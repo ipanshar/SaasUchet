@@ -1,0 +1,26 @@
+# Editors and OS files
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+
+# Environment files
+.env
+backend/.env
+
+# Local toolchains and logs
+.logs/
+.tools/go-sdk/
+.tools/flutter-sdk/
+SaasUchet/
+
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/.packages
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/build/
+
+# Go
+backend/bin/
+backend/coverage.out

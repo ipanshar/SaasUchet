@@ -1,0 +1,40 @@
+package transporthttp
+
+import (
+	stdhttp "net/http"
+
+	"github.com/altyncloud/saas-uchet/backend/internal/auth"
+	"github.com/altyncloud/saas-uchet/backend/internal/config"
+	"github.com/altyncloud/saas-uchet/backend/internal/health"
+	"github.com/altyncloud/saas-uchet/backend/internal/response"
+)
+
+func NewRouter(cfg config.Config, authHandler auth.Handler) stdhttp.Handler {
+	mux := stdhttp.NewServeMux()
+	healthHandler := health.NewHandler(cfg.AppName, cfg.AppVersion)
+
+	mux.HandleFunc("/", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if r.URL.Path != "/" {
+			response.Error(w, stdhttp.StatusNotFound, "not found")
+			return
+		}
+
+		if r.Method != stdhttp.MethodGet {
+			response.Error(w, stdhttp.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		response.JSON(w, stdhttp.StatusOK, map[string]string{
+			"service": cfg.AppName,
+			"message": "API is ready",
+		})
+	})
+
+	mux.HandleFunc("/api/v1/health", healthHandler.Get)
+	mux.HandleFunc("/api/v1/auth/register", authHandler.Register)
+	mux.HandleFunc("/api/v1/auth/login", authHandler.Login)
+	mux.HandleFunc("/api/v1/auth/me", authHandler.Me)
+	mux.HandleFunc("/api/v1/profile", authHandler.Profile)
+
+	return withRecovery(withLogging(withCORS(mux, cfg.AllowedOrigins)))
+}

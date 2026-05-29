@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import zipfile
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    destination = os.getcwd()
+    archive_path = None
+    index = 0
+
+    while index < len(args):
+        arg = args[index]
+
+        if arg in {'-d', '--destination'}:
+            index += 1
+            if index >= len(args):
+                print('unzip shim: missing destination after -d', file=sys.stderr)
+                return 2
+            destination = args[index]
+        elif arg.startswith('-'):
+            pass
+        elif archive_path is None:
+            archive_path = arg
+        else:
+            destination = arg
+
+        index += 1
+
+    if archive_path is None:
+        print('unzip shim: missing archive path', file=sys.stderr)
+        return 2
+
+    os.makedirs(destination, exist_ok=True)
+
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(destination)
+
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
