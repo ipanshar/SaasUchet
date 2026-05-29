@@ -10,6 +10,7 @@ backend/.env
 
 # Local toolchains and logs
 .logs/
+.tools/cache/
 .tools/go-sdk/
 .tools/flutter-sdk/
 SaasUchet/
