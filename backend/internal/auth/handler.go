@@ -27,9 +27,10 @@ type loginRequest struct {
 }
 
 type updateProfileRequest struct {
-	FullName string `json:"full_name"`
-	Phone    string `json:"phone"`
-	Password string `json:"password"`
+	FullName  string    `json:"full_name"`
+	Phone     string    `json:"phone"`
+	Password  string    `json:"password"`
+	Companies []Company `json:"companies"`
 }
 
 func NewHandler(service *Service) Handler {
@@ -135,9 +136,10 @@ func (h Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := h.service.UpdateProfile(accessToken, UpdateProfileInput{
-		FullName: request.FullName,
-		Phone:    request.Phone,
-		Password: request.Password,
+		FullName:  request.FullName,
+		Phone:     request.Phone,
+		Password:  request.Password,
+		Companies: request.Companies,
 	})
 	if err != nil {
 		writeAuthError(w, err)

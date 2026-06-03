@@ -20,9 +20,10 @@ type LoginInput struct {
 }
 
 type UpdateProfileInput struct {
-	FullName string
-	Phone    string
-	Password string
+	FullName  string
+	Phone     string
+	Password  string
+	Companies []Company
 }
 
 type Service struct {
@@ -72,6 +73,7 @@ func (s *Service) Register(input RegisterInput) (AuthResult, error) {
 		ID:        userID,
 		FullName:  fullName,
 		Phone:     phone,
+		Companies: []Company{},
 		CreatedAt: s.now().UTC(),
 	}
 
@@ -144,11 +146,17 @@ func (s *Service) UpdateProfile(accessToken string, input UpdateProfileInput) (U
 		}
 	}
 
+	companies, err := normalizeCompanies(input.Companies)
+	if err != nil {
+		return User{}, err
+	}
+
 	updatedUser := userRecord{
 		User: User{
 			ID:        existingUser.ID,
 			FullName:  fullName,
 			Phone:     phone,
+			Companies: companies,
 			CreatedAt: existingUser.CreatedAt,
 		},
 		PasswordHash: passwordHash,
@@ -305,6 +313,70 @@ func validatePassword(password string) error {
 	}
 
 	return nil
+}
+
+func normalizeCompanies(companies []Company) ([]Company, error) {
+	if companies == nil {
+		return []Company{}, nil
+	}
+
+	normalizedCompanies := make([]Company, 0, len(companies))
+	for index, company := range companies {
+		name := strings.Join(strings.Fields(company.Name), " ")
+		if name == "" {
+			return nil, newPublicError(ErrValidation, fmt.Sprintf("companies[%d].name is required", index))
+		}
+		if len([]rune(name)) > 120 {
+			return nil, newPublicError(ErrValidation, fmt.Sprintf("companies[%d].name must be 120 characters or fewer", index))
+		}
+
+		country := strings.ToUpper(strings.TrimSpace(company.Country))
+		if country == "" {
+			return nil, newPublicError(ErrValidation, fmt.Sprintf("companies[%d].country is required", index))
+		}
+		if len(country) != 2 {
+			return nil, newPublicError(ErrValidation, fmt.Sprintf("companies[%d].country must be a 2-letter country code", index))
+		}
+
+		iin, err := normalizeIIN(company.IIN)
+		if err != nil {
+			return nil, newPublicError(ErrValidation, fmt.Sprintf("companies[%d].iin %s", index, err.Error()))
+		}
+
+		if country == "KZ" && iin == "" {
+			return nil, newPublicError(ErrValidation, fmt.Sprintf("companies[%d].iin is required for Kazakhstan companies", index))
+		}
+
+		normalizedCompanies = append(normalizedCompanies, Company{
+			Name:    name,
+			Country: country,
+			IIN:     iin,
+		})
+	}
+
+	return normalizedCompanies, nil
+}
+
+func normalizeIIN(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+
+	var digits strings.Builder
+	for _, symbol := range trimmed {
+		if symbol < '0' || symbol > '9' {
+			return "", fmt.Errorf("must contain only digits")
+		}
+		digits.WriteRune(symbol)
+	}
+
+	normalized := digits.String()
+	if len(normalized) != 12 {
+		return "", fmt.Errorf("must contain exactly 12 digits")
+	}
+
+	return normalized, nil
 }
 
 func generateUserID() (string, error) {

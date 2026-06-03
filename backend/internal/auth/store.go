@@ -36,8 +36,9 @@ func (s *MemoryStore) CreateUser(user userRecord) error {
 		return newPublicError(ErrPhoneTaken, "user with this phone number already exists")
 	}
 
-	s.usersByPhone[user.Phone] = user
-	s.usersByID[user.ID] = user
+	clonedUser := cloneUserRecord(user)
+	s.usersByPhone[user.Phone] = clonedUser
+	s.usersByID[user.ID] = clonedUser
 
 	return nil
 }
@@ -47,7 +48,11 @@ func (s *MemoryStore) FindUserByPhone(phone string) (userRecord, bool, error) {
 	defer s.mu.RUnlock()
 
 	user, ok := s.usersByPhone[phone]
-	return user, ok, nil
+	if !ok {
+		return userRecord{}, false, nil
+	}
+
+	return cloneUserRecord(user), true, nil
 }
 
 func (s *MemoryStore) FindUserByID(id string) (userRecord, bool, error) {
@@ -55,7 +60,11 @@ func (s *MemoryStore) FindUserByID(id string) (userRecord, bool, error) {
 	defer s.mu.RUnlock()
 
 	user, ok := s.usersByID[id]
-	return user, ok, nil
+	if !ok {
+		return userRecord{}, false, nil
+	}
+
+	return cloneUserRecord(user), true, nil
 }
 
 func (s *MemoryStore) UpdateUser(user userRecord) error {
@@ -75,8 +84,9 @@ func (s *MemoryStore) UpdateUser(user userRecord) error {
 		delete(s.usersByPhone, existingUser.Phone)
 	}
 
-	s.usersByID[user.ID] = user
-	s.usersByPhone[user.Phone] = user
+	clonedUser := cloneUserRecord(user)
+	s.usersByID[user.ID] = clonedUser
+	s.usersByPhone[user.Phone] = clonedUser
 
 	return nil
 }
@@ -124,4 +134,9 @@ func (s *MemoryStore) DeleteSession(token string) error {
 
 	delete(s.sessionsByToken, token)
 	return nil
+}
+
+func cloneUserRecord(user userRecord) userRecord {
+	user.Companies = append([]Company(nil), user.Companies...)
+	return user
 }

@@ -2,10 +2,17 @@ package auth
 
 import "time"
 
+type Company struct {
+	Name    string `json:"name"`
+	Country string `json:"country"`
+	IIN     string `json:"iin,omitempty"`
+}
+
 type User struct {
 	ID        string    `json:"id"`
 	FullName  string    `json:"full_name"`
 	Phone     string    `json:"phone"`
+	Companies []Company `json:"companies"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

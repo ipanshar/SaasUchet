@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -29,12 +30,13 @@ func (s *PostgresStore) CreateUser(user userRecord) error {
 
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO users (id, full_name, phone, password_hash, created_at)
-		 VALUES ($1, $2, $3, $4, $5)`,
+		`INSERT INTO users (id, full_name, phone, password_hash, companies_json, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		user.ID,
 		user.FullName,
 		user.Phone,
 		user.PasswordHash,
+		mustMarshalCompanies(user.Companies),
 		user.CreatedAt,
 	)
 	if err != nil {
@@ -56,7 +58,7 @@ func (s *PostgresStore) FindUserByPhone(phone string) (userRecord, bool, error) 
 
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, full_name, phone, password_hash, created_at
+		`SELECT id, full_name, phone, password_hash, companies_json, created_at
 		 FROM users
 		 WHERE phone = $1`,
 		phone,
@@ -65,6 +67,7 @@ func (s *PostgresStore) FindUserByPhone(phone string) (userRecord, bool, error) 
 		&user.FullName,
 		&user.Phone,
 		&user.PasswordHash,
+		(*companiesJSON)(&user.Companies),
 		&user.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -86,7 +89,7 @@ func (s *PostgresStore) FindUserByID(id string) (userRecord, bool, error) {
 
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, full_name, phone, password_hash, created_at
+		`SELECT id, full_name, phone, password_hash, companies_json, created_at
 		 FROM users
 		 WHERE id = $1`,
 		id,
@@ -95,6 +98,7 @@ func (s *PostgresStore) FindUserByID(id string) (userRecord, bool, error) {
 		&user.FullName,
 		&user.Phone,
 		&user.PasswordHash,
+		(*companiesJSON)(&user.Companies),
 		&user.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -117,12 +121,14 @@ func (s *PostgresStore) UpdateUser(user userRecord) error {
 		`UPDATE users
 		 SET full_name = $2,
 		     phone = $3,
-		     password_hash = $4
+		     password_hash = $4,
+		     companies_json = $5
 		 WHERE id = $1`,
 		user.ID,
 		user.FullName,
 		user.Phone,
 		user.PasswordHash,
+		mustMarshalCompanies(user.Companies),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -239,4 +245,43 @@ func (s *PostgresStore) withTimeout() (context.Context, context.CancelFunc) {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+type companiesJSON []Company
+
+func (c *companiesJSON) Scan(value any) error {
+	if value == nil {
+		*c = []Company{}
+		return nil
+	}
+
+	var raw []byte
+	switch typed := value.(type) {
+	case string:
+		raw = []byte(typed)
+	case []byte:
+		raw = typed
+	default:
+		return errors.New("unsupported companies_json type")
+	}
+
+	if len(raw) == 0 {
+		*c = []Company{}
+		return nil
+	}
+
+	return json.Unmarshal(raw, c)
+}
+
+func mustMarshalCompanies(companies []Company) string {
+	if companies == nil {
+		companies = []Company{}
+	}
+
+	payload, err := json.Marshal(companies)
+	if err != nil {
+		return "[]"
+	}
+
+	return string(payload)
 }

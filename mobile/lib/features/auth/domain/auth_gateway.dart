@@ -1,4 +1,5 @@
 import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
+import 'package:saas_uchet_mobile/features/auth/domain/company_profile.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/user_profile.dart';
 
 abstract class AuthGateway {
@@ -21,6 +22,7 @@ abstract class AuthGateway {
     required String accessToken,
     required String fullName,
     required String phone,
+    required List<CompanyProfile> companies,
     String? password,
   });
 

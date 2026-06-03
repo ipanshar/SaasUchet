@@ -3,6 +3,8 @@
 .vscode/
 Thumbs.db
 .DS_Store
+.cursor/
+figma/
 
 # Environment files
 .env

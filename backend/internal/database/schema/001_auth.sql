@@ -3,8 +3,12 @@ CREATE TABLE IF NOT EXISTS users (
   full_name TEXT NOT NULL,
   phone TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  companies_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS companies_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS auth_sessions (
   token TEXT PRIMARY KEY,

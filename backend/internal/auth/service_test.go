@@ -111,6 +111,17 @@ func TestServiceUpdateProfileChangesNamePhoneAndPassword(t *testing.T) {
 		FullName: "Иван Сергеевич Петров",
 		Phone:    "8 777 111 22 33",
 		Password: "NewStrongPass123",
+		Companies: []Company{
+			{
+				Name:    "ТОО Altyn Cloud",
+				Country: "kz",
+				IIN:     "123456789012",
+			},
+			{
+				Name:    "Acme Ltd",
+				Country: "us",
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("update profile returned error: %v", err)
@@ -124,6 +135,14 @@ func TestServiceUpdateProfileChangesNamePhoneAndPassword(t *testing.T) {
 		t.Fatalf("unexpected phone after update: %s", updatedUser.Phone)
 	}
 
+	if len(updatedUser.Companies) != 2 {
+		t.Fatalf("unexpected companies count after update: %d", len(updatedUser.Companies))
+	}
+
+	if updatedUser.Companies[0].Country != "KZ" || updatedUser.Companies[0].IIN != "123456789012" {
+		t.Fatalf("unexpected first company after update: %+v", updatedUser.Companies[0])
+	}
+
 	loginResult, err := service.Login(LoginInput{
 		Phone:    "+77771112233",
 		Password: "NewStrongPass123",
@@ -134,6 +153,34 @@ func TestServiceUpdateProfileChangesNamePhoneAndPassword(t *testing.T) {
 
 	if loginResult.User.ID != registerResult.User.ID {
 		t.Fatalf("unexpected user id after login: %s", loginResult.User.ID)
+	}
+}
+
+func TestServiceUpdateProfileRequiresIINForKazakhstanCompany(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(store, 24*time.Hour)
+
+	registerResult, err := service.Register(RegisterInput{
+		FullName: "Иван Петров",
+		Phone:    "+77011234567",
+		Password: "StrongPass123",
+	})
+	if err != nil {
+		t.Fatalf("register returned error: %v", err)
+	}
+
+	_, err = service.UpdateProfile(registerResult.AccessToken, UpdateProfileInput{
+		FullName: "Иван Петров",
+		Phone:    "+77011234567",
+		Companies: []Company{
+			{
+				Name:    "ТОО Без ИИН",
+				Country: "KZ",
+			},
+		},
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation, got: %v", err)
 	}
 }
 

@@ -6,6 +6,7 @@ import 'package:saas_uchet_mobile/core/config/api_config.dart';
 import 'package:saas_uchet_mobile/core/network/api_exception.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_gateway.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
+import 'package:saas_uchet_mobile/features/auth/domain/company_profile.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/user_profile.dart';
 
 class AuthApiClient extends AuthGateway {
@@ -72,11 +73,13 @@ class AuthApiClient extends AuthGateway {
     required String accessToken,
     required String fullName,
     required String phone,
+    required List<CompanyProfile> companies,
     String? password,
   }) async {
     final payload = <String, dynamic>{
       'full_name': fullName,
       'phone': phone,
+      'companies': companies.map((company) => company.toJson()).toList(),
     };
     if (password != null && password.isNotEmpty) {
       payload['password'] = password;

@@ -4,12 +4,13 @@ import (
 	stdhttp "net/http"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/auth"
+	"github.com/altyncloud/saas-uchet/backend/internal/business"
 	"github.com/altyncloud/saas-uchet/backend/internal/config"
 	"github.com/altyncloud/saas-uchet/backend/internal/health"
 	"github.com/altyncloud/saas-uchet/backend/internal/response"
 )
 
-func NewRouter(cfg config.Config, authHandler auth.Handler) stdhttp.Handler {
+func NewRouter(cfg config.Config, authHandler auth.Handler, businessHandler business.Handler) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
 	healthHandler := health.NewHandler(cfg.AppName, cfg.AppVersion)
 
@@ -35,6 +36,7 @@ func NewRouter(cfg config.Config, authHandler auth.Handler) stdhttp.Handler {
 	mux.HandleFunc("/api/v1/auth/login", authHandler.Login)
 	mux.HandleFunc("/api/v1/auth/me", authHandler.Me)
 	mux.HandleFunc("/api/v1/profile", authHandler.Profile)
+	mux.HandleFunc("/api/v1/business/overview", businessHandler.Overview)
 
 	return withRecovery(withLogging(withCORS(mux, cfg.AllowedOrigins)))
 }

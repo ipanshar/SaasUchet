@@ -30,4 +30,6 @@ class ApiConfig {
   static Uri get authRegisterUri => Uri.parse('$baseUrl/api/v1/auth/register');
   static Uri get authLoginUri => Uri.parse('$baseUrl/api/v1/auth/login');
   static Uri get profileUri => Uri.parse('$baseUrl/api/v1/profile');
+  static Uri get businessOverviewUri =>
+      Uri.parse('$baseUrl/api/v1/business/overview');
 }

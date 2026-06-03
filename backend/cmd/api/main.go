@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/auth"
+	"github.com/altyncloud/saas-uchet/backend/internal/business"
 	"github.com/altyncloud/saas-uchet/backend/internal/config"
 	"github.com/altyncloud/saas-uchet/backend/internal/database"
 	transporthttp "github.com/altyncloud/saas-uchet/backend/internal/http"
@@ -30,10 +31,11 @@ func main() {
 	authStore := auth.NewPostgresStore(db)
 	authService := auth.NewService(authStore, cfg.AuthTokenTTL)
 	authHandler := auth.NewHandler(authService)
+	businessHandler := business.NewHandler(authService)
 
 	server := &stdhttp.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           transporthttp.NewRouter(cfg, authHandler),
+		Handler:           transporthttp.NewRouter(cfg, authHandler, businessHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
