@@ -46,13 +46,25 @@ func (h Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clients, err := h.loadClients(user.ID)
+	clients, err := h.loadClients(user)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
-	response.JSON(w, http.StatusOK, buildOverview(user, clients))
+	products, err := h.store.ListProducts(user)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	finance, err := h.store.GetFinance(user)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, buildOverview(user, clients, products, finance))
 }
 
 func (h Handler) Clients(w http.ResponseWriter, r *http.Request) {
@@ -117,8 +129,295 @@ func (h Handler) ClientByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h Handler) Products(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		products, err := h.store.ListProducts(user)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{"products": products})
+	case http.MethodPost:
+		var input CreateProductInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		input = NormalizeProductInput(input)
+		if err := ValidateProductInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		product, err := h.store.CreateProduct(user, input)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		response.JSON(w, http.StatusCreated, product)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) ProductByID(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	productID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/products/"))
+	if productID == "" || strings.Contains(productID, "/") {
+		response.Error(w, http.StatusNotFound, "product not found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var input CreateProductInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		input = NormalizeProductInput(input)
+		if err := ValidateProductInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		product, err := h.store.UpdateProduct(user, productID, input)
+		if err != nil {
+			response.Error(w, http.StatusNotFound, "product not found")
+			return
+		}
+
+		response.JSON(w, http.StatusOK, product)
+	case http.MethodDelete:
+		if err := h.store.DeleteProduct(user, productID); err != nil {
+			response.Error(w, http.StatusNotFound, "product not found")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) Accounts(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		finance, err := h.store.GetFinance(user)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{
+			"accounts": finance.Accounts,
+			"summary": map[string]any{
+				"total_balance": finance.TotalBalance,
+				"income":        finance.Income,
+				"expense":       finance.Expense,
+			},
+		})
+	case http.MethodPost:
+		var input CreateCashAccountInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		input = NormalizeCashAccountInput(input)
+		if err := ValidateCashAccountInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		account, err := h.store.CreateCashAccount(user, input)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		response.JSON(w, http.StatusCreated, account)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) MoneyOperations(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var input CreateMoneyOperationInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	input = NormalizeMoneyOperationInput(input)
+	if err := ValidateMoneyOperationInput(input); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.store.CreateMoneyOperation(user, input); err != nil {
+		if errors.Is(err, ErrValidation) {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, map[string]any{
+		"status": "ok",
+	})
+}
+
+func (h Handler) InventoryDocuments(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	documentType := strings.TrimSpace(r.URL.Query().Get("type"))
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+	documents, err := h.store.ListInventoryDocuments(user, documentType, search)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"documents": documents,
+	})
+}
+
+func (h Handler) MoneyDocuments(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	documentType := strings.TrimSpace(r.URL.Query().Get("type"))
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+	documents, err := h.store.ListMoneyDocuments(user, documentType, search)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"documents": documents,
+	})
+}
+
 func (h Handler) listClients(w http.ResponseWriter, user auth.User) {
-	clients, err := h.loadClients(user.ID)
+	clients, err := h.loadClients(user)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -142,7 +441,7 @@ func (h Handler) createClient(w http.ResponseWriter, r *http.Request, user auth.
 		return
 	}
 
-	clients, err := h.loadClients(user.ID)
+	clients, err := h.loadClients(user)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -151,7 +450,7 @@ func (h Handler) createClient(w http.ResponseWriter, r *http.Request, user auth.
 	client := NewClientFromInput(input)
 	clients = append([]Client{client}, clients...)
 
-	if err := h.store.SaveClients(user.ID, clients); err != nil {
+	if err := h.store.SaveClients(user, clients); err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -172,7 +471,7 @@ func (h Handler) updateClient(w http.ResponseWriter, r *http.Request, user auth.
 		return
 	}
 
-	clients, err := h.loadClients(user.ID)
+	clients, err := h.loadClients(user)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -185,7 +484,7 @@ func (h Handler) updateClient(w http.ResponseWriter, r *http.Request, user auth.
 	}
 
 	clients[index] = UpdatedClientFromInput(clients[index], input)
-	if err := h.store.SaveClients(user.ID, clients); err != nil {
+	if err := h.store.SaveClients(user, clients); err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -194,7 +493,7 @@ func (h Handler) updateClient(w http.ResponseWriter, r *http.Request, user auth.
 }
 
 func (h Handler) deleteClient(w http.ResponseWriter, user auth.User, clientID string) {
-	clients, err := h.loadClients(user.ID)
+	clients, err := h.loadClients(user)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -207,7 +506,7 @@ func (h Handler) deleteClient(w http.ResponseWriter, user auth.User, clientID st
 	}
 
 	clients = append(clients[:index], clients[index+1:]...)
-	if err := h.store.SaveClients(user.ID, clients); err != nil {
+	if err := h.store.SaveClients(user, clients); err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -215,22 +514,8 @@ func (h Handler) deleteClient(w http.ResponseWriter, user auth.User, clientID st
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h Handler) loadClients(userID string) ([]Client, error) {
-	clients, err := h.store.ListClients(userID)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(clients) > 0 {
-		return clients, nil
-	}
-
-	seedClients := defaultClients()
-	if err := h.store.SaveClients(userID, seedClients); err != nil {
-		return nil, err
-	}
-
-	return seedClients, nil
+func (h Handler) loadClients(user auth.User) ([]Client, error) {
+	return h.store.ListClients(user)
 }
 
 func indexOfClient(clients []Client, clientID string) int {

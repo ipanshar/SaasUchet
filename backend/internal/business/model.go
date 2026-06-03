@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/auth"
 )
@@ -88,6 +89,7 @@ type Interaction struct {
 }
 
 type Product struct {
+	ID          string          `json:"id"`
 	Name        string          `json:"name"`
 	SKU         string          `json:"sku"`
 	Category    string          `json:"category"`
@@ -100,11 +102,35 @@ type Product struct {
 	Movements   []StockMovement `json:"movements"`
 }
 
+type CreateProductInput struct {
+	Name            string `json:"name"`
+	SKU             string `json:"sku"`
+	Category        string `json:"category"`
+	InitialQuantity int    `json:"initial_quantity"`
+	MinQuantity     int    `json:"min_quantity"`
+	Price           int    `json:"price"`
+	Cost            int    `json:"cost"`
+	Barcode         string `json:"barcode"`
+}
+
 type StockMovement struct {
 	Date     string `json:"date"`
 	Document string `json:"document"`
 	Quantity int    `json:"quantity"`
 	Balance  int    `json:"balance"`
+}
+
+type InventoryDocumentSummary struct {
+	ID               string `json:"id"`
+	DocumentNo       string `json:"document_no"`
+	DocumentType     string `json:"document_type"`
+	Status           string `json:"status"`
+	DocumentDate     string `json:"document_date"`
+	WarehouseName    string `json:"warehouse_name"`
+	RelatedWarehouse string `json:"related_warehouse_name,omitempty"`
+	ProductLines     int    `json:"product_lines"`
+	TotalQuantity    int    `json:"total_quantity"`
+	Note             string `json:"note,omitempty"`
 }
 
 type Finance struct {
@@ -117,7 +143,29 @@ type Finance struct {
 	CashFlows         []CashFlow        `json:"cash_flows"`
 }
 
+type CreateCashAccountInput struct {
+	Name           string `json:"name"`
+	AccountType    string `json:"account_type"`
+	CurrencyCode   string `json:"currency_code"`
+	BankName       string `json:"bank_name"`
+	IBAN           string `json:"iban"`
+	BIK            string `json:"bik"`
+	OpeningBalance int    `json:"opening_balance"`
+}
+
+type CreateMoneyOperationInput struct {
+	AccountID             string `json:"account_id"`
+	CounterpartyAccountID string `json:"counterparty_account_id,omitempty"`
+	Direction             string `json:"direction"`
+	Amount                int    `json:"amount"`
+	Category              string `json:"category"`
+	Description           string `json:"description"`
+	ClientID              string `json:"client_id,omitempty"`
+	OperationDate         string `json:"operation_date,omitempty"`
+}
+
 type BankAccount struct {
+	ID      string `json:"id,omitempty"`
 	Name    string `json:"name"`
 	Balance int    `json:"balance"`
 	Color   string `json:"color"`
@@ -139,6 +187,18 @@ type Transaction struct {
 	Account     string `json:"account"`
 }
 
+type MoneyDocumentSummary struct {
+	ID               string `json:"id"`
+	DocumentNo       string `json:"document_no"`
+	DocumentType     string `json:"document_type"`
+	Status           string `json:"status"`
+	OperationDate    string `json:"operation_date"`
+	Description      string `json:"description"`
+	PrimaryAccount   string `json:"primary_account"`
+	SecondaryAccount string `json:"secondary_account,omitempty"`
+	Amount           int    `json:"amount"`
+}
+
 type CashFlow struct {
 	Title       string `json:"title"`
 	Subtitle    string `json:"subtitle"`
@@ -153,14 +213,10 @@ type StaffMember struct {
 	Role string `json:"role"`
 }
 
-func buildOverview(user auth.User, clients []Client) Overview {
+func buildOverview(user auth.User, clients []Client, products []Product, finance Finance) Overview {
 	companyName := `ТОО "Мой Бизнес"`
 	if len(user.Companies) > 0 {
 		companyName = user.Companies[0].Name
-	}
-
-	if len(clients) == 0 {
-		clients = defaultClients()
 	}
 
 	return Overview{
@@ -192,165 +248,13 @@ func buildOverview(user auth.User, clients []Client) Overview {
 			{Title: `ИП Нурланов А.Б.`, Amount: "₸ 89,500", Time: "2 часа назад", Icon: "payments", Tone: "success"},
 			{Title: `ТОО "Алматы Опт"`, Amount: "₸ 156,000", Time: "3 часа назад", Icon: "description", Tone: "info"},
 		},
-		Clients: clients,
-		Products: []Product{
-			{
-				Name:        "Ноутбук Lenovo ThinkPad",
-				SKU:         "TECH-001",
-				Category:    "Техника",
-				Quantity:    15,
-				MinQuantity: 10,
-				Price:       350000,
-				Cost:        280000,
-				Barcode:     "8600123456789",
-				Status:      "in_stock",
-				Movements: []StockMovement{
-					{Date: "2 июня", Document: "Продажа #1234", Quantity: -5, Balance: 15},
-					{Date: "28 мая", Document: "Поступление #567", Quantity: 20, Balance: 20},
-					{Date: "15 мая", Document: "Продажа #1122", Quantity: -3, Balance: 0},
-				},
-			},
-			{
-				Name:        "Офисное кресло Comfort Pro",
-				SKU:         "FURN-045",
-				Category:    "Мебель",
-				Quantity:    3,
-				MinQuantity: 5,
-				Price:       65000,
-				Cost:        45000,
-				Barcode:     "8600987654321",
-				Status:      "low_stock",
-				Movements: []StockMovement{
-					{Date: "3 июня", Document: "Продажа #1987", Quantity: -2, Balance: 3},
-					{Date: "27 мая", Document: "Поступление #458", Quantity: 10, Balance: 5},
-				},
-			},
-			{
-				Name:        "Принтер HP LaserJet",
-				SKU:         "TECH-089",
-				Category:    "Техника",
-				Quantity:    8,
-				MinQuantity: 5,
-				Price:       125000,
-				Cost:        95000,
-				Barcode:     "8600555666777",
-				Status:      "in_stock",
-				Movements: []StockMovement{
-					{Date: "1 июня", Document: "Продажа #1820", Quantity: -1, Balance: 8},
-				},
-			},
-			{
-				Name:        "Бумага A4 500 листов",
-				SKU:         "OFF-234",
-				Category:    "Канцелярия",
-				Quantity:    0,
-				MinQuantity: 20,
-				Price:       2500,
-				Cost:        1800,
-				Barcode:     "8600111222333",
-				Status:      "out_of_stock",
-				Movements: []StockMovement{
-					{Date: "31 мая", Document: "Продажа #1765", Quantity: -12, Balance: 0},
-				},
-			},
-		},
-		Finance: Finance{
-			TotalBalance: 5032000,
-			Income:       2145000,
-			Expense:      940000,
-			Accounts: []BankAccount{
-				{Name: "Kaspi Bank", Balance: 2450000, Color: "#F14635", Icon: "🏦"},
-				{Name: "Halyk Bank", Balance: 1890000, Color: "#00A651", Icon: "🏦"},
-				{Name: "Forte Bank", Balance: 567000, Color: "#0066B3", Icon: "🏦"},
-				{Name: "Касса", Balance: 125000, Color: "#00A86B", Icon: "💰"},
-			},
-			ExpenseCategories: []ExpenseCategory{
-				{Name: "Закупки", Value: 1200000, Color: "#00A86B"},
-				{Name: "Зарплата", Value: 900000, Color: "#3B82F6"},
-				{Name: "Аренда", Value: 300000, Color: "#F59E0B"},
-				{Name: "Другое", Value: 150000, Color: "#8B5CF6"},
-			},
-			Transactions: []Transaction{
-				{Type: "income", Description: `Оплата от ТОО "Астана Трейд"`, Amount: 125000, Category: "Продажи", Date: "3 июня", Account: "Kaspi Bank"},
-				{Type: "expense", Description: "Аренда офиса", Amount: 150000, Category: "Операционные расходы", Date: "1 июня", Account: "Halyk Bank"},
-				{Type: "income", Description: "Оплата от ИП Сериков", Amount: 89500, Category: "Продажи", Date: "1 июня", Account: "Kaspi Bank"},
-				{Type: "expense", Description: "Закуп товара", Amount: 340000, Category: "Закупки", Date: "31 мая", Account: "Forte Bank"},
-				{Type: "expense", Description: "Зарплата сотрудникам", Amount: 450000, Category: "Зарплата", Date: "30 мая", Account: "Halyk Bank"},
-			},
-			CashFlows: []CashFlow{
-				{Title: "Операционная деятельность", Subtitle: "Приток", Value: "₸ 1,245,000", Tone: "#22C55E", ValueColor: "#22C55E", Highlighted: false},
-				{Title: "Операционная деятельность", Subtitle: "Отток", Value: "₸ 890,000", Tone: "#EF4444", ValueColor: "#EF4444", Highlighted: false},
-				{Title: "Чистый денежный поток", Subtitle: "За месяц", Value: "₸ 355,000", Tone: "#00A86B", ValueColor: "#00A86B", Highlighted: true},
-			},
-		},
+		Clients:  clients,
+		Products: products,
+		Finance:  finance,
 		Staff: []StaffMember{
 			{Name: user.FullName, Role: "Администратор"},
 			{Name: "Касымова Айгуль", Role: "Менеджер"},
 			{Name: "Ибрагимов Ерлан", Role: "Кладовщик"},
-		},
-	}
-}
-
-func defaultClients() []Client {
-	return []Client{
-		{
-			ID:         mustGenerateClientID(),
-			Name:       `ТОО "Астана Трейд"`,
-			BIN:        "123456789012",
-			Contact:    "Нурланов Азамат",
-			Phone:      "+7 (777) 123-45-67",
-			Email:      "info@astana-trade.kz",
-			Segment:    "VIP",
-			TotalSales: 2450000,
-			Debt:       125000,
-			Interactions: []Interaction{
-				{Title: "Звонок", Date: "3 июня 2026", Note: "Обсудили новую поставку"},
-				{Title: "Встреча", Date: "1 июня 2026", Note: "Презентация новых товаров"},
-				{Title: "Email", Date: "28 мая 2026", Note: "Отправлено КП"},
-			},
-		},
-		{
-			ID:         mustGenerateClientID(),
-			Name:       "ИП Сериков А.Б.",
-			IIN:        "890123456789",
-			Contact:    "Сериков Алмас",
-			Phone:      "+7 (701) 234-56-78",
-			Email:      "serikov@mail.kz",
-			Segment:    "Regular",
-			TotalSales: 890000,
-			Debt:       0,
-			Interactions: []Interaction{
-				{Title: "Звонок", Date: "2 июня 2026", Note: "Подтвердил готовность к оплате"},
-				{Title: "Email", Date: "29 мая 2026", Note: "Отправили счет на оплату"},
-			},
-		},
-		{
-			ID:         mustGenerateClientID(),
-			Name:       `ТОО "Алматы Опт"`,
-			BIN:        "234567890123",
-			Contact:    "Касымова Айгуль",
-			Phone:      "+7 (727) 345-67-89",
-			Email:      "almaty-opt@gmail.com",
-			Segment:    "VIP",
-			TotalSales: 1560000,
-			Debt:       45000,
-			Interactions: []Interaction{
-				{Title: "Встреча", Date: "31 мая 2026", Note: "Согласовали квартальный контракт"},
-			},
-		},
-		{
-			ID:         mustGenerateClientID(),
-			Name:       `ТОО "Караганда Снаб"`,
-			BIN:        "345678901234",
-			Contact:    "Ибрагимов Ерлан",
-			Phone:      "+7 (778) 456-78-90",
-			Email:      "karaganda@snab.kz",
-			Segment:    "Regular",
-			TotalSales: 450000,
-			Debt:       150000,
-			Interactions: []Interaction{
-				{Title: "Email", Date: "30 мая 2026", Note: "Напоминание о просроченной задолженности"},
-			},
 		},
 	}
 }
@@ -428,6 +332,145 @@ func UpdatedClientFromInput(existing Client, input CreateClientInput) Client {
 	return existing
 }
 
+func NormalizeProductInput(input CreateProductInput) CreateProductInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.SKU = strings.TrimSpace(strings.ToUpper(input.SKU))
+	input.Category = strings.TrimSpace(input.Category)
+	input.Barcode = normalizeDigits(input.Barcode)
+	return input
+}
+
+func NormalizeCashAccountInput(input CreateCashAccountInput) CreateCashAccountInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.AccountType = strings.TrimSpace(strings.ToLower(input.AccountType))
+	input.CurrencyCode = strings.TrimSpace(strings.ToUpper(input.CurrencyCode))
+	input.BankName = strings.TrimSpace(input.BankName)
+	input.IBAN = strings.TrimSpace(strings.ToUpper(input.IBAN))
+	input.BIK = strings.TrimSpace(strings.ToUpper(input.BIK))
+	if input.CurrencyCode == "" {
+		input.CurrencyCode = "KZT"
+	}
+	if input.AccountType == "" {
+		input.AccountType = "bank"
+	}
+	return input
+}
+
+func NormalizeMoneyOperationInput(input CreateMoneyOperationInput) CreateMoneyOperationInput {
+	input.AccountID = strings.TrimSpace(input.AccountID)
+	input.CounterpartyAccountID = strings.TrimSpace(input.CounterpartyAccountID)
+	input.Direction = strings.TrimSpace(strings.ToLower(input.Direction))
+	input.Category = strings.TrimSpace(input.Category)
+	input.Description = strings.TrimSpace(input.Description)
+	input.ClientID = strings.TrimSpace(input.ClientID)
+	input.OperationDate = strings.TrimSpace(input.OperationDate)
+	return input
+}
+
+func ValidateCashAccountInput(input CreateCashAccountInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("%w: account name is required", ErrValidation)
+	}
+	switch input.AccountType {
+	case "bank", "cash", "e_wallet", "card", "other":
+	default:
+		return fmt.Errorf("%w: account type is invalid", ErrValidation)
+	}
+	if input.CurrencyCode == "" || len(input.CurrencyCode) != 3 {
+		return fmt.Errorf("%w: currency code must contain 3 letters", ErrValidation)
+	}
+	if input.OpeningBalance < 0 {
+		return fmt.Errorf("%w: opening balance must be zero or greater", ErrValidation)
+	}
+	return nil
+}
+
+func ValidateMoneyOperationInput(input CreateMoneyOperationInput) error {
+	if input.AccountID == "" {
+		return fmt.Errorf("%w: account id is required", ErrValidation)
+	}
+	switch input.Direction {
+	case "income", "expense", "transfer":
+	default:
+		return fmt.Errorf("%w: direction is invalid", ErrValidation)
+	}
+	if input.Amount <= 0 {
+		return fmt.Errorf("%w: amount must be greater than zero", ErrValidation)
+	}
+	if input.Direction == "transfer" {
+		if input.CounterpartyAccountID == "" {
+			return fmt.Errorf("%w: counterparty account id is required for transfer", ErrValidation)
+		}
+		if input.CounterpartyAccountID == input.AccountID {
+			return fmt.Errorf("%w: transfer accounts must be different", ErrValidation)
+		}
+	}
+	if input.Direction != "transfer" && input.Category == "" {
+		return fmt.Errorf("%w: category is required", ErrValidation)
+	}
+	if input.OperationDate != "" {
+		if _, err := time.Parse("2006-01-02", input.OperationDate); err != nil {
+			return fmt.Errorf("%w: operation date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+	return nil
+}
+
+func ValidateProductInput(input CreateProductInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("%w: product name is required", ErrValidation)
+	}
+	if strings.TrimSpace(input.SKU) == "" {
+		return fmt.Errorf("%w: product sku is required", ErrValidation)
+	}
+	if input.InitialQuantity < 0 {
+		return fmt.Errorf("%w: initial quantity must be zero or greater", ErrValidation)
+	}
+	if input.MinQuantity < 0 {
+		return fmt.Errorf("%w: min quantity must be zero or greater", ErrValidation)
+	}
+	if input.Price < 0 {
+		return fmt.Errorf("%w: price must be zero or greater", ErrValidation)
+	}
+	if input.Cost < 0 {
+		return fmt.Errorf("%w: cost must be zero or greater", ErrValidation)
+	}
+	if input.Barcode != "" && len(input.Barcode) < 8 {
+		return fmt.Errorf("%w: barcode must contain at least 8 digits", ErrValidation)
+	}
+	return nil
+}
+
+func NewProductFromInput(input CreateProductInput) Product {
+	normalized := NormalizeProductInput(input)
+	return Product{
+		ID:          mustGenerateProductID(),
+		Name:        normalized.Name,
+		SKU:         normalized.SKU,
+		Category:    normalized.Category,
+		Quantity:    normalized.InitialQuantity,
+		MinQuantity: normalized.MinQuantity,
+		Price:       normalized.Price,
+		Cost:        normalized.Cost,
+		Barcode:     normalized.Barcode,
+		Status:      productStatus(normalized.InitialQuantity, normalized.MinQuantity),
+		Movements:   []StockMovement{},
+	}
+}
+
+func UpdatedProductFromInput(existing Product, input CreateProductInput) Product {
+	normalized := NormalizeProductInput(input)
+	existing.Name = normalized.Name
+	existing.SKU = normalized.SKU
+	existing.Category = normalized.Category
+	existing.MinQuantity = normalized.MinQuantity
+	existing.Price = normalized.Price
+	existing.Cost = normalized.Cost
+	existing.Barcode = normalized.Barcode
+	existing.Status = productStatus(existing.Quantity, normalized.MinQuantity)
+	return existing
+}
+
 func normalizeDigits(value string) string {
 	return digitsOnly.ReplaceAllString(strings.TrimSpace(value), "")
 }
@@ -470,17 +513,75 @@ func initialsOf(value string) string {
 func mustGenerateClientID() string {
 	id, err := generateClientID()
 	if err != nil {
-		return "clt_fallback"
+		return "00000000-0000-0000-0000-000000000000"
 	}
 
 	return id
 }
 
 func generateClientID() (string, error) {
-	bytes := make([]byte, 12)
+	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}
 
-	return "clt_" + hex.EncodeToString(bytes), nil
+	hexValue := hex.EncodeToString(bytes)
+	return fmt.Sprintf(
+		"%s-%s-%s-%s-%s",
+		hexValue[0:8],
+		hexValue[8:12],
+		hexValue[12:16],
+		hexValue[16:20],
+		hexValue[20:32],
+	), nil
+}
+
+func mustGenerateProductID() string {
+	id, err := generateProductID()
+	if err != nil {
+		return "00000000-0000-0000-0000-000000000000"
+	}
+
+	return id
+}
+
+func mustGenerateAccountID() string {
+	id, err := generateAccountID()
+	if err != nil {
+		return "00000000-0000-0000-0000-000000000000"
+	}
+
+	return id
+}
+
+func generateProductID() (string, error) {
+	return generateAccountID()
+}
+
+func generateAccountID() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+
+	hexValue := hex.EncodeToString(bytes)
+	return fmt.Sprintf(
+		"%s-%s-%s-%s-%s",
+		hexValue[0:8],
+		hexValue[8:12],
+		hexValue[12:16],
+		hexValue[16:20],
+		hexValue[20:32],
+	), nil
+}
+
+func productStatus(quantity int, minQuantity int) string {
+	switch {
+	case quantity <= 0:
+		return "out_of_stock"
+	case quantity <= minQuantity:
+		return "low_stock"
+	default:
+		return "in_stock"
+	}
 }

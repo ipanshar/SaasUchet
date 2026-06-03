@@ -76,6 +76,7 @@ class _Interaction {
 
 class _Product {
   const _Product({
+    required this.id,
     required this.name,
     required this.sku,
     required this.category,
@@ -88,6 +89,7 @@ class _Product {
     required this.movements,
   });
 
+  final String id;
   final String name;
   final String sku;
   final String category;
@@ -127,16 +129,68 @@ class _StockMovement {
 
 class _BankAccount {
   const _BankAccount({
+    required this.id,
     required this.name,
     required this.balance,
     required this.color,
     required this.icon,
   });
 
+  final String id;
   final String name;
   final int balance;
   final Color color;
   final String icon;
+}
+
+class _InventoryDocument {
+  const _InventoryDocument({
+    required this.id,
+    required this.documentNo,
+    required this.documentType,
+    required this.status,
+    required this.documentDate,
+    required this.warehouseName,
+    required this.relatedWarehouseName,
+    required this.productLines,
+    required this.totalQuantity,
+    required this.note,
+  });
+
+  final String id;
+  final String documentNo;
+  final String documentType;
+  final String status;
+  final String documentDate;
+  final String warehouseName;
+  final String relatedWarehouseName;
+  final int productLines;
+  final int totalQuantity;
+  final String note;
+}
+
+class _MoneyDocument {
+  const _MoneyDocument({
+    required this.id,
+    required this.documentNo,
+    required this.documentType,
+    required this.status,
+    required this.operationDate,
+    required this.description,
+    required this.primaryAccount,
+    required this.secondaryAccount,
+    required this.amount,
+  });
+
+  final String id;
+  final String documentNo;
+  final String documentType;
+  final String status;
+  final String operationDate;
+  final String description;
+  final String primaryAccount;
+  final String secondaryAccount;
+  final int amount;
 }
 
 class _Transaction {
@@ -411,6 +465,7 @@ _Interaction _interactionFromJson(Map<String, dynamic> json) => _Interaction(
     );
 
 _Product _productFromJson(Map<String, dynamic> json) => _Product(
+      id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
       sku: json['sku'] as String? ?? '',
       category: json['category'] as String? ?? '',
@@ -439,10 +494,38 @@ _StockMovement _stockMovementFromJson(Map<String, dynamic> json) =>
     );
 
 _BankAccount _bankAccountFromJson(Map<String, dynamic> json) => _BankAccount(
+      id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
       balance: json['balance'] as int? ?? 0,
       color: hexColor(json['color'] as String? ?? '#00A86B'),
       icon: json['icon'] as String? ?? '🏦',
+    );
+
+_InventoryDocument _inventoryDocumentFromJson(Map<String, dynamic> json) =>
+    _InventoryDocument(
+      id: json['id'] as String? ?? '',
+      documentNo: json['document_no'] as String? ?? '',
+      documentType: json['document_type'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      documentDate: json['document_date'] as String? ?? '',
+      warehouseName: json['warehouse_name'] as String? ?? '',
+      relatedWarehouseName: json['related_warehouse_name'] as String? ?? '',
+      productLines: json['product_lines'] as int? ?? 0,
+      totalQuantity: json['total_quantity'] as int? ?? 0,
+      note: json['note'] as String? ?? '',
+    );
+
+_MoneyDocument _moneyDocumentFromJson(Map<String, dynamic> json) =>
+    _MoneyDocument(
+      id: json['id'] as String? ?? '',
+      documentNo: json['document_no'] as String? ?? '',
+      documentType: json['document_type'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      operationDate: json['operation_date'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      primaryAccount: json['primary_account'] as String? ?? '',
+      secondaryAccount: json['secondary_account'] as String? ?? '',
+      amount: json['amount'] as int? ?? 0,
     );
 
 _ExpenseCategory _expenseCategoryFromJson(Map<String, dynamic> json) =>

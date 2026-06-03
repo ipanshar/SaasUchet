@@ -34,4 +34,14 @@ class ApiConfig {
       Uri.parse('$baseUrl/api/v1/business/overview');
   static Uri get businessClientsUri =>
       Uri.parse('$baseUrl/api/v1/business/clients');
+  static Uri get businessProductsUri =>
+      Uri.parse('$baseUrl/api/v1/business/products');
+  static Uri get businessInventoryDocumentsUri =>
+      Uri.parse('$baseUrl/api/v1/business/inventory-documents');
+  static Uri get businessAccountsUri =>
+      Uri.parse('$baseUrl/api/v1/business/accounts');
+  static Uri get businessMoneyOperationsUri =>
+      Uri.parse('$baseUrl/api/v1/business/money-operations');
+  static Uri get businessMoneyDocumentsUri =>
+      Uri.parse('$baseUrl/api/v1/business/money-documents');
 }

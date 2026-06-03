@@ -162,6 +162,7 @@ class _FakeBusinessGateway extends BusinessGateway {
       ],
       'products': [
         {
+          'id': 'prd_1',
           'name': 'Ноутбук Lenovo ThinkPad',
           'sku': 'TECH-001',
           'category': 'Техника',
@@ -187,6 +188,7 @@ class _FakeBusinessGateway extends BusinessGateway {
         'expense': 940000,
         'accounts': [
           {
+            'id': 'acc_1',
             'name': 'Kaspi Bank',
             'balance': 2450000,
             'color': '#F14635',
@@ -256,6 +258,93 @@ class _FakeBusinessGateway extends BusinessGateway {
     required String accessToken,
     required String clientId,
   }) async {}
+
+  @override
+  Future<Map<String, dynamic>> createProduct({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {
+      'id': 'prd_new',
+      ...payload,
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateProduct({
+    required String accessToken,
+    required String productId,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {
+      'id': productId,
+      ...payload,
+    };
+  }
+
+  @override
+  Future<void> deleteProduct({
+    required String accessToken,
+    required String productId,
+  }) async {}
+
+  @override
+  Future<Map<String, dynamic>> createCashAccount({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {
+      'id': 'acc_new',
+      ...payload,
+    };
+  }
+
+  @override
+  Future<void> createMoneyOperation({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {}
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchInventoryDocuments({
+    required String accessToken,
+    String? type,
+    String? search,
+  }) async {
+    return [
+      {
+        'id': 'inv_1',
+        'document_no': 'OPEN-TECH-001',
+        'document_type': 'opening',
+        'status': 'posted',
+        'document_date': '2026-06-03',
+        'warehouse_name': 'Основной склад',
+        'product_lines': 1,
+        'total_quantity': 15,
+        'note': 'Начальный остаток',
+      },
+    ];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchMoneyDocuments({
+    required String accessToken,
+    String? type,
+    String? search,
+  }) async {
+    return [
+      {
+        'id': 'mny_1',
+        'document_no': 'RCP-1',
+        'document_type': 'receipt',
+        'status': 'posted',
+        'operation_date': '2026-06-03',
+        'description': 'Оплата',
+        'primary_account': 'Kaspi Bank',
+        'amount': 125000,
+      },
+    ];
+  }
 }
 
 final _fakeSession = AuthSession(

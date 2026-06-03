@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/config"
@@ -72,15 +71,103 @@ func applySchema(ctx context.Context, db *sql.DB) error {
 }
 
 func splitSQLStatements(schema string) []string {
-	rawStatements := strings.Split(schema, ";")
-	statements := make([]string, 0, len(rawStatements))
+	statements := make([]string, 0, 16)
+	var current []rune
+	inSingleQuote := false
+	inDoubleQuote := false
+	dollarTag := ""
 
-	for _, statement := range rawStatements {
-		trimmed := strings.TrimSpace(statement)
-		if trimmed != "" {
-			statements = append(statements, trimmed)
+	for index := 0; index < len(schema); index++ {
+		ch := rune(schema[index])
+
+		if dollarTag == "" && !inSingleQuote && !inDoubleQuote && ch == '$' {
+			tagEnd := index + 1
+			for tagEnd < len(schema) {
+				next := rune(schema[tagEnd])
+				if next == '$' {
+					tag := schema[index : tagEnd+1]
+					dollarTag = tag
+					current = append(current, []rune(tag)...)
+					index = tagEnd
+					goto continueLoop
+				}
+				if !(next == '_' || (next >= '0' && next <= '9') || (next >= 'A' && next <= 'Z') || (next >= 'a' && next <= 'z')) {
+					break
+				}
+				tagEnd++
+			}
 		}
+
+		if dollarTag != "" {
+			if hasPrefixAt(schema, index, dollarTag) {
+				current = append(current, []rune(dollarTag)...)
+				index += len(dollarTag) - 1
+				dollarTag = ""
+				goto continueLoop
+			}
+			current = append(current, ch)
+			goto continueLoop
+		}
+
+		if ch == '\'' && !inDoubleQuote {
+			if !inSingleQuote {
+				inSingleQuote = true
+			} else if index+1 < len(schema) && schema[index+1] == '\'' {
+				current = append(current, ch, ch)
+				index++
+				goto continueLoop
+			} else {
+				inSingleQuote = false
+			}
+		} else if ch == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		}
+
+		if ch == ';' && !inSingleQuote && !inDoubleQuote {
+			if trimmed := trimWhitespace(string(current)); trimmed != "" {
+				statements = append(statements, trimmed)
+			}
+			current = current[:0]
+			goto continueLoop
+		}
+
+		current = append(current, ch)
+
+	continueLoop:
+	}
+
+	if trimmed := trimWhitespace(string(current)); trimmed != "" {
+		statements = append(statements, trimmed)
 	}
 
 	return statements
+}
+
+func hasPrefixAt(value string, index int, prefix string) bool {
+	return index+len(prefix) <= len(value) && value[index:index+len(prefix)] == prefix
+}
+
+func trimWhitespace(value string) string {
+	start := 0
+	for start < len(value) {
+		switch value[start] {
+		case ' ', '\n', '\r', '\t':
+			start++
+		default:
+			goto foundStart
+		}
+	}
+	return ""
+
+foundStart:
+	end := len(value)
+	for end > start {
+		switch value[end-1] {
+		case ' ', '\n', '\r', '\t':
+			end--
+		default:
+			return value[start:end]
+		}
+	}
+	return value[start:end]
 }

@@ -176,8 +176,18 @@ class _BusinessShellState extends State<BusinessShell> {
                   businessGateway: widget.businessGateway,
                   onClientsChanged: _loadOverview,
                 ),
-                _WarehouseScreen(products: overview.products),
-                _FinanceScreen(finance: overview.finance),
+                _WarehouseScreen(
+                  accessToken: _session.accessToken,
+                  products: overview.products,
+                  businessGateway: widget.businessGateway,
+                  onProductsChanged: _loadOverview,
+                ),
+                _FinanceScreen(
+                  accessToken: _session.accessToken,
+                  finance: overview.finance,
+                  businessGateway: widget.businessGateway,
+                  onFinanceChanged: _loadOverview,
+                ),
                 _MoreScreen(
                   session: _session,
                   overview: overview,
