@@ -29,9 +29,10 @@ func main() {
 	defer db.Close()
 
 	authStore := auth.NewPostgresStore(db)
+	businessStore := business.NewPostgresStore(db)
 	authService := auth.NewService(authStore, cfg.AuthTokenTTL)
 	authHandler := auth.NewHandler(authService)
-	businessHandler := business.NewHandler(authService)
+	businessHandler := business.NewHandler(authService, businessStore)
 
 	server := &stdhttp.Server{
 		Addr:              ":" + cfg.Port,

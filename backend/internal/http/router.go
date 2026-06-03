@@ -37,6 +37,8 @@ func NewRouter(cfg config.Config, authHandler auth.Handler, businessHandler busi
 	mux.HandleFunc("/api/v1/auth/me", authHandler.Me)
 	mux.HandleFunc("/api/v1/profile", authHandler.Profile)
 	mux.HandleFunc("/api/v1/business/overview", businessHandler.Overview)
+	mux.HandleFunc("/api/v1/business/clients", businessHandler.Clients)
+	mux.HandleFunc("/api/v1/business/clients/", businessHandler.ClientByID)
 
 	return withRecovery(withLogging(withCORS(mux, cfg.AllowedOrigins)))
 }

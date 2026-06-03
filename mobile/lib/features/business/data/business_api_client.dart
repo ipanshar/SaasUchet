@@ -38,6 +38,87 @@ class BusinessApiClient extends BusinessGateway {
     return decodedBody;
   }
 
+  @override
+  Future<Map<String, dynamic>> createClient({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.businessClientsUri,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 201) {
+      throw _buildApiException(response);
+    }
+
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateClient({
+    required String accessToken,
+    required String clientId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .put(
+          Uri.parse('${ApiConfig.businessClientsUri}/$clientId'),
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) {
+      throw _buildApiException(response);
+    }
+
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
+  }
+
+  @override
+  Future<void> deleteClient({
+    required String accessToken,
+    required String clientId,
+  }) async {
+    final response = await _client.delete(
+      Uri.parse('${ApiConfig.businessClientsUri}/$clientId'),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $accessToken',
+      },
+    ).timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 204) {
+      throw _buildApiException(response);
+    }
+  }
+
   ApiException _buildApiException(http.Response response) {
     try {
       final decodedBody = jsonDecode(response.body);

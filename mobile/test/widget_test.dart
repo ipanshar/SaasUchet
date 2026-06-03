@@ -142,6 +142,7 @@ class _FakeBusinessGateway extends BusinessGateway {
       ],
       'clients': [
         {
+          'id': 'clt_1',
           'name': 'ТОО Астана Трейд',
           'bin': '123456789012',
           'contact': 'Нурланов Азамат',
@@ -229,6 +230,32 @@ class _FakeBusinessGateway extends BusinessGateway {
       'menu_notifications': 5,
     };
   }
+
+  @override
+  Future<Map<String, dynamic>> createClient({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    return payload;
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateClient({
+    required String accessToken,
+    required String clientId,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {
+      'id': clientId,
+      ...payload,
+    };
+  }
+
+  @override
+  Future<void> deleteClient({
+    required String accessToken,
+    required String clientId,
+  }) async {}
 }
 
 final _fakeSession = AuthSession(

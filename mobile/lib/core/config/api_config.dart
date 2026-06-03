@@ -32,4 +32,6 @@ class ApiConfig {
   static Uri get profileUri => Uri.parse('$baseUrl/api/v1/profile');
   static Uri get businessOverviewUri =>
       Uri.parse('$baseUrl/api/v1/business/overview');
+  static Uri get businessClientsUri =>
+      Uri.parse('$baseUrl/api/v1/business/clients');
 }

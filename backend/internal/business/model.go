@@ -1,10 +1,19 @@
 package business
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/auth"
+)
+
+var (
+	ErrValidation = errors.New("validation failed")
+	digitsOnly    = regexp.MustCompile(`\D`)
 )
 
 type Overview struct {
@@ -49,6 +58,7 @@ type Activity struct {
 }
 
 type Client struct {
+	ID           string        `json:"id"`
 	Name         string        `json:"name"`
 	Contact      string        `json:"contact"`
 	Phone        string        `json:"phone"`
@@ -59,6 +69,16 @@ type Client struct {
 	BIN          string        `json:"bin,omitempty"`
 	IIN          string        `json:"iin,omitempty"`
 	Interactions []Interaction `json:"interactions"`
+}
+
+type CreateClientInput struct {
+	Name    string `json:"name"`
+	Contact string `json:"contact"`
+	Phone   string `json:"phone"`
+	Email   string `json:"email"`
+	Segment string `json:"segment"`
+	BIN     string `json:"bin,omitempty"`
+	IIN     string `json:"iin,omitempty"`
 }
 
 type Interaction struct {
@@ -133,10 +153,14 @@ type StaffMember struct {
 	Role string `json:"role"`
 }
 
-func buildOverview(user auth.User) Overview {
+func buildOverview(user auth.User, clients []Client) Overview {
 	companyName := `ТОО "Мой Бизнес"`
 	if len(user.Companies) > 0 {
 		companyName = user.Companies[0].Name
+	}
+
+	if len(clients) == 0 {
+		clients = defaultClients()
 	}
 
 	return Overview{
@@ -168,63 +192,7 @@ func buildOverview(user auth.User) Overview {
 			{Title: `ИП Нурланов А.Б.`, Amount: "₸ 89,500", Time: "2 часа назад", Icon: "payments", Tone: "success"},
 			{Title: `ТОО "Алматы Опт"`, Amount: "₸ 156,000", Time: "3 часа назад", Icon: "description", Tone: "info"},
 		},
-		Clients: []Client{
-			{
-				Name:       `ТОО "Астана Трейд"`,
-				BIN:        "123456789012",
-				Contact:    "Нурланов Азамат",
-				Phone:      "+7 (777) 123-45-67",
-				Email:      "info@astana-trade.kz",
-				Segment:    "VIP",
-				TotalSales: 2450000,
-				Debt:       125000,
-				Interactions: []Interaction{
-					{Title: "Звонок", Date: "3 июня 2026", Note: "Обсудили новую поставку"},
-					{Title: "Встреча", Date: "1 июня 2026", Note: "Презентация новых товаров"},
-					{Title: "Email", Date: "28 мая 2026", Note: "Отправлено КП"},
-				},
-			},
-			{
-				Name:       "ИП Сериков А.Б.",
-				IIN:        "890123456789",
-				Contact:    "Сериков Алмас",
-				Phone:      "+7 (701) 234-56-78",
-				Email:      "serikov@mail.kz",
-				Segment:    "Regular",
-				TotalSales: 890000,
-				Debt:       0,
-				Interactions: []Interaction{
-					{Title: "Звонок", Date: "2 июня 2026", Note: "Подтвердил готовность к оплате"},
-					{Title: "Email", Date: "29 мая 2026", Note: "Отправили счет на оплату"},
-				},
-			},
-			{
-				Name:       `ТОО "Алматы Опт"`,
-				BIN:        "234567890123",
-				Contact:    "Касымова Айгуль",
-				Phone:      "+7 (727) 345-67-89",
-				Email:      "almaty-opt@gmail.com",
-				Segment:    "VIP",
-				TotalSales: 1560000,
-				Debt:       45000,
-				Interactions: []Interaction{
-					{Title: "Встреча", Date: "31 мая 2026", Note: "Согласовали квартальный контракт"},
-				},
-			},
-			{
-				Name:       `ТОО "Караганда Снаб"`,
-				BIN:        "345678901234",
-				Contact:    "Ибрагимов Ерлан",
-				Phone:      "+7 (778) 456-78-90",
-				Email:      "karaganda@snab.kz",
-				Segment:    "Regular",
-				TotalSales: 450000,
-				Debt:       150000,
-				Interactions: []Interaction{
-					{Title: "Email", Date: "30 мая 2026", Note: "Напоминание о просроченной задолженности"},
-				},
-			},
-		},
+		Clients: clients,
 		Products: []Product{
 			{
 				Name:        "Ноутбук Lenovo ThinkPad",
@@ -323,6 +291,164 @@ func buildOverview(user auth.User) Overview {
 	}
 }
 
+func defaultClients() []Client {
+	return []Client{
+		{
+			ID:         mustGenerateClientID(),
+			Name:       `ТОО "Астана Трейд"`,
+			BIN:        "123456789012",
+			Contact:    "Нурланов Азамат",
+			Phone:      "+7 (777) 123-45-67",
+			Email:      "info@astana-trade.kz",
+			Segment:    "VIP",
+			TotalSales: 2450000,
+			Debt:       125000,
+			Interactions: []Interaction{
+				{Title: "Звонок", Date: "3 июня 2026", Note: "Обсудили новую поставку"},
+				{Title: "Встреча", Date: "1 июня 2026", Note: "Презентация новых товаров"},
+				{Title: "Email", Date: "28 мая 2026", Note: "Отправлено КП"},
+			},
+		},
+		{
+			ID:         mustGenerateClientID(),
+			Name:       "ИП Сериков А.Б.",
+			IIN:        "890123456789",
+			Contact:    "Сериков Алмас",
+			Phone:      "+7 (701) 234-56-78",
+			Email:      "serikov@mail.kz",
+			Segment:    "Regular",
+			TotalSales: 890000,
+			Debt:       0,
+			Interactions: []Interaction{
+				{Title: "Звонок", Date: "2 июня 2026", Note: "Подтвердил готовность к оплате"},
+				{Title: "Email", Date: "29 мая 2026", Note: "Отправили счет на оплату"},
+			},
+		},
+		{
+			ID:         mustGenerateClientID(),
+			Name:       `ТОО "Алматы Опт"`,
+			BIN:        "234567890123",
+			Contact:    "Касымова Айгуль",
+			Phone:      "+7 (727) 345-67-89",
+			Email:      "almaty-opt@gmail.com",
+			Segment:    "VIP",
+			TotalSales: 1560000,
+			Debt:       45000,
+			Interactions: []Interaction{
+				{Title: "Встреча", Date: "31 мая 2026", Note: "Согласовали квартальный контракт"},
+			},
+		},
+		{
+			ID:         mustGenerateClientID(),
+			Name:       `ТОО "Караганда Снаб"`,
+			BIN:        "345678901234",
+			Contact:    "Ибрагимов Ерлан",
+			Phone:      "+7 (778) 456-78-90",
+			Email:      "karaganda@snab.kz",
+			Segment:    "Regular",
+			TotalSales: 450000,
+			Debt:       150000,
+			Interactions: []Interaction{
+				{Title: "Email", Date: "30 мая 2026", Note: "Напоминание о просроченной задолженности"},
+			},
+		},
+	}
+}
+
+func NormalizeClientInput(input CreateClientInput) CreateClientInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Contact = strings.TrimSpace(input.Contact)
+	input.Phone = normalizePhone(input.Phone)
+	input.Email = strings.TrimSpace(strings.ToLower(input.Email))
+	input.Segment = strings.TrimSpace(input.Segment)
+	input.BIN = normalizeDigits(input.BIN)
+	input.IIN = normalizeDigits(input.IIN)
+
+	if input.Segment == "" {
+		input.Segment = "Regular"
+	}
+
+	return input
+}
+
+func ValidateClientInput(input CreateClientInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("%w: client name is required", ErrValidation)
+	}
+
+	if strings.TrimSpace(input.Contact) == "" {
+		return fmt.Errorf("%w: client contact is required", ErrValidation)
+	}
+
+	if normalizePhone(input.Phone) == "" {
+		return fmt.Errorf("%w: client phone is required", ErrValidation)
+	}
+
+	if input.Email != "" && !strings.Contains(input.Email, "@") {
+		return fmt.Errorf("%w: client email is invalid", ErrValidation)
+	}
+
+	if input.BIN != "" && len(input.BIN) != 12 {
+		return fmt.Errorf("%w: BIN must contain 12 digits", ErrValidation)
+	}
+
+	if input.IIN != "" && len(input.IIN) != 12 {
+		return fmt.Errorf("%w: IIN must contain 12 digits", ErrValidation)
+	}
+
+	return nil
+}
+
+func NewClientFromInput(input CreateClientInput) Client {
+	normalized := NormalizeClientInput(input)
+	return Client{
+		ID:           mustGenerateClientID(),
+		Name:         normalized.Name,
+		Contact:      normalized.Contact,
+		Phone:        normalized.Phone,
+		Email:        normalized.Email,
+		Segment:      normalized.Segment,
+		BIN:          normalized.BIN,
+		IIN:          normalized.IIN,
+		TotalSales:   0,
+		Debt:         0,
+		Interactions: []Interaction{},
+	}
+}
+
+func UpdatedClientFromInput(existing Client, input CreateClientInput) Client {
+	normalized := NormalizeClientInput(input)
+	existing.Name = normalized.Name
+	existing.Contact = normalized.Contact
+	existing.Phone = normalized.Phone
+	existing.Email = normalized.Email
+	existing.Segment = normalized.Segment
+	existing.BIN = normalized.BIN
+	existing.IIN = normalized.IIN
+	return existing
+}
+
+func normalizeDigits(value string) string {
+	return digitsOnly.ReplaceAllString(strings.TrimSpace(value), "")
+}
+
+func normalizePhone(value string) string {
+	digits := normalizeDigits(value)
+	if digits == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(digits, "8") && len(digits) == 11 {
+		digits = "7" + digits[1:]
+	}
+
+	if !strings.HasPrefix(digits, "7") && len(digits) == 10 {
+		digits = "7" + digits
+	}
+
+	return "+" + digits
+}
+
 func initialsOf(value string) string {
 	normalized := strings.ReplaceAll(value, `"`, "")
 	parts := strings.Fields(normalized)
@@ -339,4 +465,22 @@ func initialsOf(value string) string {
 	}
 
 	return fmt.Sprintf("%s", strings.Join(initials, ""))
+}
+
+func mustGenerateClientID() string {
+	id, err := generateClientID()
+	if err != nil {
+		return "clt_fallback"
+	}
+
+	return id
+}
+
+func generateClientID() (string, error) {
+	bytes := make([]byte, 12)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+
+	return "clt_" + hex.EncodeToString(bytes), nil
 }
