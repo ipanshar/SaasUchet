@@ -251,21 +251,27 @@ func (s *PostgresStore) ListProducts(user auth.User) ([]Product, error) {
 	for rows.Next() {
 		var product Product
 		var quantity float64
+		var minQuantity float64
+		var price float64
+		var cost float64
 		if err := rows.Scan(
 			&product.ID,
 			&product.Name,
 			&product.SKU,
 			&product.Category,
 			&quantity,
-			&product.MinQuantity,
-			&product.Price,
-			&product.Cost,
+			&minQuantity,
+			&price,
+			&cost,
 			&product.Barcode,
 		); err != nil {
 			return nil, err
 		}
 
 		product.Quantity = int(quantity)
+		product.MinQuantity = int(minQuantity)
+		product.Price = int(price)
+		product.Cost = int(cost)
 		product.Status = productStatus(product.Quantity, product.MinQuantity)
 		product.Movements = []StockMovement{}
 		indexByID[product.ID] = len(products)
@@ -480,6 +486,196 @@ func (s *PostgresStore) DeleteProduct(user auth.User, productID string) error {
 	return nil
 }
 
+func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInventoryDocumentInput) (InventoryDocumentDetail, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	normalized := NormalizeInventoryDocumentInput(input)
+	documentDate := time.Now()
+	if normalized.DocumentDate != "" {
+		documentDate, err = time.Parse("2006-01-02", normalized.DocumentDate)
+		if err != nil {
+			return InventoryDocumentDetail{}, fmt.Errorf("%w: document date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+
+	sourceWarehouseID, sourceWarehouseName, err := s.ensureWarehouse(ctx, tx, companyID, normalized.WarehouseName, "MAIN", "Основной склад")
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	relatedWarehouseID := ""
+	relatedWarehouseName := ""
+	if normalized.DocumentType == "transfer" {
+		relatedWarehouseID, relatedWarehouseName, err = s.ensureWarehouse(ctx, tx, companyID, normalized.RelatedWarehouseName, "TRANSIT", normalized.RelatedWarehouseName)
+		if err != nil {
+			return InventoryDocumentDetail{}, err
+		}
+	}
+
+	clientName := ""
+	if normalized.ClientID != "" {
+		client, clientErr := s.findClientByID(ctx, companyID, normalized.ClientID)
+		if clientErr != nil {
+			if errors.Is(clientErr, sql.ErrNoRows) {
+				return InventoryDocumentDetail{}, fmt.Errorf("%w: client not found", ErrValidation)
+			}
+			return InventoryDocumentDetail{}, clientErr
+		}
+		clientName = client.Name
+	}
+
+	documentNo := normalized.DocumentNo
+	if documentNo == "" {
+		documentNo = s.nextInventoryDocumentNo(normalized.DocumentType)
+	}
+
+	var documentID string
+	if err = tx.QueryRowContext(
+		ctx,
+		`INSERT INTO inventory_documents (
+		   company_id, document_no, document_type, status, document_date, warehouse_id, related_warehouse_id, client_id, note, created_by_user_id, posted_by_user_id, posted_at, created_at, updated_at
+		 ) VALUES (
+		   $1::uuid, $2, $3, 'posted', $4, $5::uuid, $6::uuid, $7::uuid, NULLIF($8, ''), $9, $9, NOW(), NOW(), NOW()
+		 )
+		 RETURNING id::text`,
+		companyID,
+		documentNo,
+		normalized.DocumentType,
+		documentDate.Format("2006-01-02"),
+		sourceWarehouseID,
+		nullUUID(relatedWarehouseID),
+		nullUUID(normalized.ClientID),
+		normalized.Note,
+		user.ID,
+	).Scan(&documentID); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	detail := InventoryDocumentDetail{
+		Summary: InventoryDocumentSummary{
+			ID:               documentID,
+			DocumentNo:       documentNo,
+			DocumentType:     normalized.DocumentType,
+			Status:           "posted",
+			DocumentDate:     documentDate.Format("2006-01-02"),
+			ClientID:         normalized.ClientID,
+			ClientName:       clientName,
+			WarehouseName:    sourceWarehouseName,
+			RelatedWarehouse: relatedWarehouseName,
+			ProductLines:     len(normalized.Lines),
+			Note:             normalized.Note,
+		},
+		Lines: make([]InventoryDocumentLine, 0, len(normalized.Lines)),
+	}
+
+	totalQuantity := 0
+	totalAmount := 0
+	for index, inputLine := range normalized.Lines {
+		product, productErr := s.findProductByID(ctx, companyID, inputLine.ProductID)
+		if productErr != nil {
+			if errors.Is(productErr, sql.ErrNoRows) {
+				return InventoryDocumentDetail{}, fmt.Errorf("%w: product not found", ErrValidation)
+			}
+			return InventoryDocumentDetail{}, productErr
+		}
+
+		unitPrice := inputLine.UnitPrice
+		if unitPrice == 0 {
+			unitPrice = product.Price
+		}
+		unitCost := inputLine.UnitCost
+		if unitCost == 0 {
+			unitCost = product.Cost
+		}
+
+		var lineID string
+		if err = tx.QueryRowContext(
+			ctx,
+			`INSERT INTO inventory_document_lines (
+			   document_id, line_no, product_id, quantity, unit_price, unit_cost, note, created_at
+			 ) VALUES (
+			   $1::uuid, $2, $3::uuid, $4, $5, $6, NULLIF($7, ''), NOW()
+			 )
+			 RETURNING id::text`,
+			documentID,
+			index+1,
+			product.ID,
+			inputLine.Quantity,
+			unitPrice,
+			unitCost,
+			inputLine.Note,
+		).Scan(&lineID); err != nil {
+			return InventoryDocumentDetail{}, err
+		}
+
+		lineTotal := inputLine.Quantity * unitPrice
+		if err = s.applyInventoryMovement(
+			ctx,
+			tx,
+			companyID,
+			normalized.DocumentType,
+			sourceWarehouseID,
+			relatedWarehouseID,
+			product,
+			documentID,
+			lineID,
+			inputLine.Quantity,
+			unitCost,
+			documentDate,
+		); err != nil {
+			return InventoryDocumentDetail{}, err
+		}
+
+		totalQuantity += inputLine.Quantity
+		totalAmount += lineTotal
+		detail.Lines = append(detail.Lines, InventoryDocumentLine{
+			ProductName: product.Name,
+			SKU:         product.SKU,
+			Quantity:    inputLine.Quantity,
+			UnitPrice:   unitPrice,
+			UnitCost:    unitCost,
+			LineTotal:   lineTotal,
+			Note:        inputLine.Note,
+		})
+	}
+
+	detail.Summary.TotalQuantity = totalQuantity
+	detail.Summary.TotalAmount = totalAmount
+
+	if err = s.createLinkedMoneyDocumentDraft(
+		ctx,
+		tx,
+		companyID,
+		documentID,
+		detail.Summary,
+		documentDate,
+	); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	return detail, nil
+}
+
 func (s *PostgresStore) ListInventoryDocuments(user auth.User, documentType string, search string) ([]InventoryDocumentSummary, error) {
 	ctx, cancel := s.withTimeout()
 	defer cancel()
@@ -497,12 +693,16 @@ func (s *PostgresStore) ListInventoryDocuments(user auth.User, documentType stri
 		    d.document_type,
 		    d.status,
 		    d.document_date,
+		    COALESCE(c.id::text, ''),
+		    COALESCE(c.name, ''),
 		    COALESCE(w.name, ''),
 		    COALESCE(rw.name, ''),
 		    COUNT(DISTINCT l.id),
 		    COALESCE(SUM(l.quantity), 0),
+		    COALESCE(SUM(l.line_total), 0),
 		    COALESCE(d.note, '')
 		 FROM inventory_documents d
+		 LEFT JOIN clients c ON c.id = d.client_id
 		 LEFT JOIN warehouses w ON w.id = d.warehouse_id
 		 LEFT JOIN warehouses rw ON rw.id = d.related_warehouse_id
 		 LEFT JOIN inventory_document_lines l ON l.document_id = d.id
@@ -512,9 +712,10 @@ func (s *PostgresStore) ListInventoryDocuments(user auth.User, documentType stri
 		     $3 = ''
 		     OR d.document_no ILIKE '%' || $3 || '%'
 		     OR COALESCE(d.note, '') ILIKE '%' || $3 || '%'
+		     OR COALESCE(c.name, '') ILIKE '%' || $3 || '%'
 		     OR COALESCE(w.name, '') ILIKE '%' || $3 || '%'
 		   )
-		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.document_date, w.name, rw.name, d.note
+		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.document_date, c.id, c.name, w.name, rw.name, d.note
 		 ORDER BY d.document_date DESC, d.created_at DESC
 		 LIMIT 100`,
 		companyID,
@@ -531,26 +732,230 @@ func (s *PostgresStore) ListInventoryDocuments(user auth.User, documentType stri
 		var document InventoryDocumentSummary
 		var documentDate time.Time
 		var totalQuantity float64
+		var totalAmount float64
 		if err := rows.Scan(
 			&document.ID,
 			&document.DocumentNo,
 			&document.DocumentType,
 			&document.Status,
 			&documentDate,
+			&document.ClientID,
+			&document.ClientName,
 			&document.WarehouseName,
 			&document.RelatedWarehouse,
 			&document.ProductLines,
 			&totalQuantity,
+			&totalAmount,
 			&document.Note,
 		); err != nil {
 			return nil, err
 		}
 		document.DocumentDate = documentDate.Format("2006-01-02")
 		document.TotalQuantity = int(totalQuantity)
+		document.TotalAmount = int(totalAmount)
 		documents = append(documents, document)
 	}
 
 	return documents, rows.Err()
+}
+
+func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) (InventoryDocumentDetail, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	var detail InventoryDocumentDetail
+	var documentDate time.Time
+	var totalQuantity float64
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    d.id::text,
+		    d.document_no,
+		    d.document_type,
+		    d.status,
+		    d.document_date,
+		    COALESCE(c.id::text, ''),
+		    COALESCE(c.name, ''),
+		    COALESCE(w.name, ''),
+		    COALESCE(rw.name, ''),
+		    COUNT(DISTINCT l.id),
+		    COALESCE(SUM(l.quantity), 0),
+		    COALESCE(SUM(l.line_total), 0),
+		    COALESCE(d.note, '')
+		 FROM inventory_documents d
+		 LEFT JOIN clients c ON c.id = d.client_id
+		 LEFT JOIN warehouses w ON w.id = d.warehouse_id
+		 LEFT JOIN warehouses rw ON rw.id = d.related_warehouse_id
+		 LEFT JOIN inventory_document_lines l ON l.document_id = d.id
+		 WHERE d.company_id = $1::uuid AND d.id = $2::uuid
+		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.document_date, c.id, c.name, w.name, rw.name, d.note`,
+		companyID,
+		documentID,
+	).Scan(
+		&detail.Summary.ID,
+		&detail.Summary.DocumentNo,
+		&detail.Summary.DocumentType,
+		&detail.Summary.Status,
+		&documentDate,
+		&detail.Summary.ClientID,
+		&detail.Summary.ClientName,
+		&detail.Summary.WarehouseName,
+		&detail.Summary.RelatedWarehouse,
+		&detail.Summary.ProductLines,
+		&totalQuantity,
+		&detail.Summary.TotalAmount,
+		&detail.Summary.Note,
+	)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	detail.Summary.DocumentDate = documentDate.Format("2006-01-02")
+	detail.Summary.TotalQuantity = int(totalQuantity)
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    COALESCE(p.name, ''),
+		    COALESCE(p.sku, ''),
+		    l.quantity,
+		    l.unit_price,
+		    l.unit_cost,
+		    COALESCE(l.line_total, 0),
+		    COALESCE(l.note, '')
+		 FROM inventory_document_lines l
+		 JOIN products p ON p.id = l.product_id
+		 WHERE l.document_id = $1::uuid
+		 ORDER BY l.line_no ASC`,
+		documentID,
+	)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	defer rows.Close()
+
+	detail.Lines = make([]InventoryDocumentLine, 0)
+	for rows.Next() {
+		var line InventoryDocumentLine
+		var quantity float64
+		var unitPrice float64
+		var unitCost float64
+		var lineTotal float64
+		if err := rows.Scan(
+			&line.ProductName,
+			&line.SKU,
+			&quantity,
+			&unitPrice,
+			&unitCost,
+			&lineTotal,
+			&line.Note,
+		); err != nil {
+			return InventoryDocumentDetail{}, err
+		}
+		line.Quantity = int(quantity)
+		line.UnitPrice = int(unitPrice)
+		line.UnitCost = int(unitCost)
+		line.LineTotal = int(lineTotal)
+		detail.Lines = append(detail.Lines, line)
+	}
+
+	return detail, rows.Err()
+}
+
+type clientRecord struct {
+	ID   string
+	Name string
+}
+
+func (s *PostgresStore) findClientByID(ctx context.Context, companyID string, clientID string) (clientRecord, error) {
+	var client clientRecord
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT id::text, name
+		 FROM clients
+		 WHERE id = $1::uuid AND company_id = $2::uuid AND archived_at IS NULL`,
+		clientID,
+		companyID,
+	).Scan(&client.ID, &client.Name)
+	if err != nil {
+		return clientRecord{}, err
+	}
+	return client, nil
+}
+
+func (s *PostgresStore) createLinkedMoneyDocumentDraft(
+	ctx context.Context,
+	tx *sql.Tx,
+	companyID string,
+	inventoryDocumentID string,
+	summary InventoryDocumentSummary,
+	documentDate time.Time,
+) error {
+	if summary.ClientID == "" || summary.TotalAmount <= 0 {
+		return nil
+	}
+
+	documentType := ""
+	description := ""
+	categoryDirection := ""
+	categoryName := ""
+	switch summary.DocumentType {
+	case "sale_issue":
+		documentType = "sale_receivable"
+		description = fmt.Sprintf("Оплата по продаже %s", summary.DocumentNo)
+		categoryDirection = "income"
+		categoryName = "Продажи"
+	case "purchase_receipt":
+		documentType = "purchase_payable"
+		description = fmt.Sprintf("Оплата по закупу %s", summary.DocumentNo)
+		categoryDirection = "expense"
+		categoryName = "Закуп"
+	default:
+		return nil
+	}
+
+	categoryID, err := s.ensureMoneyCategory(ctx, tx, companyID, categoryDirection, categoryName)
+	if err != nil {
+		return err
+	}
+
+	var moneyDocumentID string
+	if err = tx.QueryRowContext(
+		ctx,
+		`INSERT INTO money_documents (
+		   company_id, document_no, document_type, status, operation_date, client_id, description, source_module, source_reference, created_at, updated_at
+		 ) VALUES (
+		   $1::uuid, $2, $3, 'draft', $4, $5::uuid, $6, 'inventory', $7::uuid, NOW(), NOW()
+		 )
+		 RETURNING id::text`,
+		companyID,
+		fmt.Sprintf("FIN-%s", summary.DocumentNo),
+		documentType,
+		documentDate.Format("2006-01-02"),
+		summary.ClientID,
+		description,
+		inventoryDocumentID,
+	).Scan(&moneyDocumentID); err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO money_document_lines (
+		   document_id, line_no, category_id, amount, note, created_at
+		 ) VALUES (
+		   $1::uuid, 1, $2::uuid, $3, $4, NOW()
+		 )`,
+		moneyDocumentID,
+		nullUUID(categoryID),
+		summary.TotalAmount,
+		description,
+	)
+	return err
 }
 
 func (s *PostgresStore) GetFinance(user auth.User) (Finance, error) {
@@ -1096,6 +1501,86 @@ func (s *PostgresStore) ListMoneyDocuments(user auth.User, documentType string, 
 	return documents, rows.Err()
 }
 
+func (s *PostgresStore) GetMoneyDocument(user auth.User, documentID string) (MoneyDocumentDetail, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return MoneyDocumentDetail{}, err
+	}
+
+	var detail MoneyDocumentDetail
+	var operationDate time.Time
+	var amount float64
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    d.id::text,
+		    d.document_no,
+		    d.document_type,
+		    d.status,
+		    d.operation_date,
+		    COALESCE(d.description, ''),
+		    COALESCE(pa.name, ''),
+		    COALESCE(sa.name, ''),
+		    COALESCE(SUM(l.amount), 0)
+		 FROM money_documents d
+		 LEFT JOIN cash_accounts pa ON pa.id = d.primary_account_id
+		 LEFT JOIN cash_accounts sa ON sa.id = d.secondary_account_id
+		 LEFT JOIN money_document_lines l ON l.document_id = d.id
+		 WHERE d.company_id = $1::uuid AND d.id = $2::uuid
+		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.operation_date, d.description, pa.name, sa.name`,
+		companyID,
+		documentID,
+	).Scan(
+		&detail.Summary.ID,
+		&detail.Summary.DocumentNo,
+		&detail.Summary.DocumentType,
+		&detail.Summary.Status,
+		&operationDate,
+		&detail.Summary.Description,
+		&detail.Summary.PrimaryAccount,
+		&detail.Summary.SecondaryAccount,
+		&amount,
+	)
+	if err != nil {
+		return MoneyDocumentDetail{}, err
+	}
+	detail.Summary.OperationDate = operationDate.Format("2006-01-02")
+	detail.Summary.Amount = int(amount)
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    COALESCE(mc.name, ''),
+		    l.amount,
+		    COALESCE(l.note, '')
+		 FROM money_document_lines l
+		 LEFT JOIN money_categories mc ON mc.id = l.category_id
+		 WHERE l.document_id = $1::uuid
+		 ORDER BY l.line_no ASC`,
+		documentID,
+	)
+	if err != nil {
+		return MoneyDocumentDetail{}, err
+	}
+	defer rows.Close()
+
+	detail.Lines = make([]MoneyDocumentLine, 0)
+	for rows.Next() {
+		var line MoneyDocumentLine
+		var lineAmount float64
+		if err := rows.Scan(&line.Category, &lineAmount, &line.Note); err != nil {
+			return MoneyDocumentDetail{}, err
+		}
+		line.Amount = int(lineAmount)
+		detail.Lines = append(detail.Lines, line)
+	}
+
+	return detail, rows.Err()
+}
+
 func (s *PostgresStore) ensurePrimaryCompany(ctx context.Context, user auth.User) (string, error) {
 	var companyID string
 	err := s.db.QueryRowContext(
@@ -1184,6 +1669,9 @@ func (s *PostgresStore) withTimeout() (context.Context, context.CancelFunc) {
 func (s *PostgresStore) findProductByID(ctx context.Context, companyID string, productID string) (Product, error) {
 	var product Product
 	var quantity float64
+	var minQuantity float64
+	var price float64
+	var cost float64
 	err := s.db.QueryRowContext(
 		ctx,
 		`SELECT
@@ -1209,9 +1697,9 @@ func (s *PostgresStore) findProductByID(ctx context.Context, companyID string, p
 		&product.SKU,
 		&product.Category,
 		&quantity,
-		&product.MinQuantity,
-		&product.Price,
-		&product.Cost,
+		&minQuantity,
+		&price,
+		&cost,
 		&product.Barcode,
 	)
 	if err != nil {
@@ -1219,6 +1707,9 @@ func (s *PostgresStore) findProductByID(ctx context.Context, companyID string, p
 	}
 
 	product.Quantity = int(quantity)
+	product.MinQuantity = int(minQuantity)
+	product.Price = int(price)
+	product.Cost = int(cost)
 	product.Status = productStatus(product.Quantity, product.MinQuantity)
 	product.Movements = []StockMovement{}
 	return product, nil
@@ -1368,6 +1859,228 @@ func (s *PostgresStore) createOpeningInventory(ctx context.Context, tx *sql.Tx, 
 		product.Cost,
 	)
 	return err
+}
+
+func (s *PostgresStore) ensureWarehouse(ctx context.Context, tx *sql.Tx, companyID string, name string, fallbackCode string, fallbackName string) (string, string, error) {
+	normalizedName := strings.TrimSpace(name)
+	if normalizedName == "" {
+		normalizedName = fallbackName
+	}
+
+	var warehouseID string
+	var warehouseName string
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT id::text, name
+		 FROM warehouses
+		 WHERE company_id = $1::uuid AND lower(name) = lower($2) AND archived_at IS NULL
+		 LIMIT 1`,
+		companyID,
+		normalizedName,
+	).Scan(&warehouseID, &warehouseName)
+	if err == nil {
+		return warehouseID, warehouseName, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", "", err
+	}
+
+	code := fallbackCode
+	if code == "" {
+		code = strings.ToUpper(strings.ReplaceAll(normalizedName, " ", "_"))
+	}
+
+	if err = tx.QueryRowContext(
+		ctx,
+		`INSERT INTO warehouses (
+		   company_id, code, name, warehouse_type, is_active, created_at, updated_at
+		 ) VALUES ($1::uuid, $2, $3, 'storage', TRUE, NOW(), NOW())
+		 RETURNING id::text, name`,
+		companyID,
+		code,
+		normalizedName,
+	).Scan(&warehouseID, &warehouseName); err != nil {
+		return "", "", err
+	}
+
+	return warehouseID, warehouseName, nil
+}
+
+func (s *PostgresStore) currentInventoryBalance(ctx context.Context, tx *sql.Tx, companyID string, warehouseID string, productID string) (int, error) {
+	var quantity float64
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(quantity_on_hand, 0)
+		 FROM inventory_balances
+		 WHERE company_id = $1::uuid AND warehouse_id = $2::uuid AND product_id = $3::uuid`,
+		companyID,
+		warehouseID,
+		productID,
+	).Scan(&quantity)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return int(quantity), nil
+}
+
+func (s *PostgresStore) upsertInventoryBalance(ctx context.Context, tx *sql.Tx, companyID string, warehouseID string, productID string, quantity int, averageCost int) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO inventory_balances (
+		   company_id, warehouse_id, product_id, quantity_on_hand, quantity_reserved, average_cost, updated_at
+		 ) VALUES (
+		   $1::uuid, $2::uuid, $3::uuid, $4, 0, $5, NOW()
+		 )
+		 ON CONFLICT (company_id, warehouse_id, product_id)
+		 DO UPDATE SET
+		   quantity_on_hand = EXCLUDED.quantity_on_hand,
+		   average_cost = EXCLUDED.average_cost,
+		   updated_at = NOW()`,
+		companyID,
+		warehouseID,
+		productID,
+		quantity,
+		averageCost,
+	)
+	return err
+}
+
+func (s *PostgresStore) applyInventoryMovement(
+	ctx context.Context,
+	tx *sql.Tx,
+	companyID string,
+	documentType string,
+	sourceWarehouseID string,
+	relatedWarehouseID string,
+	product Product,
+	documentID string,
+	lineID string,
+	quantity int,
+	unitCost int,
+	documentDate time.Time,
+) error {
+	switch documentType {
+	case "purchase_receipt", "adjustment":
+		currentBalance, err := s.currentInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID)
+		if err != nil {
+			return err
+		}
+		newBalance := currentBalance + quantity
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO inventory_movements (
+			   company_id, warehouse_id, product_id, document_id, document_line_id, movement_type, quantity_delta, unit_cost, total_cost, balance_after, happened_at, created_at
+			 ) VALUES (
+			   $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'in', $6, $7, $8, $9, $10, NOW()
+			 )`,
+			companyID,
+			sourceWarehouseID,
+			product.ID,
+			documentID,
+			lineID,
+			quantity,
+			unitCost,
+			quantity*unitCost,
+			newBalance,
+			documentDate,
+		); err != nil {
+			return err
+		}
+		return s.upsertInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID, newBalance, unitCost)
+	case "write_off", "sale_issue":
+		currentBalance, err := s.currentInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID)
+		if err != nil {
+			return err
+		}
+		if currentBalance < quantity {
+			return fmt.Errorf("%w: not enough stock for product %s", ErrValidation, product.Name)
+		}
+		newBalance := currentBalance - quantity
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO inventory_movements (
+			   company_id, warehouse_id, product_id, document_id, document_line_id, movement_type, quantity_delta, unit_cost, total_cost, balance_after, happened_at, created_at
+			 ) VALUES (
+			   $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'out', $6, $7, $8, $9, $10, NOW()
+			 )`,
+			companyID,
+			sourceWarehouseID,
+			product.ID,
+			documentID,
+			lineID,
+			-quantity,
+			unitCost,
+			quantity*unitCost,
+			newBalance,
+			documentDate,
+		); err != nil {
+			return err
+		}
+		return s.upsertInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID, newBalance, unitCost)
+	case "transfer":
+		currentSourceBalance, err := s.currentInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID)
+		if err != nil {
+			return err
+		}
+		if currentSourceBalance < quantity {
+			return fmt.Errorf("%w: not enough stock for product %s", ErrValidation, product.Name)
+		}
+		currentTargetBalance, err := s.currentInventoryBalance(ctx, tx, companyID, relatedWarehouseID, product.ID)
+		if err != nil {
+			return err
+		}
+		newSourceBalance := currentSourceBalance - quantity
+		newTargetBalance := currentTargetBalance + quantity
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO inventory_movements (
+			   company_id, warehouse_id, product_id, document_id, document_line_id, movement_type, quantity_delta, unit_cost, total_cost, balance_after, happened_at, created_at
+			 ) VALUES (
+			   $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'transfer_out', $6, $7, $8, $9, $10, NOW()
+			 )`,
+			companyID,
+			sourceWarehouseID,
+			product.ID,
+			documentID,
+			lineID,
+			-quantity,
+			unitCost,
+			quantity*unitCost,
+			newSourceBalance,
+			documentDate,
+		); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO inventory_movements (
+			   company_id, warehouse_id, product_id, document_id, document_line_id, movement_type, quantity_delta, unit_cost, total_cost, balance_after, happened_at, created_at
+			 ) VALUES (
+			   $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'transfer_in', $6, $7, $8, $9, $10, NOW()
+			 )`,
+			companyID,
+			relatedWarehouseID,
+			product.ID,
+			documentID,
+			lineID,
+			quantity,
+			unitCost,
+			quantity*unitCost,
+			newTargetBalance,
+			documentDate,
+		); err != nil {
+			return err
+		}
+		if err = s.upsertInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID, newSourceBalance, unitCost); err != nil {
+			return err
+		}
+		return s.upsertInventoryBalance(ctx, tx, companyID, relatedWarehouseID, product.ID, newTargetBalance, unitCost)
+	default:
+		return fmt.Errorf("%w: document type is invalid", ErrValidation)
+	}
 }
 
 type cashAccountRecord struct {
@@ -1592,6 +2305,23 @@ func (s *PostgresStore) nextMoneyDocumentNo(direction string) string {
 		prefix = "PAY"
 	case "transfer":
 		prefix = "TRF"
+	}
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+}
+
+func (s *PostgresStore) nextInventoryDocumentNo(documentType string) string {
+	prefix := "INV"
+	switch documentType {
+	case "purchase_receipt":
+		prefix = "REC"
+	case "write_off":
+		prefix = "WOF"
+	case "transfer":
+		prefix = "TRN"
+	case "sale_issue":
+		prefix = "SAL"
+	case "adjustment":
+		prefix = "ADJ"
 	}
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }

@@ -40,9 +40,59 @@ class BusinessShell extends StatefulWidget {
 }
 
 class _BusinessShellState extends State<BusinessShell> {
+  static const List<_FabMenuAction> _defaultFabActions = [
+    _FabMenuAction(
+      id: 'sale',
+      label: 'Продажа',
+      icon: Icons.point_of_sale_rounded,
+      color: Color(0xFF00A86B),
+    ),
+    _FabMenuAction(
+      id: 'purchase',
+      label: 'Закупка',
+      icon: Icons.shopping_cart_checkout_rounded,
+      color: Color(0xFF3B82F6),
+    ),
+    _FabMenuAction(
+      id: 'client',
+      label: 'Клиент',
+      icon: Icons.person_add_alt_1_rounded,
+      color: Color(0xFF22C55E),
+    ),
+    _FabMenuAction(
+      id: 'invoice',
+      label: 'Счет',
+      icon: Icons.receipt_long_rounded,
+      color: Color(0xFFF59E0B),
+    ),
+  ];
+
+  static const List<_FabMenuAction> _warehouseFabActions = [
+    _FabMenuAction(
+      id: 'warehouse_documents',
+      label: 'Документы',
+      icon: Icons.description_rounded,
+      color: Color(0xFF475569),
+    ),
+    _FabMenuAction(
+      id: 'warehouse_operation',
+      label: 'Операция',
+      icon: Icons.playlist_add_check_circle_rounded,
+      color: Color(0xFF0F766E),
+    ),
+    _FabMenuAction(
+      id: 'warehouse_product',
+      label: 'Товар',
+      icon: Icons.add_box_rounded,
+      color: Color(0xFF00A86B),
+    ),
+  ];
+
   BusinessTab _activeTab = BusinessTab.dashboard;
   bool _isFabExpanded = false;
   late AuthSession _session;
+  final GlobalKey<_WarehouseScreenState> _warehouseScreenKey =
+      GlobalKey<_WarehouseScreenState>();
   _OverviewData? _overview;
   bool _isLoading = true;
   String? _loadError;
@@ -117,9 +167,51 @@ class _BusinessShellState extends State<BusinessShell> {
     _loadOverview();
   }
 
+  List<_FabMenuAction> _fabActionsForCurrentTab() {
+    switch (_activeTab) {
+      case BusinessTab.warehouse:
+        return _warehouseFabActions;
+      default:
+        return _defaultFabActions;
+    }
+  }
+
+  Future<void> _handleFabAction(_FabMenuAction action) async {
+    setState(() {
+      _isFabExpanded = false;
+    });
+
+    if (_activeTab == BusinessTab.warehouse) {
+      final warehouseState = _warehouseScreenKey.currentState;
+      if (warehouseState == null) {
+        return;
+      }
+
+      switch (action.id) {
+        case 'warehouse_documents':
+          await warehouseState.openInventoryDocuments();
+          return;
+        case 'warehouse_operation':
+          await warehouseState.openCreateInventoryDocument();
+          return;
+        case 'warehouse_product':
+          await warehouseState.openCreateProduct();
+          return;
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Действие "${action.label}" пока в разработке')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final showFab = _activeTab != BusinessTab.more;
+    final fabActions = _fabActionsForCurrentTab();
     final overview = _overview;
 
     return Scaffold(
@@ -177,8 +269,10 @@ class _BusinessShellState extends State<BusinessShell> {
                   onClientsChanged: _loadOverview,
                 ),
                 _WarehouseScreen(
+                  key: _warehouseScreenKey,
                   accessToken: _session.accessToken,
                   products: overview.products,
+                  clients: overview.clients,
                   businessGateway: widget.businessGateway,
                   onProductsChanged: _loadOverview,
                 ),
@@ -202,21 +296,13 @@ class _BusinessShellState extends State<BusinessShell> {
               bottom: 90,
               child: _FabMenu(
                 expanded: _isFabExpanded,
+                actions: fabActions,
                 onToggle: () {
                   setState(() {
                     _isFabExpanded = !_isFabExpanded;
                   });
                 },
-                onActionSelected: (action) {
-                  setState(() {
-                    _isFabExpanded = false;
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Действие "$action" пока в разработке'),
-                    ),
-                  );
-                },
+                onActionSelected: _handleFabAction,
               ),
             ),
         ],

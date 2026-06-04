@@ -2,14 +2,17 @@ part of 'business_shell.dart';
 
 class _WarehouseScreen extends StatefulWidget {
   const _WarehouseScreen({
+    super.key,
     required this.accessToken,
     required this.products,
+    required this.clients,
     required this.businessGateway,
     required this.onProductsChanged,
   });
 
   final String accessToken;
   final List<_Product> products;
+  final List<_Client> clients;
   final BusinessGateway businessGateway;
   final Future<void> Function() onProductsChanged;
 
@@ -22,6 +25,27 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
   WarehouseFilter _filter = WarehouseFilter.all;
   _Product? _selectedProduct;
   bool _isSubmitting = false;
+
+  Future<void> openInventoryDocuments() async {
+    if (_isSubmitting) {
+      return;
+    }
+    await _showInventoryDocuments();
+  }
+
+  Future<void> openCreateInventoryDocument() async {
+    if (_isSubmitting) {
+      return;
+    }
+    await _showCreateInventoryDocument();
+  }
+
+  Future<void> openCreateProduct() async {
+    if (_isSubmitting) {
+      return;
+    }
+    await _showProductSheet();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -288,32 +312,9 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Склад',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: _isSubmitting ? null : _showInventoryDocuments,
-                icon: const Icon(Icons.description_rounded),
-                label: const Text('Документы'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: _isSubmitting ? null : () => _showProductSheet(),
-                icon: _isSubmitting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.add_box_rounded),
-                label: const Text('Товар'),
-              ),
-            ],
+          const Text(
+            'Склад',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 16),
           Row(
@@ -606,6 +607,8 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
         builder: (context) => _InventoryDocumentsSheet(
+          accessToken: widget.accessToken,
+          businessGateway: widget.businessGateway,
           documents:
               documents.map(_inventoryDocumentFromJson).toList(growable: false),
         ),
@@ -617,6 +620,77 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$error')),
       );
+    }
+  }
+
+  Future<void> _showCreateInventoryDocument() async {
+    if (widget.products.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Сначала добавьте товары')),
+      );
+      return;
+    }
+
+    final result = await showModalBottomSheet<_CreateInventoryDocumentFormData>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CreateInventoryDocumentSheet(
+        products: widget.products,
+        clients: widget.clients,
+      ),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      await widget.businessGateway.createInventoryDocument(
+        accessToken: widget.accessToken,
+        payload: {
+          'document_type': result.documentType,
+          'client_id': result.clientId,
+          'warehouse_name': result.warehouseName,
+          'related_warehouse_name': result.relatedWarehouseName,
+          'note': result.note,
+          'lines': result.lines
+              .map(
+                (line) => {
+                  'product_id': line.productId,
+                  'quantity': line.quantity,
+                  'unit_price': line.unitPrice,
+                  'unit_cost': line.unitCost,
+                  'note': line.note,
+                },
+              )
+              .toList(growable: false),
+        },
+      );
+      await widget.onProductsChanged();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Складской документ создан')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
     }
   }
 }
@@ -839,9 +913,435 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
   }
 }
 
-class _InventoryDocumentsSheet extends StatefulWidget {
-  const _InventoryDocumentsSheet({required this.documents});
+class _CreateInventoryDocumentFormData {
+  const _CreateInventoryDocumentFormData({
+    required this.documentType,
+    required this.clientId,
+    required this.warehouseName,
+    required this.relatedWarehouseName,
+    required this.note,
+    required this.lines,
+  });
 
+  final String documentType;
+  final String clientId;
+  final String warehouseName;
+  final String relatedWarehouseName;
+  final String note;
+  final List<_CreateInventoryDocumentLineFormData> lines;
+}
+
+class _CreateInventoryDocumentLineFormData {
+  const _CreateInventoryDocumentLineFormData({
+    required this.productId,
+    required this.quantity,
+    required this.unitPrice,
+    required this.unitCost,
+    required this.note,
+  });
+
+  final String productId;
+  final int quantity;
+  final int unitPrice;
+  final int unitCost;
+  final String note;
+}
+
+class _CreateInventoryDocumentSheet extends StatefulWidget {
+  const _CreateInventoryDocumentSheet({
+    required this.products,
+    required this.clients,
+  });
+
+  final List<_Product> products;
+  final List<_Client> clients;
+
+  @override
+  State<_CreateInventoryDocumentSheet> createState() =>
+      _CreateInventoryDocumentSheetState();
+}
+
+class _CreateInventoryDocumentSheetState
+    extends State<_CreateInventoryDocumentSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _warehouseController = TextEditingController(text: 'Основной склад');
+  final _relatedWarehouseController = TextEditingController();
+  final _noteController = TextEditingController();
+  late final List<_InventoryDocumentDraftLine> _lines;
+  String _documentType = 'purchase_receipt';
+  String? _clientId;
+
+  @override
+  void initState() {
+    super.initState();
+    _lines = [_InventoryDocumentDraftLine.fromProduct(widget.products.first)];
+  }
+
+  @override
+  void dispose() {
+    _warehouseController.dispose();
+    _relatedWarehouseController.dispose();
+    _noteController.dispose();
+    for (final line in _lines) {
+      line.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFFF7FAF8),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            child: Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Center(
+                      child: SizedBox(width: 48, child: Divider(thickness: 4)),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Новый складской документ',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: _documentType,
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'purchase_receipt',
+                          child: Text('Приход'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'write_off',
+                          child: Text('Списание'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'transfer',
+                          child: Text('Перемещение'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'sale_issue',
+                          child: Text('Продажа'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'adjustment',
+                          child: Text('Корректировка'),
+                        ),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Тип документа',
+                      ),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _documentType = value;
+                            if (_documentType != 'sale_issue' &&
+                                _documentType != 'purchase_receipt') {
+                              _clientId = null;
+                            }
+                          });
+                        }
+                      },
+                    ),
+                    if (_documentType == 'sale_issue' ||
+                        _documentType == 'purchase_receipt') ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _clientId,
+                        items: widget.clients
+                            .map(
+                              (client) => DropdownMenuItem<String>(
+                                value: client.id,
+                                child: Text(client.name),
+                              ),
+                            )
+                            .toList(growable: false),
+                        decoration: const InputDecoration(
+                          labelText: 'Контрагент',
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Выберите контрагента';
+                          }
+                          return null;
+                        },
+                        onChanged: (value) {
+                          setState(() {
+                            _clientId = value;
+                          });
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    _ClientTextField(
+                      controller: _warehouseController,
+                      label: 'Склад-источник',
+                    ),
+                    if (_documentType == 'transfer') ...[
+                      const SizedBox(height: 12),
+                      _ClientTextField(
+                        controller: _relatedWarehouseController,
+                        label: 'Склад-получатель',
+                        validator: _requiredValidator,
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    _ClientTextField(
+                      controller: _noteController,
+                      label: 'Примечание',
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Строки документа',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _addLine,
+                          icon: const Icon(Icons.add_rounded),
+                          label: const Text('Строка'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    ..._buildLineEditors(),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _submit,
+                        child: const Text('Провести документ'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildLineEditors() {
+    return List<Widget>.generate(_lines.length, (index) {
+      final line = _lines[index];
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: _BusinessCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Строка ${index + 1}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  if (_lines.length > 1)
+                    IconButton(
+                      onPressed: () => _removeLine(index),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: Color(0xFFDC2626),
+                      ),
+                    ),
+                ],
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: line.productId,
+                items: widget.products
+                    .map(
+                      (product) => DropdownMenuItem(
+                        value: product.id,
+                        child: Text('${product.name} (${product.sku})'),
+                      ),
+                    )
+                    .toList(growable: false),
+                decoration: const InputDecoration(labelText: 'Товар'),
+                onChanged: (value) {
+                  if (value == null) {
+                    return;
+                  }
+                  final product = widget.products.firstWhere(
+                    (item) => item.id == value,
+                  );
+                  setState(() {
+                    line.productId = value;
+                    line.unitPriceController.text = '${product.price}';
+                    line.unitCostController.text = '${product.cost}';
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              _ClientTextField(
+                controller: line.quantityController,
+                label: 'Количество',
+                keyboardType: TextInputType.number,
+                validator: _numberValidator,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _ClientTextField(
+                      controller: line.unitPriceController,
+                      label: 'Цена',
+                      keyboardType: TextInputType.number,
+                      validator: _numberValidator,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _ClientTextField(
+                      controller: line.unitCostController,
+                      label: 'Себестоимость',
+                      keyboardType: TextInputType.number,
+                      validator: _numberValidator,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _ClientTextField(
+                controller: line.noteController,
+                label: 'Комментарий к строке',
+              ),
+            ],
+          ),
+        ),
+      );
+    });
+  }
+
+  void _addLine() {
+    setState(() {
+      _lines
+          .add(_InventoryDocumentDraftLine.fromProduct(widget.products.first));
+    });
+  }
+
+  void _removeLine(int index) {
+    final line = _lines.removeAt(index);
+    line.dispose();
+    setState(() {});
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _CreateInventoryDocumentFormData(
+        documentType: _documentType,
+        clientId: _clientId ?? '',
+        warehouseName: _warehouseController.text.trim(),
+        relatedWarehouseName: _relatedWarehouseController.text.trim(),
+        note: _noteController.text.trim(),
+        lines: _lines
+            .map(
+              (line) => _CreateInventoryDocumentLineFormData(
+                productId: line.productId,
+                quantity: int.parse(line.quantityController.text.trim()),
+                unitPrice: int.parse(line.unitPriceController.text.trim()),
+                unitCost: int.parse(line.unitCostController.text.trim()),
+                note: line.noteController.text.trim(),
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
+  }
+
+  String? _requiredValidator(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Обязательное поле';
+    }
+    return null;
+  }
+
+  String? _numberValidator(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Обязательное поле';
+    }
+    if (int.tryParse(value.trim()) == null) {
+      return 'Введите число';
+    }
+    return null;
+  }
+}
+
+class _InventoryDocumentDraftLine {
+  _InventoryDocumentDraftLine({
+    required this.productId,
+    required this.quantityController,
+    required this.unitPriceController,
+    required this.unitCostController,
+    required this.noteController,
+  });
+
+  factory _InventoryDocumentDraftLine.fromProduct(_Product product) {
+    return _InventoryDocumentDraftLine(
+      productId: product.id,
+      quantityController: TextEditingController(text: '1'),
+      unitPriceController: TextEditingController(text: '${product.price}'),
+      unitCostController: TextEditingController(text: '${product.cost}'),
+      noteController: TextEditingController(),
+    );
+  }
+
+  String productId;
+  final TextEditingController quantityController;
+  final TextEditingController unitPriceController;
+  final TextEditingController unitCostController;
+  final TextEditingController noteController;
+
+  void dispose() {
+    quantityController.dispose();
+    unitPriceController.dispose();
+    unitCostController.dispose();
+    noteController.dispose();
+  }
+}
+
+class _InventoryDocumentsSheet extends StatefulWidget {
+  const _InventoryDocumentsSheet({
+    required this.accessToken,
+    required this.businessGateway,
+    required this.documents,
+  });
+
+  final String accessToken;
+  final BusinessGateway businessGateway;
   final List<_InventoryDocument> documents;
 
   @override
@@ -860,6 +1360,7 @@ class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
       final query = _query.toLowerCase();
       final matchesQuery = query.isEmpty ||
           document.documentNo.toLowerCase().contains(query) ||
+          document.clientName.toLowerCase().contains(query) ||
           document.warehouseName.toLowerCase().contains(query) ||
           document.note.toLowerCase().contains(query);
       return matchesType && matchesQuery;
@@ -934,6 +1435,7 @@ class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
                         itemBuilder: (context, index) {
                           final document = filtered[index];
                           return _BusinessCard(
+                            onTap: () => _openDocumentDetail(document),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -971,9 +1473,33 @@ class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
                                         value: document.warehouseName,
                                       ),
                                     ),
+                                    if (document.clientName.isNotEmpty)
+                                      Expanded(
+                                        child: _LabelValue(
+                                          label: 'Контрагент',
+                                          value: document.clientName,
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
                                     _LabelValue(
-                                      label: 'Количество',
-                                      value: '${document.totalQuantity}',
+                                      label: 'Сумма',
+                                      value: formatMoney(document.totalAmount),
+                                      textAlign: TextAlign.right,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _LabelValue(
+                                        label: 'Количество',
+                                        value: '${document.totalQuantity}',
+                                      ),
+                                    ),
+                                    _LabelValue(
+                                      label: 'Строк',
+                                      value: '${document.productLines}',
                                       textAlign: TextAlign.right,
                                     ),
                                   ],
@@ -993,6 +1519,178 @@ class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
                           );
                         },
                       ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openDocumentDetail(_InventoryDocument document) async {
+    try {
+      final payload = await widget.businessGateway.fetchInventoryDocumentDetail(
+        accessToken: widget.accessToken,
+        documentId: document.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      final detail = _inventoryDocumentDetailFromJson(payload);
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => _InventoryDocumentDetailSheet(detail: detail),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+}
+
+class _InventoryDocumentDetailSheet extends StatelessWidget {
+  const _InventoryDocumentDetailSheet({required this.detail});
+
+  final _InventoryDocumentDetail detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFFF7FAF8),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(width: 48, child: Divider(thickness: 4)),
+              const SizedBox(height: 12),
+              Text(
+                detail.summary.documentNo,
+                style:
+                    const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${detail.summary.documentType} • ${detail.summary.documentDate}',
+                style: const TextStyle(color: Color(0xFF7B8794)),
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    _BusinessCard(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _LabelValue(
+                              label: 'Склад',
+                              value: detail.summary.warehouseName,
+                            ),
+                          ),
+                          if (detail.summary.clientName.isNotEmpty)
+                            Expanded(
+                              child: _LabelValue(
+                                label: 'Контрагент',
+                                value: detail.summary.clientName,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          _LabelValue(
+                            label: 'Сумма',
+                            value: formatMoney(detail.summary.totalAmount),
+                            textAlign: TextAlign.right,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _BusinessCard(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _LabelValue(
+                              label: 'Строк',
+                              value: '${detail.summary.productLines}',
+                            ),
+                          ),
+                          _LabelValue(
+                            label: 'Количество',
+                            value: '${detail.summary.totalQuantity}',
+                            textAlign: TextAlign.right,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...detail.lines.map(
+                      (line) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _BusinessCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                line.productName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'SKU: ${line.sku}',
+                                style: const TextStyle(
+                                  color: Color(0xFF7B8794),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _LabelValue(
+                                      label: 'Количество',
+                                      value: '${line.quantity}',
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: _LabelValue(
+                                      label: 'Сумма',
+                                      value: formatMoney(line.lineTotal),
+                                      textAlign: TextAlign.right,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (line.note.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  line.note,
+                                  style: const TextStyle(
+                                    color: Color(0xFF475569),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

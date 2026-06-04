@@ -99,26 +99,35 @@ class _BottomNavBar extends StatelessWidget {
   }
 }
 
+class _FabMenuAction {
+  const _FabMenuAction({
+    required this.id,
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  final String id;
+  final String label;
+  final IconData icon;
+  final Color color;
+}
+
 class _FabMenu extends StatelessWidget {
   const _FabMenu({
     required this.expanded,
+    required this.actions,
     required this.onToggle,
     required this.onActionSelected,
   });
 
   final bool expanded;
+  final List<_FabMenuAction> actions;
   final VoidCallback onToggle;
-  final ValueChanged<String> onActionSelected;
+  final ValueChanged<_FabMenuAction> onActionSelected;
 
   @override
   Widget build(BuildContext context) {
-    const actions = [
-      ('Продажа', Color(0xFF00A86B)),
-      ('Закупка', Color(0xFF3B82F6)),
-      ('Клиент', Color(0xFF22C55E)),
-      ('Счет', Color(0xFFF59E0B)),
-    ];
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
@@ -127,23 +136,30 @@ class _FabMenu extends StatelessWidget {
             (action) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Material(
-                color: action.$2,
+                color: action.color,
                 borderRadius: BorderRadius.circular(16),
                 elevation: 6,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(16),
-                  onTap: () => onActionSelected(action.$1),
+                  onTap: () => onActionSelected(action),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 12,
                     ),
-                    child: Text(
-                      action.$1,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(action.icon, color: Colors.white, size: 18),
+                        const SizedBox(width: 10),
+                        Text(
+                          action.label,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

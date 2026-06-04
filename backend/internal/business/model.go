@@ -113,6 +113,25 @@ type CreateProductInput struct {
 	Barcode         string `json:"barcode"`
 }
 
+type CreateInventoryDocumentLineInput struct {
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+	UnitPrice int    `json:"unit_price"`
+	UnitCost  int    `json:"unit_cost"`
+	Note      string `json:"note"`
+}
+
+type CreateInventoryDocumentInput struct {
+	DocumentType         string                             `json:"document_type"`
+	DocumentDate         string                             `json:"document_date,omitempty"`
+	DocumentNo           string                             `json:"document_no,omitempty"`
+	WarehouseName        string                             `json:"warehouse_name,omitempty"`
+	RelatedWarehouseName string                             `json:"related_warehouse_name,omitempty"`
+	ClientID             string                             `json:"client_id,omitempty"`
+	Note                 string                             `json:"note,omitempty"`
+	Lines                []CreateInventoryDocumentLineInput `json:"lines"`
+}
+
 type StockMovement struct {
 	Date     string `json:"date"`
 	Document string `json:"document"`
@@ -128,9 +147,27 @@ type InventoryDocumentSummary struct {
 	DocumentDate     string `json:"document_date"`
 	WarehouseName    string `json:"warehouse_name"`
 	RelatedWarehouse string `json:"related_warehouse_name,omitempty"`
+	ClientID         string `json:"client_id,omitempty"`
+	ClientName       string `json:"client_name,omitempty"`
 	ProductLines     int    `json:"product_lines"`
 	TotalQuantity    int    `json:"total_quantity"`
+	TotalAmount      int    `json:"total_amount"`
 	Note             string `json:"note,omitempty"`
+}
+
+type InventoryDocumentLine struct {
+	ProductName string `json:"product_name"`
+	SKU         string `json:"sku"`
+	Quantity    int    `json:"quantity"`
+	UnitPrice   int    `json:"unit_price"`
+	UnitCost    int    `json:"unit_cost"`
+	LineTotal   int    `json:"line_total"`
+	Note        string `json:"note,omitempty"`
+}
+
+type InventoryDocumentDetail struct {
+	Summary InventoryDocumentSummary `json:"summary"`
+	Lines   []InventoryDocumentLine  `json:"lines"`
 }
 
 type Finance struct {
@@ -197,6 +234,17 @@ type MoneyDocumentSummary struct {
 	PrimaryAccount   string `json:"primary_account"`
 	SecondaryAccount string `json:"secondary_account,omitempty"`
 	Amount           int    `json:"amount"`
+}
+
+type MoneyDocumentLine struct {
+	Category string `json:"category"`
+	Amount   int    `json:"amount"`
+	Note     string `json:"note,omitempty"`
+}
+
+type MoneyDocumentDetail struct {
+	Summary MoneyDocumentSummary `json:"summary"`
+	Lines   []MoneyDocumentLine  `json:"lines"`
 }
 
 type CashFlow struct {
@@ -340,6 +388,23 @@ func NormalizeProductInput(input CreateProductInput) CreateProductInput {
 	return input
 }
 
+func NormalizeInventoryDocumentInput(input CreateInventoryDocumentInput) CreateInventoryDocumentInput {
+	input.DocumentType = strings.TrimSpace(strings.ToLower(input.DocumentType))
+	input.DocumentDate = strings.TrimSpace(input.DocumentDate)
+	input.DocumentNo = strings.TrimSpace(strings.ToUpper(input.DocumentNo))
+	input.WarehouseName = strings.TrimSpace(input.WarehouseName)
+	input.RelatedWarehouseName = strings.TrimSpace(input.RelatedWarehouseName)
+	input.ClientID = strings.TrimSpace(input.ClientID)
+	input.Note = strings.TrimSpace(input.Note)
+
+	for index := range input.Lines {
+		input.Lines[index].ProductID = strings.TrimSpace(input.Lines[index].ProductID)
+		input.Lines[index].Note = strings.TrimSpace(input.Lines[index].Note)
+	}
+
+	return input
+}
+
 func NormalizeCashAccountInput(input CreateCashAccountInput) CreateCashAccountInput {
 	input.Name = strings.TrimSpace(input.Name)
 	input.AccountType = strings.TrimSpace(strings.ToLower(input.AccountType))
@@ -411,6 +476,43 @@ func ValidateMoneyOperationInput(input CreateMoneyOperationInput) error {
 	if input.OperationDate != "" {
 		if _, err := time.Parse("2006-01-02", input.OperationDate); err != nil {
 			return fmt.Errorf("%w: operation date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+	return nil
+}
+
+func ValidateInventoryDocumentInput(input CreateInventoryDocumentInput) error {
+	switch input.DocumentType {
+	case "purchase_receipt", "write_off", "transfer", "sale_issue", "adjustment":
+	default:
+		return fmt.Errorf("%w: document type is invalid", ErrValidation)
+	}
+	if input.DocumentDate != "" {
+		if _, err := time.Parse("2006-01-02", input.DocumentDate); err != nil {
+			return fmt.Errorf("%w: document date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+	if len(input.Lines) == 0 {
+		return fmt.Errorf("%w: at least one line is required", ErrValidation)
+	}
+	if input.DocumentType == "transfer" && strings.TrimSpace(input.RelatedWarehouseName) == "" {
+		return fmt.Errorf("%w: related warehouse name is required for transfer", ErrValidation)
+	}
+	if (input.DocumentType == "sale_issue" || input.DocumentType == "purchase_receipt") && strings.TrimSpace(input.ClientID) == "" {
+		return fmt.Errorf("%w: client_id is required for sale and purchase documents", ErrValidation)
+	}
+	for index, line := range input.Lines {
+		if strings.TrimSpace(line.ProductID) == "" {
+			return fmt.Errorf("%w: lines[%d].product_id is required", ErrValidation, index)
+		}
+		if line.Quantity <= 0 {
+			return fmt.Errorf("%w: lines[%d].quantity must be greater than zero", ErrValidation, index)
+		}
+		if line.UnitPrice < 0 {
+			return fmt.Errorf("%w: lines[%d].unit_price must be zero or greater", ErrValidation, index)
+		}
+		if line.UnitCost < 0 {
+			return fmt.Errorf("%w: lines[%d].unit_cost must be zero or greater", ErrValidation, index)
 		}
 	}
 	return nil

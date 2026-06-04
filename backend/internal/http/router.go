@@ -42,9 +42,11 @@ func NewRouter(cfg config.Config, authHandler auth.Handler, businessHandler busi
 	mux.HandleFunc("/api/v1/business/products", businessHandler.Products)
 	mux.HandleFunc("/api/v1/business/products/", businessHandler.ProductByID)
 	mux.HandleFunc("/api/v1/business/inventory-documents", businessHandler.InventoryDocuments)
+	mux.HandleFunc("/api/v1/business/inventory-documents/", businessHandler.InventoryDocumentByID)
 	mux.HandleFunc("/api/v1/business/accounts", businessHandler.Accounts)
 	mux.HandleFunc("/api/v1/business/money-operations", businessHandler.MoneyOperations)
 	mux.HandleFunc("/api/v1/business/money-documents", businessHandler.MoneyDocuments)
+	mux.HandleFunc("/api/v1/business/money-documents/", businessHandler.MoneyDocumentByID)
 
 	return withRecovery(withLogging(withCORS(mux, cfg.AllowedOrigins)))
 }

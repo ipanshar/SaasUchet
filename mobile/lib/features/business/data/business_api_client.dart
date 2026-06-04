@@ -151,6 +151,37 @@ class BusinessApiClient extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> createInventoryDocument({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.businessInventoryDocumentsUri,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 201) {
+      throw _buildApiException(response);
+    }
+
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
+  }
+
+  @override
   Future<Map<String, dynamic>> updateProduct({
     required String accessToken,
     required String productId,
@@ -290,6 +321,34 @@ class BusinessApiClient extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> fetchInventoryDocumentDetail({
+    required String accessToken,
+    required String documentId,
+  }) async {
+    final response = await _client.get(
+      ApiConfig.businessInventoryDocumentUri(documentId),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $accessToken',
+      },
+    ).timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) {
+      throw _buildApiException(response);
+    }
+
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> fetchMoneyDocuments({
     required String accessToken,
     String? type,
@@ -324,6 +383,34 @@ class BusinessApiClient extends BusinessGateway {
     return (decodedBody['documents'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList(growable: false);
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchMoneyDocumentDetail({
+    required String accessToken,
+    required String documentId,
+  }) async {
+    final response = await _client.get(
+      ApiConfig.businessMoneyDocumentUri(documentId),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $accessToken',
+      },
+    ).timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) {
+      throw _buildApiException(response);
+    }
+
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
   }
 
   ApiException _buildApiException(http.Response response) {

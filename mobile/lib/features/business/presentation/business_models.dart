@@ -150,10 +150,13 @@ class _InventoryDocument {
     required this.documentType,
     required this.status,
     required this.documentDate,
+    required this.clientId,
+    required this.clientName,
     required this.warehouseName,
     required this.relatedWarehouseName,
     required this.productLines,
     required this.totalQuantity,
+    required this.totalAmount,
     required this.note,
   });
 
@@ -162,10 +165,13 @@ class _InventoryDocument {
   final String documentType;
   final String status;
   final String documentDate;
+  final String clientId;
+  final String clientName;
   final String warehouseName;
   final String relatedWarehouseName;
   final int productLines;
   final int totalQuantity;
+  final int totalAmount;
   final String note;
 }
 
@@ -191,6 +197,58 @@ class _MoneyDocument {
   final String primaryAccount;
   final String secondaryAccount;
   final int amount;
+}
+
+class _InventoryDocumentLine {
+  const _InventoryDocumentLine({
+    required this.productName,
+    required this.sku,
+    required this.quantity,
+    required this.unitPrice,
+    required this.unitCost,
+    required this.lineTotal,
+    required this.note,
+  });
+
+  final String productName;
+  final String sku;
+  final int quantity;
+  final int unitPrice;
+  final int unitCost;
+  final int lineTotal;
+  final String note;
+}
+
+class _InventoryDocumentDetail {
+  const _InventoryDocumentDetail({
+    required this.summary,
+    required this.lines,
+  });
+
+  final _InventoryDocument summary;
+  final List<_InventoryDocumentLine> lines;
+}
+
+class _MoneyDocumentLine {
+  const _MoneyDocumentLine({
+    required this.category,
+    required this.amount,
+    required this.note,
+  });
+
+  final String category;
+  final int amount;
+  final String note;
+}
+
+class _MoneyDocumentDetail {
+  const _MoneyDocumentDetail({
+    required this.summary,
+    required this.lines,
+  });
+
+  final _MoneyDocument summary;
+  final List<_MoneyDocumentLine> lines;
 }
 
 class _Transaction {
@@ -508,10 +566,13 @@ _InventoryDocument _inventoryDocumentFromJson(Map<String, dynamic> json) =>
       documentType: json['document_type'] as String? ?? '',
       status: json['status'] as String? ?? '',
       documentDate: json['document_date'] as String? ?? '',
+      clientId: json['client_id'] as String? ?? '',
+      clientName: json['client_name'] as String? ?? '',
       warehouseName: json['warehouse_name'] as String? ?? '',
       relatedWarehouseName: json['related_warehouse_name'] as String? ?? '',
       productLines: json['product_lines'] as int? ?? 0,
       totalQuantity: json['total_quantity'] as int? ?? 0,
+      totalAmount: json['total_amount'] as int? ?? 0,
       note: json['note'] as String? ?? '',
     );
 
@@ -526,6 +587,50 @@ _MoneyDocument _moneyDocumentFromJson(Map<String, dynamic> json) =>
       primaryAccount: json['primary_account'] as String? ?? '',
       secondaryAccount: json['secondary_account'] as String? ?? '',
       amount: json['amount'] as int? ?? 0,
+    );
+
+_InventoryDocumentLine _inventoryDocumentLineFromJson(
+  Map<String, dynamic> json,
+) =>
+    _InventoryDocumentLine(
+      productName: json['product_name'] as String? ?? '',
+      sku: json['sku'] as String? ?? '',
+      quantity: json['quantity'] as int? ?? 0,
+      unitPrice: json['unit_price'] as int? ?? 0,
+      unitCost: json['unit_cost'] as int? ?? 0,
+      lineTotal: json['line_total'] as int? ?? 0,
+      note: json['note'] as String? ?? '',
+    );
+
+_InventoryDocumentDetail _inventoryDocumentDetailFromJson(
+  Map<String, dynamic> json,
+) =>
+    _InventoryDocumentDetail(
+      summary: _inventoryDocumentFromJson(
+        json['summary'] as Map<String, dynamic>? ?? const {},
+      ),
+      lines: (json['lines'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_inventoryDocumentLineFromJson)
+          .toList(growable: false),
+    );
+
+_MoneyDocumentLine _moneyDocumentLineFromJson(Map<String, dynamic> json) =>
+    _MoneyDocumentLine(
+      category: json['category'] as String? ?? '',
+      amount: json['amount'] as int? ?? 0,
+      note: json['note'] as String? ?? '',
+    );
+
+_MoneyDocumentDetail _moneyDocumentDetailFromJson(Map<String, dynamic> json) =>
+    _MoneyDocumentDetail(
+      summary: _moneyDocumentFromJson(
+        json['summary'] as Map<String, dynamic>? ?? const {},
+      ),
+      lines: (json['lines'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_moneyDocumentLineFromJson)
+          .toList(growable: false),
     );
 
 _ExpenseCategory _expenseCategoryFromJson(Map<String, dynamic> json) =>

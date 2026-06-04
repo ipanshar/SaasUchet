@@ -44,4 +44,10 @@ class ApiConfig {
       Uri.parse('$baseUrl/api/v1/business/money-operations');
   static Uri get businessMoneyDocumentsUri =>
       Uri.parse('$baseUrl/api/v1/business/money-documents');
+
+  static Uri businessInventoryDocumentUri(String documentId) =>
+      Uri.parse('$baseUrl/api/v1/business/inventory-documents/$documentId');
+
+  static Uri businessMoneyDocumentUri(String documentId) =>
+      Uri.parse('$baseUrl/api/v1/business/money-documents/$documentId');
 }

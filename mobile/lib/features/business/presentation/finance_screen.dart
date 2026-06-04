@@ -476,6 +476,8 @@ class _FinanceScreenState extends State<_FinanceScreen> {
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
         builder: (context) => _MoneyDocumentsSheet(
+          accessToken: widget.accessToken,
+          businessGateway: widget.businessGateway,
           documents:
               documents.map(_moneyDocumentFromJson).toList(growable: false),
         ),
@@ -916,8 +918,14 @@ class _CreateMoneyOperationSheetState
 }
 
 class _MoneyDocumentsSheet extends StatefulWidget {
-  const _MoneyDocumentsSheet({required this.documents});
+  const _MoneyDocumentsSheet({
+    required this.accessToken,
+    required this.businessGateway,
+    required this.documents,
+  });
 
+  final String accessToken;
+  final BusinessGateway businessGateway;
   final List<_MoneyDocument> documents;
 
   @override
@@ -1010,6 +1018,7 @@ class _MoneyDocumentsSheetState extends State<_MoneyDocumentsSheet> {
                         itemBuilder: (context, index) {
                           final document = filtered[index];
                           return _BusinessCard(
+                            onTap: () => _openDocumentDetail(document),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -1074,6 +1083,147 @@ class _MoneyDocumentsSheetState extends State<_MoneyDocumentsSheet> {
                           );
                         },
                       ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openDocumentDetail(_MoneyDocument document) async {
+    try {
+      final payload = await widget.businessGateway.fetchMoneyDocumentDetail(
+        accessToken: widget.accessToken,
+        documentId: document.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      final detail = _moneyDocumentDetailFromJson(payload);
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => _MoneyDocumentDetailSheet(detail: detail),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+}
+
+class _MoneyDocumentDetailSheet extends StatelessWidget {
+  const _MoneyDocumentDetailSheet({required this.detail});
+
+  final _MoneyDocumentDetail detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFFF7FAF8),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(width: 48, child: Divider(thickness: 4)),
+              const SizedBox(height: 12),
+              Text(
+                detail.summary.documentNo,
+                style:
+                    const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${detail.summary.documentType} • ${detail.summary.operationDate}',
+                style: const TextStyle(color: Color(0xFF7B8794)),
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    _BusinessCard(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _LabelValue(
+                              label: 'Основной счет',
+                              value: detail.summary.primaryAccount,
+                            ),
+                          ),
+                          _LabelValue(
+                            label: 'Сумма',
+                            value: formatMoney(detail.summary.amount),
+                            textAlign: TextAlign.right,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (detail.summary.description.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _BusinessCard(
+                        child: Text(
+                          detail.summary.description,
+                          style: const TextStyle(color: Color(0xFF475569)),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    ...detail.lines.map(
+                      (line) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _BusinessCard(
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      line.category.isEmpty
+                                          ? 'Без категории'
+                                          : line.category,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    if (line.note.isNotEmpty)
+                                      Text(
+                                        line.note,
+                                        style: const TextStyle(
+                                          color: Color(0xFF7B8794),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              Text(
+                                formatMoney(line.amount),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

@@ -580,4 +580,149 @@ func TestHandlerListsDocumentFeeds(t *testing.T) {
 	if moneyRecorder.Code != http.StatusOK {
 		t.Fatalf("unexpected money documents status: %d body=%s", moneyRecorder.Code, moneyRecorder.Body.String())
 	}
+
+	var inventoryList struct {
+		Documents []InventoryDocumentSummary `json:"documents"`
+	}
+	if err := json.Unmarshal(inventoryRecorder.Body.Bytes(), &inventoryList); err != nil {
+		t.Fatalf("decode inventory documents: %v", err)
+	}
+	if len(inventoryList.Documents) == 0 {
+		t.Fatalf("expected inventory documents")
+	}
+
+	inventoryDetailRequest := httptest.NewRequest(http.MethodGet, "/api/v1/business/inventory-documents/"+inventoryList.Documents[0].ID, nil)
+	inventoryDetailRequest.Header.Set("Authorization", "Bearer token")
+	inventoryDetailRecorder := httptest.NewRecorder()
+	handler.InventoryDocumentByID(inventoryDetailRecorder, inventoryDetailRequest)
+	if inventoryDetailRecorder.Code != http.StatusOK {
+		t.Fatalf("unexpected inventory document detail status: %d body=%s", inventoryDetailRecorder.Code, inventoryDetailRecorder.Body.String())
+	}
+
+	var moneyList struct {
+		Documents []MoneyDocumentSummary `json:"documents"`
+	}
+	if err := json.Unmarshal(moneyRecorder.Body.Bytes(), &moneyList); err != nil {
+		t.Fatalf("decode money documents: %v", err)
+	}
+	if len(moneyList.Documents) == 0 {
+		t.Fatalf("expected money documents")
+	}
+
+	moneyDetailRequest := httptest.NewRequest(http.MethodGet, "/api/v1/business/money-documents/"+moneyList.Documents[0].ID, nil)
+	moneyDetailRequest.Header.Set("Authorization", "Bearer token")
+	moneyDetailRecorder := httptest.NewRecorder()
+	handler.MoneyDocumentByID(moneyDetailRecorder, moneyDetailRequest)
+	if moneyDetailRecorder.Code != http.StatusOK {
+		t.Fatalf("unexpected money document detail status: %d body=%s", moneyDetailRecorder.Code, moneyDetailRecorder.Body.String())
+	}
+}
+
+func TestHandlerCreatesInventoryDocument(t *testing.T) {
+	store := NewMemoryStore()
+	handler := NewHandler(
+		stubAuthenticator{
+			user: auth.User{
+				ID:       "usr_1",
+				FullName: "Иван Петров",
+				Phone:    "+77011234567",
+			},
+		},
+		store,
+	)
+
+	createPayload, err := json.Marshal(CreateProductInput{
+		Name:            "Товар для склада",
+		SKU:             "WH-001",
+		Category:        "Склад",
+		InitialQuantity: 20,
+		MinQuantity:     5,
+		Price:           12000,
+		Cost:            8000,
+		Barcode:         "1234567890123",
+	})
+	if err != nil {
+		t.Fatalf("marshal create product payload: %v", err)
+	}
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/business/products", bytes.NewReader(createPayload))
+	createRequest.Header.Set("Authorization", "Bearer token")
+	createRecorder := httptest.NewRecorder()
+	handler.Products(createRecorder, createRequest)
+
+	var created Product
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created product: %v", err)
+	}
+
+	clientPayload, err := json.Marshal(CreateClientInput{
+		Name:    "ТОО Покупатель",
+		Contact: "Айдар",
+		Phone:   "+7 777 555 44 33",
+		Segment: "Regular",
+		BIN:     "123456789012",
+	})
+	if err != nil {
+		t.Fatalf("marshal create client payload: %v", err)
+	}
+
+	clientRequest := httptest.NewRequest(http.MethodPost, "/api/v1/business/clients", bytes.NewReader(clientPayload))
+	clientRequest.Header.Set("Authorization", "Bearer token")
+	clientRecorder := httptest.NewRecorder()
+	handler.Clients(clientRecorder, clientRequest)
+
+	if clientRecorder.Code != http.StatusCreated {
+		t.Fatalf("unexpected client create status: %d body=%s", clientRecorder.Code, clientRecorder.Body.String())
+	}
+
+	var createdClient Client
+	if err := json.Unmarshal(clientRecorder.Body.Bytes(), &createdClient); err != nil {
+		t.Fatalf("decode created client: %v", err)
+	}
+
+	documentPayload, err := json.Marshal(CreateInventoryDocumentInput{
+		DocumentType: "sale_issue",
+		ClientID:     createdClient.ID,
+		Note:         "Тестовая продажа",
+		Lines: []CreateInventoryDocumentLineInput{
+			{
+				ProductID: created.ID,
+				Quantity:  3,
+				UnitPrice: 12000,
+				UnitCost:  8000,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal inventory document payload: %v", err)
+	}
+
+	documentRequest := httptest.NewRequest(http.MethodPost, "/api/v1/business/inventory-documents", bytes.NewReader(documentPayload))
+	documentRequest.Header.Set("Authorization", "Bearer token")
+	documentRecorder := httptest.NewRecorder()
+	handler.InventoryDocuments(documentRecorder, documentRequest)
+
+	if documentRecorder.Code != http.StatusCreated {
+		t.Fatalf("unexpected inventory document status: %d body=%s", documentRecorder.Code, documentRecorder.Body.String())
+	}
+
+	var detail InventoryDocumentDetail
+	if err := json.Unmarshal(documentRecorder.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode inventory document detail: %v", err)
+	}
+	if detail.Summary.DocumentType != "sale_issue" {
+		t.Fatalf("unexpected document type: %s", detail.Summary.DocumentType)
+	}
+	if detail.Summary.ClientID != createdClient.ID {
+		t.Fatalf("unexpected client id: %s", detail.Summary.ClientID)
+	}
+	if detail.Summary.ClientName != createdClient.Name {
+		t.Fatalf("unexpected client name: %s", detail.Summary.ClientName)
+	}
+	if detail.Summary.TotalAmount != 36000 {
+		t.Fatalf("unexpected total amount: %d", detail.Summary.TotalAmount)
+	}
+	if len(detail.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(detail.Lines))
+	}
 }

@@ -1,6 +1,8 @@
 package business
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,25 +16,30 @@ type Store interface {
 	CreateProduct(user auth.User, input CreateProductInput) (Product, error)
 	UpdateProduct(user auth.User, productID string, input CreateProductInput) (Product, error)
 	DeleteProduct(user auth.User, productID string) error
+	CreateInventoryDocument(user auth.User, input CreateInventoryDocumentInput) (InventoryDocumentDetail, error)
 	ListInventoryDocuments(user auth.User, documentType string, search string) ([]InventoryDocumentSummary, error)
+	GetInventoryDocument(user auth.User, documentID string) (InventoryDocumentDetail, error)
 	GetFinance(user auth.User) (Finance, error)
 	CreateCashAccount(user auth.User, input CreateCashAccountInput) (BankAccount, error)
 	CreateMoneyOperation(user auth.User, input CreateMoneyOperationInput) error
 	ListMoneyDocuments(user auth.User, documentType string, search string) ([]MoneyDocumentSummary, error)
+	GetMoneyDocument(user auth.User, documentID string) (MoneyDocumentDetail, error)
 }
 
 type MemoryStore struct {
-	mu             sync.RWMutex
-	clientsByUser  map[string][]Client
-	productsByUser map[string][]Product
-	financeByUser  map[string]Finance
+	mu                  sync.RWMutex
+	clientsByUser       map[string][]Client
+	productsByUser      map[string][]Product
+	inventoryDocsByUser map[string][]InventoryDocumentDetail
+	financeByUser       map[string]Finance
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		clientsByUser:  make(map[string][]Client),
-		productsByUser: make(map[string][]Product),
-		financeByUser:  make(map[string]Finance),
+		clientsByUser:       make(map[string][]Client),
+		productsByUser:      make(map[string][]Product),
+		inventoryDocsByUser: make(map[string][]InventoryDocumentDetail),
+		financeByUser:       make(map[string]Finance),
 	}
 }
 
@@ -65,6 +72,38 @@ func (s *MemoryStore) CreateProduct(user auth.User, input CreateProductInput) (P
 	defer s.mu.Unlock()
 
 	product := NewProductFromInput(input)
+	if product.Quantity > 0 {
+		documentNo := fmt.Sprintf("OPEN-%s", product.SKU)
+		product.Movements = append(product.Movements, StockMovement{
+			Date:     time.Now().Format("2 January 2006"),
+			Document: documentNo,
+			Quantity: product.Quantity,
+			Balance:  product.Quantity,
+		})
+		s.inventoryDocsByUser[user.ID] = append(
+			[]InventoryDocumentDetail{{
+				Summary: InventoryDocumentSummary{
+					ID:            mustGenerateProductID(),
+					DocumentNo:    documentNo,
+					DocumentType:  "opening",
+					Status:        "posted",
+					DocumentDate:  time.Now().Format("2006-01-02"),
+					WarehouseName: "Основной склад",
+					ProductLines:  1,
+					TotalQuantity: product.Quantity,
+				},
+				Lines: []InventoryDocumentLine{{
+					ProductName: product.Name,
+					SKU:         product.SKU,
+					Quantity:    product.Quantity,
+					UnitPrice:   product.Price,
+					UnitCost:    product.Cost,
+					LineTotal:   product.Quantity * product.Price,
+				}},
+			}},
+			s.inventoryDocsByUser[user.ID]...,
+		)
+	}
 	s.productsByUser[user.ID] = append([]Product{product}, s.productsByUser[user.ID]...)
 	return cloneProducts([]Product{product})[0], nil
 }
@@ -104,27 +143,206 @@ func (s *MemoryStore) DeleteProduct(user auth.User, productID string) error {
 	return ErrValidation
 }
 
+func (s *MemoryStore) CreateInventoryDocument(user auth.User, input CreateInventoryDocumentInput) (InventoryDocumentDetail, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	products := s.productsByUser[user.ID]
+	if len(products) == 0 {
+		return InventoryDocumentDetail{}, ErrValidation
+	}
+
+	normalized := NormalizeInventoryDocumentInput(input)
+	documentID := mustGenerateProductID()
+	documentDate := time.Now().Format("2006-01-02")
+	if normalized.DocumentDate != "" {
+		documentDate = normalized.DocumentDate
+	}
+	documentNo := normalized.DocumentNo
+	if documentNo == "" {
+		documentNo = fmt.Sprintf("%s-%d", strings.ToUpper(normalized.DocumentType), time.Now().UnixNano())
+	}
+	warehouseName := defaultIfEmpty(normalized.WarehouseName, "Основной склад")
+	clientName := ""
+	if normalized.ClientID != "" {
+		for _, client := range s.clientsByUser[user.ID] {
+			if client.ID == normalized.ClientID {
+				clientName = client.Name
+				break
+			}
+		}
+		if clientName == "" {
+			return InventoryDocumentDetail{}, ErrValidation
+		}
+	}
+
+	lines := make([]InventoryDocumentLine, 0, len(normalized.Lines))
+	totalQuantity := 0
+	totalAmount := 0
+	for _, line := range normalized.Lines {
+		index := -1
+		for productIndex := range products {
+			if products[productIndex].ID == line.ProductID {
+				index = productIndex
+				break
+			}
+		}
+		if index < 0 {
+			return InventoryDocumentDetail{}, ErrValidation
+		}
+
+		product := &products[index]
+		unitPrice := line.UnitPrice
+		if unitPrice == 0 {
+			unitPrice = product.Price
+		}
+		unitCost := line.UnitCost
+		if unitCost == 0 {
+			unitCost = product.Cost
+		}
+
+		switch normalized.DocumentType {
+		case "purchase_receipt":
+			product.Quantity += line.Quantity
+			product.Movements = append([]StockMovement{{
+				Date:     documentDate,
+				Document: documentNo,
+				Quantity: line.Quantity,
+				Balance:  product.Quantity,
+			}}, product.Movements...)
+		case "write_off", "sale_issue":
+			if product.Quantity < line.Quantity {
+				return InventoryDocumentDetail{}, ErrValidation
+			}
+			product.Quantity -= line.Quantity
+			product.Movements = append([]StockMovement{{
+				Date:     documentDate,
+				Document: documentNo,
+				Quantity: -line.Quantity,
+				Balance:  product.Quantity,
+			}}, product.Movements...)
+		case "transfer":
+			if product.Quantity < line.Quantity {
+				return InventoryDocumentDetail{}, ErrValidation
+			}
+			product.Quantity -= line.Quantity
+			product.Movements = append([]StockMovement{{
+				Date:     documentDate,
+				Document: documentNo,
+				Quantity: -line.Quantity,
+				Balance:  product.Quantity,
+			}}, product.Movements...)
+		case "adjustment":
+			product.Quantity += line.Quantity
+			product.Movements = append([]StockMovement{{
+				Date:     documentDate,
+				Document: documentNo,
+				Quantity: line.Quantity,
+				Balance:  product.Quantity,
+			}}, product.Movements...)
+		}
+		product.Status = productStatus(product.Quantity, product.MinQuantity)
+
+		totalQuantity += line.Quantity
+		totalAmount += line.Quantity * unitPrice
+		lines = append(lines, InventoryDocumentLine{
+			ProductName: product.Name,
+			SKU:         product.SKU,
+			Quantity:    line.Quantity,
+			UnitPrice:   unitPrice,
+			UnitCost:    unitCost,
+			LineTotal:   line.Quantity * unitPrice,
+			Note:        line.Note,
+		})
+	}
+
+	s.productsByUser[user.ID] = products
+	detail := InventoryDocumentDetail{
+		Summary: InventoryDocumentSummary{
+			ID:               documentID,
+			DocumentNo:       documentNo,
+			DocumentType:     normalized.DocumentType,
+			Status:           "posted",
+			DocumentDate:     documentDate,
+			ClientID:         normalized.ClientID,
+			ClientName:       clientName,
+			WarehouseName:    warehouseName,
+			RelatedWarehouse: normalized.RelatedWarehouseName,
+			ProductLines:     len(lines),
+			TotalQuantity:    totalQuantity,
+			TotalAmount:      totalAmount,
+			Note:             normalized.Note,
+		},
+		Lines: lines,
+	}
+	s.inventoryDocsByUser[user.ID] = append([]InventoryDocumentDetail{detail}, s.inventoryDocsByUser[user.ID]...)
+	s.linkInventoryDocumentToFinance(user.ID, detail)
+	return detail, nil
+}
+
 func (s *MemoryStore) ListInventoryDocuments(user auth.User, documentType string, search string) ([]InventoryDocumentSummary, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	documents := make([]InventoryDocumentSummary, 0)
-	for _, product := range s.productsByUser[user.ID] {
-		for _, movement := range product.Movements {
-			documents = append(documents, InventoryDocumentSummary{
-				ID:            mustGenerateProductID(),
-				DocumentNo:    movement.Document,
-				DocumentType:  "movement",
-				Status:        "posted",
-				DocumentDate:  movement.Date,
-				WarehouseName: "Основной склад",
-				ProductLines:  1,
-				TotalQuantity: absInt(movement.Quantity),
-			})
+	documents := make([]InventoryDocumentSummary, 0, len(s.inventoryDocsByUser[user.ID]))
+	for _, detail := range s.inventoryDocsByUser[user.ID] {
+		document := detail.Summary
+		if documentType != "" && document.DocumentType != documentType {
+			continue
 		}
+		loweredSearch := strings.ToLower(strings.TrimSpace(search))
+		if loweredSearch != "" &&
+			!strings.Contains(strings.ToLower(document.DocumentNo), loweredSearch) &&
+			!strings.Contains(strings.ToLower(document.WarehouseName), loweredSearch) &&
+			!strings.Contains(strings.ToLower(document.ClientName), loweredSearch) &&
+			!strings.Contains(strings.ToLower(document.Note), loweredSearch) {
+			continue
+		}
+		documents = append(documents, document)
 	}
 
 	return documents, nil
+}
+
+func (s *MemoryStore) GetInventoryDocument(user auth.User, documentID string) (InventoryDocumentDetail, error) {
+	for _, document := range s.inventoryDocsByUser[user.ID] {
+		if document.Summary.ID == documentID {
+			return document, nil
+		}
+	}
+	return InventoryDocumentDetail{}, ErrValidation
+}
+
+func (s *MemoryStore) linkInventoryDocumentToFinance(userID string, detail InventoryDocumentDetail) {
+	if detail.Summary.ClientID == "" || detail.Summary.TotalAmount <= 0 {
+		return
+	}
+
+	finance := s.financeByUser[userID]
+	documentType := ""
+	lineNote := ""
+	switch detail.Summary.DocumentType {
+	case "sale_issue":
+		documentType = "sale_receivable"
+		lineNote = "Дебиторская задолженность по продаже"
+	case "purchase_receipt":
+		documentType = "purchase_payable"
+		lineNote = "Кредиторская задолженность по закупу"
+	default:
+		return
+	}
+
+	documentNo := fmt.Sprintf("FIN-%s", detail.Summary.DocumentNo)
+	finance.Transactions = append([]Transaction{{
+		Type:        documentType,
+		Description: documentNo,
+		Amount:      detail.Summary.TotalAmount,
+		Category:    lineNote,
+		Date:        detail.Summary.DocumentDate,
+		Account:     detail.Summary.ClientName,
+	}}, finance.Transactions...)
+	s.financeByUser[userID] = finance
+
 }
 
 func (s *MemoryStore) GetFinance(user auth.User) (Finance, error) {
@@ -265,6 +483,23 @@ func (s *MemoryStore) ListMoneyDocuments(user auth.User, documentType string, se
 	}
 
 	return documents, nil
+}
+
+func (s *MemoryStore) GetMoneyDocument(user auth.User, documentID string) (MoneyDocumentDetail, error) {
+	documents, _ := s.ListMoneyDocuments(user, "", "")
+	if len(documents) == 0 {
+		return MoneyDocumentDetail{}, ErrValidation
+	}
+	return MoneyDocumentDetail{
+		Summary: documents[0],
+		Lines: []MoneyDocumentLine{
+			{
+				Category: documents[0].DocumentType,
+				Amount:   documents[0].Amount,
+				Note:     documents[0].Description,
+			},
+		},
+	}, nil
 }
 
 func cloneClients(clients []Client) []Client {

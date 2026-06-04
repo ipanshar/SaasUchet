@@ -271,6 +271,27 @@ class _FakeBusinessGateway extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> createInventoryDocument({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {
+      'summary': {
+        'id': 'inv_new',
+        'document_no': 'REC-1',
+        'document_type': payload['document_type'] ?? 'purchase_receipt',
+        'status': 'posted',
+        'document_date': '2026-06-04',
+        'warehouse_name': 'Основной склад',
+        'product_lines':
+            (payload['lines'] as List<dynamic>? ?? const []).length,
+        'total_quantity': 1,
+      },
+      'lines': payload['lines'] ?? const [],
+    };
+  }
+
+  @override
   Future<Map<String, dynamic>> updateProduct({
     required String accessToken,
     required String productId,
@@ -327,6 +348,35 @@ class _FakeBusinessGateway extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> fetchInventoryDocumentDetail({
+    required String accessToken,
+    required String documentId,
+  }) async {
+    return {
+      'summary': {
+        'id': documentId,
+        'document_no': 'OPEN-TECH-001',
+        'document_type': 'opening',
+        'status': 'posted',
+        'document_date': '2026-06-03',
+        'warehouse_name': 'Основной склад',
+        'product_lines': 1,
+        'total_quantity': 15,
+      },
+      'lines': [
+        {
+          'product_name': 'Ноутбук Lenovo ThinkPad',
+          'sku': 'TECH-001',
+          'quantity': 15,
+          'unit_price': 350000,
+          'unit_cost': 280000,
+          'line_total': 5250000,
+        },
+      ],
+    };
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> fetchMoneyDocuments({
     required String accessToken,
     String? type,
@@ -344,6 +394,32 @@ class _FakeBusinessGateway extends BusinessGateway {
         'amount': 125000,
       },
     ];
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchMoneyDocumentDetail({
+    required String accessToken,
+    required String documentId,
+  }) async {
+    return {
+      'summary': {
+        'id': documentId,
+        'document_no': 'RCP-1',
+        'document_type': 'receipt',
+        'status': 'posted',
+        'operation_date': '2026-06-03',
+        'description': 'Оплата',
+        'primary_account': 'Kaspi Bank',
+        'amount': 125000,
+      },
+      'lines': [
+        {
+          'category': 'Продажи',
+          'amount': 125000,
+          'note': 'Оплата клиента',
+        },
+      ],
+    };
   }
 }
 

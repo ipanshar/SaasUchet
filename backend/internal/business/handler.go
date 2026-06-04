@@ -3,6 +3,7 @@ package business
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -48,18 +49,21 @@ func (h Handler) Overview(w http.ResponseWriter, r *http.Request) {
 
 	clients, err := h.loadClients(user)
 	if err != nil {
+		log.Printf("business overview loadClients failed user=%s: %v", user.ID, err)
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	products, err := h.store.ListProducts(user)
 	if err != nil {
+		log.Printf("business overview ListProducts failed user=%s: %v", user.ID, err)
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	finance, err := h.store.GetFinance(user)
 	if err != nil {
+		log.Printf("business overview GetFinance failed user=%s: %v", user.ID, err)
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -362,22 +366,83 @@ func (h Handler) InventoryDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	switch r.Method {
+	case http.MethodGet:
+		documentType := strings.TrimSpace(r.URL.Query().Get("type"))
+		search := strings.TrimSpace(r.URL.Query().Get("search"))
+		documents, err := h.store.ListInventoryDocuments(user, documentType, search)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		response.JSON(w, http.StatusOK, map[string]any{
+			"documents": documents,
+		})
+	case http.MethodPost:
+		var input CreateInventoryDocumentInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		input = NormalizeInventoryDocumentInput(input)
+		if err := ValidateInventoryDocumentInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		document, err := h.store.CreateInventoryDocument(user, input)
+		if err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		response.JSON(w, http.StatusCreated, document)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) InventoryDocumentByID(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	documentType := strings.TrimSpace(r.URL.Query().Get("type"))
-	search := strings.TrimSpace(r.URL.Query().Get("search"))
-	documents, err := h.store.ListInventoryDocuments(user, documentType, search)
-	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	documentID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/inventory-documents/"))
+	if documentID == "" || strings.Contains(documentID, "/") {
+		response.Error(w, http.StatusNotFound, "document not found")
 		return
 	}
 
-	response.JSON(w, http.StatusOK, map[string]any{
-		"documents": documents,
-	})
+	document, err := h.store.GetInventoryDocument(user, documentID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "document not found")
+		return
+	}
+	response.JSON(w, http.StatusOK, document)
 }
 
 func (h Handler) MoneyDocuments(w http.ResponseWriter, r *http.Request) {
@@ -414,6 +479,43 @@ func (h Handler) MoneyDocuments(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]any{
 		"documents": documents,
 	})
+}
+
+func (h Handler) MoneyDocumentByID(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	documentID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/money-documents/"))
+	if documentID == "" || strings.Contains(documentID, "/") {
+		response.Error(w, http.StatusNotFound, "document not found")
+		return
+	}
+
+	document, err := h.store.GetMoneyDocument(user, documentID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "document not found")
+		return
+	}
+	response.JSON(w, http.StatusOK, document)
 }
 
 func (h Handler) listClients(w http.ResponseWriter, user auth.User) {

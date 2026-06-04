@@ -24,6 +24,11 @@ abstract class BusinessGateway {
     required Map<String, dynamic> payload,
   });
 
+  Future<Map<String, dynamic>> createInventoryDocument({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  });
+
   Future<Map<String, dynamic>> updateProduct({
     required String accessToken,
     required String productId,
@@ -51,10 +56,20 @@ abstract class BusinessGateway {
     String? search,
   });
 
+  Future<Map<String, dynamic>> fetchInventoryDocumentDetail({
+    required String accessToken,
+    required String documentId,
+  });
+
   Future<List<Map<String, dynamic>>> fetchMoneyDocuments({
     required String accessToken,
     String? type,
     String? search,
+  });
+
+  Future<Map<String, dynamic>> fetchMoneyDocumentDetail({
+    required String accessToken,
+    required String documentId,
   });
 
   void dispose() {}
