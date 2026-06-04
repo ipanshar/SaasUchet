@@ -4,12 +4,16 @@ class _CrmScreen extends StatefulWidget {
   const _CrmScreen({
     required this.accessToken,
     required this.clients,
+    required this.products,
+    required this.accounts,
     required this.businessGateway,
     required this.onClientsChanged,
   });
 
   final String accessToken;
   final List<_Client> clients;
+  final List<_Product> products;
+  final List<_BankAccount> accounts;
   final BusinessGateway businessGateway;
   final Future<void> Function() onClientsChanged;
 
@@ -21,6 +25,24 @@ class _CrmScreenState extends State<_CrmScreen> {
   String _query = '';
   _Client? _selectedClient;
   bool _isSubmitting = false;
+
+  @override
+  void didUpdateWidget(covariant _CrmScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedClient == null) {
+      return;
+    }
+
+    _Client? updatedClient;
+    for (final client in widget.clients) {
+      if (client.id == _selectedClient!.id) {
+        updatedClient = client;
+        break;
+      }
+    }
+
+    _selectedClient = updatedClient;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -97,13 +119,37 @@ class _CrmScreenState extends State<_CrmScreen> {
                       ),
                       const SizedBox(width: 16),
                       _HeroStat(
-                        label: 'Задолженность',
-                        value: formatMoney(client.debt),
+                        label: 'Дебиторка',
+                        value: formatMoney(client.receivable),
                       ),
                     ],
                   ),
                 ],
               ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _BusinessCard(
+                    child: _LabelValue(
+                      label: 'Дебиторская задолженность',
+                      value: formatMoney(client.receivable),
+                      valueColor: const Color(0xFFD97706),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _BusinessCard(
+                    child: _LabelValue(
+                      label: 'Кредиторская задолженность',
+                      value: formatMoney(client.payable),
+                      valueColor: const Color(0xFF2563EB),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             _BusinessCard(
@@ -130,6 +176,105 @@ class _CrmScreenState extends State<_CrmScreen> {
                     label: 'Email',
                     value: client.email,
                   ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            _BusinessCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Открытые документы',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 14),
+                  if (client.openDocuments.isEmpty)
+                    const Text(
+                      'Открытых документов нет',
+                      style: TextStyle(color: Color(0xFF7B8794)),
+                    )
+                  else
+                    ...client.openDocuments.map(
+                      (document) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: _isSubmitting
+                                ? null
+                                : () => _openDebtDocument(document),
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          document.documentNo,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                      _StatusBadge(
+                                        label: document.status,
+                                        kind: document.status == 'posted'
+                                            ? StatusKind.success
+                                            : StatusKind.warning,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    '${document.documentType} • ${document.operationDate}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF7B8794),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _LabelValue(
+                                          label: 'Сумма',
+                                          value: formatMoney(document.amount),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: _LabelValue(
+                                          label: 'Оплачено',
+                                          value: formatMoney(
+                                            document.paidAmount,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                      _LabelValue(
+                                        label: 'Остаток',
+                                        value: formatMoney(
+                                          document.remainingAmount,
+                                        ),
+                                        valueColor: const Color(0xFFD97706),
+                                        textAlign: TextAlign.right,
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -228,16 +373,52 @@ class _CrmScreenState extends State<_CrmScreen> {
             Row(
               children: [
                 Expanded(
-                  child: FilledButton(
-                    onPressed: () {},
-                    child: const Text('Создать сделку'),
+                  child: FilledButton.icon(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () => _showInventoryDocumentSheet(
+                              client: client,
+                              documentType: 'sale_issue',
+                            ),
+                    icon: const Icon(Icons.point_of_sale_rounded),
+                    label: const Text('Продажа'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {},
-                    child: const Text('Позвонить'),
+                  child: OutlinedButton.icon(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () => _showInventoryDocumentSheet(
+                              client: client,
+                              documentType: 'purchase_receipt',
+                            ),
+                    icon: const Icon(Icons.shopping_cart_checkout_rounded),
+                    label: const Text('Закуп'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () => _openReceivableDocument(client),
+                    icon: const Icon(Icons.receipt_long_rounded),
+                    label: const Text('Счет на оплату'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () => _settleReceivableDocument(client),
+                    icon: const Icon(Icons.payments_rounded),
+                    label: const Text('Принять оплату'),
                   ),
                 ),
               ],
@@ -389,11 +570,19 @@ class _CrmScreenState extends State<_CrmScreen> {
                             value: formatMoney(client.totalSales),
                           ),
                         ),
-                        if (client.debt > 0)
+                        if (client.receivable > 0 || client.payable > 0)
                           _LabelValue(
-                            label: 'Долг',
-                            value: formatMoney(client.debt),
-                            valueColor: const Color(0xFFD97706),
+                            label: client.receivable > 0
+                                ? 'Дебиторка'
+                                : 'Кредиторка',
+                            value: formatMoney(
+                              client.receivable > 0
+                                  ? client.receivable
+                                  : client.payable,
+                            ),
+                            valueColor: client.receivable > 0
+                                ? const Color(0xFFD97706)
+                                : const Color(0xFF2563EB),
                             textAlign: TextAlign.right,
                           ),
                       ],
@@ -538,6 +727,188 @@ class _CrmScreenState extends State<_CrmScreen> {
       }
     }
   }
+
+  Future<void> _openDebtDocument(
+    _ClientDebtDocument document, {
+    bool openSettleOnOpen = false,
+  }) async {
+    try {
+      final payload = await widget.businessGateway.fetchMoneyDocumentDetail(
+        accessToken: widget.accessToken,
+        documentId: document.documentId,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      final detail = _moneyDocumentDetailFromJson(payload);
+      final wasSettled = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => _MoneyDocumentDetailSheet(
+          accessToken: widget.accessToken,
+          businessGateway: widget.businessGateway,
+          accounts: widget.accounts,
+          detail: detail,
+          onSettled: widget.onClientsChanged,
+          openSettleOnOpen: openSettleOnOpen,
+        ),
+      );
+
+      if (wasSettled == true) {
+        await widget.onClientsChanged();
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+
+  Future<void> _openReceivableDocument(_Client client) async {
+    final document = await _pickReceivableDocument(client);
+    if (document == null) {
+      return;
+    }
+    await _openDebtDocument(document);
+  }
+
+  Future<void> _settleReceivableDocument(_Client client) async {
+    if (widget.accounts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Сначала добавьте счет в разделе Финансы')),
+      );
+      return;
+    }
+
+    final document = await _pickReceivableDocument(client);
+    if (document == null) {
+      return;
+    }
+    await _openDebtDocument(document, openSettleOnOpen: true);
+  }
+
+  Future<_ClientDebtDocument?> _pickReceivableDocument(_Client client) async {
+    final documents = client.openDocuments
+        .where(
+          (document) =>
+              document.documentType == 'sale_receivable' &&
+              document.remainingAmount > 0,
+        )
+        .toList(growable: false);
+
+    if (documents.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Сначала создайте продажу с задолженностью для клиента'),
+        ),
+      );
+      return null;
+    }
+
+    if (documents.length == 1) {
+      return documents.first;
+    }
+
+    return showModalBottomSheet<_ClientDebtDocument>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _ClientReceivableDocumentsSheet(
+        clientName: client.name,
+        documents: documents,
+      ),
+    );
+  }
+
+  Future<void> _showInventoryDocumentSheet({
+    required _Client client,
+    required String documentType,
+  }) async {
+    if (widget.products.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Сначала добавьте хотя бы один товар на склад'),
+        ),
+      );
+      return;
+    }
+
+    final result = await showModalBottomSheet<_CreateInventoryDocumentFormData>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CreateInventoryDocumentSheet(
+        products: widget.products,
+        clients: widget.clients,
+        initialDocumentType: documentType,
+        initialClientId: client.id,
+      ),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      await widget.businessGateway.createInventoryDocument(
+        accessToken: widget.accessToken,
+        payload: {
+          'document_type': result.documentType,
+          'client_id': result.clientId,
+          'warehouse_name': result.warehouseName,
+          'related_warehouse_name': result.relatedWarehouseName,
+          'note': result.note,
+          'lines': result.lines
+              .map(
+                (line) => {
+                  'product_id': line.productId,
+                  'quantity': line.quantity,
+                  'unit_price': line.unitPrice,
+                  'unit_cost': line.unitCost,
+                  'note': line.note,
+                },
+              )
+              .toList(growable: false),
+        },
+      );
+      await widget.onClientsChanged();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.documentType == 'sale_issue'
+                ? 'Продажа создана'
+                : 'Закуп создан',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
 }
 
 class _CreateClientFormData {
@@ -558,6 +929,121 @@ class _CreateClientFormData {
   final String segment;
   final String bin;
   final String iin;
+}
+
+class _ClientReceivableDocumentsSheet extends StatelessWidget {
+  const _ClientReceivableDocumentsSheet({
+    required this.clientName,
+    required this.documents,
+  });
+
+  final String clientName;
+  final List<_ClientDebtDocument> documents;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFFF7FAF8),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Center(
+                child: SizedBox(width: 48, child: Divider(thickness: 4)),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Выберите счет',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                clientName,
+                style: const TextStyle(color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: documents.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final document = documents[index];
+                    return _BusinessCard(
+                      onTap: () => Navigator.of(context).pop(document),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  document.documentNo,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                              _StatusBadge(
+                                label: document.status,
+                                kind: document.status == 'partial'
+                                    ? StatusKind.warning
+                                    : StatusKind.success,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            document.operationDate,
+                            style: const TextStyle(
+                              color: Color(0xFF7B8794),
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _LabelValue(
+                                  label: 'Сумма',
+                                  value: formatMoney(document.amount),
+                                ),
+                              ),
+                              Expanded(
+                                child: _LabelValue(
+                                  label: 'Оплачено',
+                                  value: formatMoney(document.paidAmount),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                              _LabelValue(
+                                label: 'Остаток',
+                                value: formatMoney(document.remainingAmount),
+                                valueColor: const Color(0xFFD97706),
+                                textAlign: TextAlign.right,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _CreateClientSheet extends StatefulWidget {

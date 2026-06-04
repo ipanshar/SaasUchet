@@ -478,6 +478,8 @@ class _FinanceScreenState extends State<_FinanceScreen> {
         builder: (context) => _MoneyDocumentsSheet(
           accessToken: widget.accessToken,
           businessGateway: widget.businessGateway,
+          accounts: widget.finance.accounts,
+          onSettled: widget.onFinanceChanged,
           documents:
               documents.map(_moneyDocumentFromJson).toList(growable: false),
         ),
@@ -921,11 +923,15 @@ class _MoneyDocumentsSheet extends StatefulWidget {
   const _MoneyDocumentsSheet({
     required this.accessToken,
     required this.businessGateway,
+    required this.accounts,
+    required this.onSettled,
     required this.documents,
   });
 
   final String accessToken;
   final BusinessGateway businessGateway;
+  final List<_BankAccount> accounts;
+  final Future<void> Function() onSettled;
   final List<_MoneyDocument> documents;
 
   @override
@@ -1068,6 +1074,30 @@ class _MoneyDocumentsSheetState extends State<_MoneyDocumentsSheet> {
                                       ),
                                   ],
                                 ),
+                                if (document.documentType ==
+                                        'sale_receivable' ||
+                                    document.documentType ==
+                                        'purchase_payable') ...[
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _LabelValue(
+                                          label: 'Оплачено',
+                                          value:
+                                              formatMoney(document.paidAmount),
+                                        ),
+                                      ),
+                                      _LabelValue(
+                                        label: 'Остаток',
+                                        value: formatMoney(
+                                          document.remainingAmount,
+                                        ),
+                                        textAlign: TextAlign.right,
+                                      ),
+                                    ],
+                                  ),
+                                ],
                                 if (document.description.isNotEmpty) ...[
                                   const SizedBox(height: 8),
                                   Text(
@@ -1101,12 +1131,21 @@ class _MoneyDocumentsSheetState extends State<_MoneyDocumentsSheet> {
         return;
       }
       final detail = _moneyDocumentDetailFromJson(payload);
-      await showModalBottomSheet<void>(
+      final wasSettled = await showModalBottomSheet<bool>(
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (context) => _MoneyDocumentDetailSheet(detail: detail),
+        builder: (context) => _MoneyDocumentDetailSheet(
+          accessToken: widget.accessToken,
+          businessGateway: widget.businessGateway,
+          accounts: widget.accounts,
+          detail: detail,
+          onSettled: widget.onSettled,
+        ),
       );
+      if (wasSettled == true && mounted) {
+        Navigator.of(context).pop();
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -1118,13 +1157,58 @@ class _MoneyDocumentsSheetState extends State<_MoneyDocumentsSheet> {
   }
 }
 
-class _MoneyDocumentDetailSheet extends StatelessWidget {
-  const _MoneyDocumentDetailSheet({required this.detail});
+class _MoneyDocumentDetailSheet extends StatefulWidget {
+  const _MoneyDocumentDetailSheet({
+    required this.accessToken,
+    required this.businessGateway,
+    required this.accounts,
+    required this.detail,
+    required this.onSettled,
+    this.openSettleOnOpen = false,
+  });
 
+  final String accessToken;
+  final BusinessGateway businessGateway;
+  final List<_BankAccount> accounts;
   final _MoneyDocumentDetail detail;
+  final Future<void> Function() onSettled;
+  final bool openSettleOnOpen;
+
+  @override
+  State<_MoneyDocumentDetailSheet> createState() =>
+      _MoneyDocumentDetailSheetState();
+}
+
+class _MoneyDocumentDetailSheetState extends State<_MoneyDocumentDetailSheet> {
+  bool _isSubmitting = false;
+  bool _didAutoOpenSettle = false;
+
+  bool get _canSettle =>
+      (widget.detail.summary.status == 'draft' ||
+          widget.detail.summary.status == 'partial') &&
+      (widget.detail.summary.documentType == 'sale_receivable' ||
+          widget.detail.summary.documentType == 'purchase_payable') &&
+      widget.accounts.isNotEmpty &&
+      widget.detail.summary.remainingAmount > 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !widget.openSettleOnOpen ||
+          !_canSettle ||
+          _didAutoOpenSettle) {
+        return;
+      }
+      _didAutoOpenSettle = true;
+      _settleDocument();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final detail = widget.detail;
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFFF7FAF8),
@@ -1160,7 +1244,9 @@ class _MoneyDocumentDetailSheet extends StatelessWidget {
                           Expanded(
                             child: _LabelValue(
                               label: 'Основной счет',
-                              value: detail.summary.primaryAccount,
+                              value: detail.summary.primaryAccount.isEmpty
+                                  ? 'Не выбран'
+                                  : detail.summary.primaryAccount,
                             ),
                           ),
                           _LabelValue(
@@ -1171,6 +1257,29 @@ class _MoneyDocumentDetailSheet extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (detail.summary.documentType == 'sale_receivable' ||
+                        detail.summary.documentType == 'purchase_payable') ...[
+                      const SizedBox(height: 12),
+                      _BusinessCard(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _LabelValue(
+                                label: 'Оплачено',
+                                value: formatMoney(detail.summary.paidAmount),
+                              ),
+                            ),
+                            _LabelValue(
+                              label: 'Остаток',
+                              value: formatMoney(
+                                detail.summary.remainingAmount,
+                              ),
+                              textAlign: TextAlign.right,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (detail.summary.description.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       _BusinessCard(
@@ -1222,6 +1331,23 @@ class _MoneyDocumentDetailSheet extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (_canSettle) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: _isSubmitting ? null : _settleDocument,
+                          child: _isSubmitting
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Провести оплату'),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1230,5 +1356,243 @@ class _MoneyDocumentDetailSheet extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _settleDocument() async {
+    final result = await showModalBottomSheet<_SettleMoneyDocumentFormData>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _SettleMoneyDocumentSheet(
+        accounts: widget.accounts,
+        maxAmount: widget.detail.summary.remainingAmount,
+      ),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      await widget.businessGateway.settleMoneyDocument(
+        accessToken: widget.accessToken,
+        documentId: widget.detail.summary.id,
+        payload: {
+          'account_id': result.accountId,
+          'amount': result.amount,
+          'operation_date': result.operationDate,
+          'description': result.description,
+        },
+      );
+      await widget.onSettled();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Оплата проведена')),
+      );
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+}
+
+class _SettleMoneyDocumentFormData {
+  const _SettleMoneyDocumentFormData({
+    required this.accountId,
+    required this.amount,
+    required this.operationDate,
+    required this.description,
+  });
+
+  final String accountId;
+  final int amount;
+  final String operationDate;
+  final String description;
+}
+
+class _SettleMoneyDocumentSheet extends StatefulWidget {
+  const _SettleMoneyDocumentSheet({
+    required this.accounts,
+    required this.maxAmount,
+  });
+
+  final List<_BankAccount> accounts;
+  final int maxAmount;
+
+  @override
+  State<_SettleMoneyDocumentSheet> createState() =>
+      _SettleMoneyDocumentSheetState();
+}
+
+class _SettleMoneyDocumentSheetState extends State<_SettleMoneyDocumentSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _amountController;
+  late final TextEditingController _operationDateController;
+  final _descriptionController = TextEditingController();
+  late String _accountId;
+
+  @override
+  void initState() {
+    super.initState();
+    _accountId = widget.accounts.first.id;
+    _amountController = TextEditingController(text: '${widget.maxAmount}');
+    final now = DateTime.now();
+    _operationDateController = TextEditingController(
+      text:
+          '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+    );
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _operationDateController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFFF7FAF8),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            child: Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Center(
+                      child: SizedBox(width: 48, child: Divider(thickness: 4)),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Провести оплату',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: _accountId,
+                      items: widget.accounts
+                          .map(
+                            (account) => DropdownMenuItem<String>(
+                              value: account.id,
+                              child: Text(account.name),
+                            ),
+                          )
+                          .toList(growable: false),
+                      decoration: const InputDecoration(labelText: 'Счет'),
+                      onChanged: (value) {
+                        if (value == null) {
+                          return;
+                        }
+                        setState(() {
+                          _accountId = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _ClientTextField(
+                      controller: _amountController,
+                      label: 'Сумма оплаты',
+                      keyboardType: TextInputType.number,
+                      validator: _amountValidator,
+                    ),
+                    const SizedBox(height: 12),
+                    _ClientTextField(
+                      controller: _operationDateController,
+                      label: 'Дата операции',
+                      validator: _requiredValidator,
+                    ),
+                    const SizedBox(height: 12),
+                    _ClientTextField(
+                      controller: _descriptionController,
+                      label: 'Комментарий',
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _submit,
+                        child: const Text('Провести'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _SettleMoneyDocumentFormData(
+        accountId: _accountId,
+        amount: int.parse(_amountController.text.trim()),
+        operationDate: _operationDateController.text.trim(),
+        description: _descriptionController.text.trim(),
+      ),
+    );
+  }
+
+  String? _requiredValidator(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Обязательное поле';
+    }
+    return null;
+  }
+
+  String? _amountValidator(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Обязательное поле';
+    }
+    final parsed = int.tryParse(value.trim());
+    if (parsed == null) {
+      return 'Введите число';
+    }
+    if (parsed <= 0) {
+      return 'Сумма должна быть больше нуля';
+    }
+    if (parsed > widget.maxAmount) {
+      return 'Сумма не должна превышать остаток';
+    }
+    return null;
   }
 }

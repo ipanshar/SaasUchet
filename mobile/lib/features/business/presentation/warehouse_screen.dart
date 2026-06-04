@@ -483,6 +483,9 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
         'name': result.name,
         'sku': result.sku,
         'category': result.category,
+        'product_type': result.productType,
+        'unit_name': result.unitName,
+        'allowed_to_sell': result.allowedToSell,
         'initial_quantity': result.initialQuantity,
         'min_quantity': result.minQuantity,
         'price': result.price,
@@ -700,6 +703,9 @@ class _CreateProductFormData {
     required this.name,
     required this.sku,
     required this.category,
+    required this.productType,
+    required this.unitName,
+    required this.allowedToSell,
     required this.initialQuantity,
     required this.minQuantity,
     required this.price,
@@ -710,6 +716,9 @@ class _CreateProductFormData {
   final String name;
   final String sku;
   final String category;
+  final String productType;
+  final String unitName;
+  final bool allowedToSell;
   final int initialQuantity;
   final int minQuantity;
   final int price;
@@ -727,32 +736,61 @@ class _CreateProductSheet extends StatefulWidget {
 }
 
 class _CreateProductSheetState extends State<_CreateProductSheet> {
+  static const _productTypes = [
+    ('consumer_goods', 'ТНП — товары народного потребления'),
+    ('raw_material', 'Сырье'),
+    ('finished_product', 'ГП — готовый продукт'),
+  ];
+
+  static const _unitOptions = [
+    'шт',
+    'кг',
+    'г',
+    'л',
+    'мл',
+    'м',
+    'м²',
+    'упак',
+    'т',
+    'ящ',
+  ];
+
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _skuController = TextEditingController();
   final _categoryController = TextEditingController();
+  final _unitNameController = TextEditingController();
   final _initialQuantityController = TextEditingController();
   final _minQuantityController = TextEditingController();
   final _priceController = TextEditingController();
   final _costController = TextEditingController();
   final _barcodeController = TextEditingController();
 
+  String _productType = 'consumer_goods';
+  bool _allowedToSell = true;
+
   @override
   void initState() {
     super.initState();
     final product = widget.initialProduct;
     if (product == null) {
+      _unitNameController.text = 'шт';
       return;
     }
 
     _nameController.text = product.name;
     _skuController.text = product.sku;
     _categoryController.text = product.category;
+    _unitNameController.text =
+        product.unitName.isEmpty ? 'шт' : product.unitName;
     _initialQuantityController.text = '${product.quantity}';
     _minQuantityController.text = '${product.minQuantity}';
     _priceController.text = '${product.price}';
     _costController.text = '${product.cost}';
     _barcodeController.text = product.barcode;
+    _productType =
+        product.productType.isEmpty ? 'consumer_goods' : product.productType;
+    _allowedToSell = product.allowedToSell;
   }
 
   @override
@@ -760,6 +798,7 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
     _nameController.dispose();
     _skuController.dispose();
     _categoryController.dispose();
+    _unitNameController.dispose();
     _initialQuantityController.dispose();
     _minQuantityController.dispose();
     _priceController.dispose();
@@ -821,6 +860,66 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
                       label: 'Категория',
                     ),
                     const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: _productType,
+                      decoration: InputDecoration(
+                        labelText: 'Тип товара',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                      items: _productTypes
+                          .map(
+                            (t) => DropdownMenuItem(
+                              value: t.$1,
+                              child: Text(t.$2),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) =>
+                          setState(() => _productType = v ?? 'consumer_goods'),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _ClientTextField(
+                            controller: _unitNameController,
+                            label: 'Ед. измерения *',
+                            validator: _requiredValidator,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        PopupMenuButton<String>(
+                          icon:
+                              const Icon(Icons.arrow_drop_down_circle_outlined),
+                          tooltip: 'Выбрать',
+                          onSelected: (v) => setState(
+                            () => _unitNameController.text = v,
+                          ),
+                          itemBuilder: (_) => _unitOptions
+                              .map(
+                                (u) => PopupMenuItem(value: u, child: Text(u)),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    SwitchListTile.adaptive(
+                      value: _allowedToSell,
+                      onChanged: (v) => setState(() => _allowedToSell = v),
+                      title: const Text(
+                        'Разрешено к продаже',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      activeThumbColor: const Color(0xFF00A86B),
+                      activeTrackColor: const Color(0x4400A86B),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const SizedBox(height: 4),
                     _ClientTextField(
                       controller: _initialQuantityController,
                       label: 'Начальный остаток',
@@ -886,6 +985,11 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
         name: _nameController.text.trim(),
         sku: _skuController.text.trim(),
         category: _categoryController.text.trim(),
+        productType: _productType,
+        unitName: _unitNameController.text.trim().isEmpty
+            ? 'шт'
+            : _unitNameController.text.trim(),
+        allowedToSell: _allowedToSell,
         initialQuantity: int.parse(_initialQuantityController.text.trim()),
         minQuantity: int.parse(_minQuantityController.text.trim()),
         price: int.parse(_priceController.text.trim()),
@@ -951,10 +1055,14 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
   const _CreateInventoryDocumentSheet({
     required this.products,
     required this.clients,
+    this.initialDocumentType = 'purchase_receipt',
+    this.initialClientId,
   });
 
   final List<_Product> products;
   final List<_Client> clients;
+  final String initialDocumentType;
+  final String? initialClientId;
 
   @override
   State<_CreateInventoryDocumentSheet> createState() =>
@@ -968,12 +1076,14 @@ class _CreateInventoryDocumentSheetState
   final _relatedWarehouseController = TextEditingController();
   final _noteController = TextEditingController();
   late final List<_InventoryDocumentDraftLine> _lines;
-  String _documentType = 'purchase_receipt';
+  late String _documentType;
   String? _clientId;
 
   @override
   void initState() {
     super.initState();
+    _documentType = widget.initialDocumentType;
+    _clientId = widget.initialClientId;
     _lines = [_InventoryDocumentDraftLine.fromProduct(widget.products.first)];
   }
 

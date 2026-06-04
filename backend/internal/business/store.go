@@ -24,6 +24,11 @@ type Store interface {
 	CreateMoneyOperation(user auth.User, input CreateMoneyOperationInput) error
 	ListMoneyDocuments(user auth.User, documentType string, search string) ([]MoneyDocumentSummary, error)
 	GetMoneyDocument(user auth.User, documentID string) (MoneyDocumentDetail, error)
+	SettleMoneyDocument(user auth.User, documentID string, input SettleMoneyDocumentInput) error
+	ListServices(user auth.User) ([]Service, error)
+	CreateService(user auth.User, input CreateServiceInput) (Service, error)
+	UpdateService(user auth.User, serviceID string, input CreateServiceInput) (Service, error)
+	DeleteService(user auth.User, serviceID string) error
 }
 
 type MemoryStore struct {
@@ -502,10 +507,39 @@ func (s *MemoryStore) GetMoneyDocument(user auth.User, documentID string) (Money
 	}, nil
 }
 
+func (s *MemoryStore) SettleMoneyDocument(user auth.User, documentID string, input SettleMoneyDocumentInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalized := NormalizeSettleMoneyDocumentInput(input)
+	if err := ValidateSettleMoneyDocumentInput(normalized); err != nil {
+		return err
+	}
+
+	finance := s.financeByUser[user.ID]
+	accountIndex := -1
+	for index := range finance.Accounts {
+		if finance.Accounts[index].ID == normalized.AccountID {
+			accountIndex = index
+			break
+		}
+	}
+	if accountIndex < 0 {
+		return ErrValidation
+	}
+
+	if input.Amount <= 0 {
+		return ErrValidation
+	}
+
+	return nil
+}
+
 func cloneClients(clients []Client) []Client {
 	cloned := make([]Client, 0, len(clients))
 	for _, client := range clients {
 		client.Interactions = append([]Interaction(nil), client.Interactions...)
+		client.OpenDocuments = append([]ClientDebtDocument(nil), client.OpenDocuments...)
 		cloned = append(cloned, client)
 	}
 	return cloned
@@ -559,6 +593,49 @@ func defaultIfEmpty(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func (s *MemoryStore) ListServices(_ auth.User) ([]Service, error) {
+	return []Service{}, nil
+}
+
+func (s *MemoryStore) CreateService(_ auth.User, input CreateServiceInput) (Service, error) {
+	normalized := NormalizeServiceInput(input)
+	if err := ValidateServiceInput(normalized); err != nil {
+		return Service{}, err
+	}
+	svc := Service{
+		ID:            mustGenerateProductID(),
+		Name:          normalized.Name,
+		Description:   normalized.Description,
+		Price:         normalized.Price,
+		AllowedToSell: normalized.AllowedToSell,
+		Materials:     []ServiceMaterial{},
+	}
+	for _, m := range normalized.Materials {
+		svc.Materials = append(svc.Materials, ServiceMaterial{
+			ID:                  mustGenerateProductID(),
+			MaterialType:        m.MaterialType,
+			ProductID:           m.ProductID,
+			SubServiceID:        m.SubServiceID,
+			ExternalServiceName: m.ExternalServiceName,
+			Quantity:            m.Quantity,
+			Cost:                m.Cost,
+		})
+	}
+	return svc, nil
+}
+
+func (s *MemoryStore) UpdateService(_ auth.User, serviceID string, input CreateServiceInput) (Service, error) {
+	normalized := NormalizeServiceInput(input)
+	if err := ValidateServiceInput(normalized); err != nil {
+		return Service{}, err
+	}
+	return Service{ID: serviceID, Name: normalized.Name, Description: normalized.Description, Price: normalized.Price, AllowedToSell: normalized.AllowedToSell, Materials: []ServiceMaterial{}}, nil
+}
+
+func (s *MemoryStore) DeleteService(_ auth.User, _ string) error {
+	return nil
 }
 
 func buildMemoryCashFlows(income int, expense int) []CashFlow {

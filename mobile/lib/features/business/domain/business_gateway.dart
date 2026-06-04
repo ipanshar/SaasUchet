@@ -72,5 +72,31 @@ abstract class BusinessGateway {
     required String documentId,
   });
 
+  Future<void> settleMoneyDocument({
+    required String accessToken,
+    required String documentId,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<List<Map<String, dynamic>>> fetchServices({
+    required String accessToken,
+  });
+
+  Future<Map<String, dynamic>> createService({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<Map<String, dynamic>> updateService({
+    required String accessToken,
+    required String serviceId,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<void> deleteService({
+    required String accessToken,
+    required String serviceId,
+  });
+
   void dispose() {}
 }

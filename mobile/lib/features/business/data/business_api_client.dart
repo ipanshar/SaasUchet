@@ -413,6 +413,28 @@ class BusinessApiClient extends BusinessGateway {
     return decodedBody;
   }
 
+  @override
+  Future<void> settleMoneyDocument({
+    required String accessToken,
+    required String documentId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.businessMoneyDocumentSettleUri(documentId),
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 201) {
+      throw _buildApiException(response);
+    }
+  }
+
   ApiException _buildApiException(http.Response response) {
     try {
       final decodedBody = jsonDecode(response.body);
@@ -429,6 +451,96 @@ class BusinessApiClient extends BusinessGateway {
       message: 'API request failed with ${response.statusCode}.',
       statusCode: response.statusCode,
     );
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchServices({
+    required String accessToken,
+  }) async {
+    final response = await _client.get(
+      ApiConfig.catalogServicesUri,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $accessToken',
+      },
+    ).timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) throw _buildApiException(response);
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const ApiException(message: 'Unexpected response.', statusCode: 500);
+    }
+    return (decoded['services'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>> createService({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.catalogServicesUri,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 201) throw _buildApiException(response);
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const ApiException(message: 'Unexpected response.', statusCode: 500);
+    }
+    return decoded;
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateService({
+    required String accessToken,
+    required String serviceId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .put(
+          ApiConfig.catalogServiceUri(serviceId),
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) throw _buildApiException(response);
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const ApiException(message: 'Unexpected response.', statusCode: 500);
+    }
+    return decoded;
+  }
+
+  @override
+  Future<void> deleteService({
+    required String accessToken,
+    required String serviceId,
+  }) async {
+    final response = await _client.delete(
+      ApiConfig.catalogServiceUri(serviceId),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $accessToken',
+      },
+    ).timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 204) throw _buildApiException(response);
   }
 
   @override

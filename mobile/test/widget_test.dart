@@ -421,6 +421,43 @@ class _FakeBusinessGateway extends BusinessGateway {
       ],
     };
   }
+
+  @override
+  Future<void> settleMoneyDocument({
+    required String accessToken,
+    required String documentId,
+    required Map<String, dynamic> payload,
+  }) async {}
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchServices({
+    required String accessToken,
+  }) async {
+    return [];
+  }
+
+  @override
+  Future<Map<String, dynamic>> createService({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {'id': 'svc_new', ...payload};
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateService({
+    required String accessToken,
+    required String serviceId,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {'id': serviceId, ...payload};
+  }
+
+  @override
+  Future<void> deleteService({
+    required String accessToken,
+    required String serviceId,
+  }) async {}
 }
 
 final _fakeSession = AuthSession(

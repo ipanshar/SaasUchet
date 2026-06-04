@@ -499,12 +499,55 @@ func (h Handler) MoneyDocumentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	path := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/money-documents/"))
+	if path == "" {
+		response.Error(w, http.StatusNotFound, "document not found")
+		return
+	}
+
+	if strings.HasSuffix(path, "/settle") {
+		if r.Method != http.MethodPost {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		documentID := strings.TrimSpace(strings.TrimSuffix(path, "/settle"))
+		if documentID == "" || strings.Contains(documentID, "/") {
+			response.Error(w, http.StatusNotFound, "document not found")
+			return
+		}
+
+		var input SettleMoneyDocumentInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		input = NormalizeSettleMoneyDocumentInput(input)
+		if err := ValidateSettleMoneyDocumentInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if err := h.store.SettleMoneyDocument(user, documentID, input); err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		response.JSON(w, http.StatusCreated, map[string]any{"status": "ok"})
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	documentID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/money-documents/"))
+	documentID := strings.TrimSpace(path)
 	if documentID == "" || strings.Contains(documentID, "/") {
 		response.Error(w, http.StatusNotFound, "document not found")
 		return
@@ -628,6 +671,105 @@ func indexOfClient(clients []Client, clientID string) int {
 	}
 
 	return -1
+}
+
+func (h Handler) Services(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		services, err := h.store.ListServices(user)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{"services": services})
+	case http.MethodPost:
+		var input CreateServiceInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		input = NormalizeServiceInput(input)
+		if err := ValidateServiceInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		svc, err := h.store.CreateService(user, input)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusCreated, svc)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) ServiceByID(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	serviceID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/catalog/services/"))
+	if serviceID == "" || strings.Contains(serviceID, "/") {
+		response.Error(w, http.StatusNotFound, "service not found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var input CreateServiceInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		input = NormalizeServiceInput(input)
+		if err := ValidateServiceInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		svc, err := h.store.UpdateService(user, serviceID, input)
+		if err != nil {
+			response.Error(w, http.StatusNotFound, "service not found")
+			return
+		}
+		response.JSON(w, http.StatusOK, svc)
+	case http.MethodDelete:
+		if err := h.store.DeleteService(user, serviceID); err != nil {
+			response.Error(w, http.StatusNotFound, "service not found")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 func extractBearerToken(headerValue string) (string, error) {

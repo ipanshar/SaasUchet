@@ -6,12 +6,14 @@ class _MoreScreen extends StatefulWidget {
     required this.overview,
     required this.onLogout,
     required this.onOpenProfile,
+    required this.onNavSettingsOpen,
   });
 
   final AuthSession session;
   final _OverviewData overview;
   final VoidCallback onLogout;
   final Future<void> Function() onOpenProfile;
+  final VoidCallback onNavSettingsOpen;
 
   @override
   State<_MoreScreen> createState() => _MoreScreenState();
@@ -350,6 +352,18 @@ class _MoreScreenState extends State<_MoreScreen> {
                           value: _darkMode,
                           onChanged: (value) =>
                               setState(() => _darkMode = value),
+                        ),
+                        const Divider(height: 24),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: widget.onNavSettingsOpen,
+                          child: const _MenuTile(
+                            icon: Icons.tune_rounded,
+                            iconColor: Color(0xFF3B82F6),
+                            iconTone: Color(0x143B82F6),
+                            title: 'Настройка навигации',
+                            subtitle: 'Разделы в панели',
+                          ),
                         ),
                         const Divider(height: 24),
                         const _MenuTile(

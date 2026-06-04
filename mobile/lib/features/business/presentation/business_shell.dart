@@ -6,7 +6,9 @@ import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/company_profile.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/user_profile.dart';
 import 'package:saas_uchet_mobile/features/business/domain/business_gateway.dart';
+import 'package:saas_uchet_mobile/features/business/presentation/nav_settings_screen.dart';
 import 'package:saas_uchet_mobile/features/business/presentation/profile_editor_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 part 'onboarding_flow.dart';
 part 'dashboard_screen.dart';
@@ -14,6 +16,11 @@ part 'crm_screen.dart';
 part 'warehouse_screen.dart';
 part 'finance_screen.dart';
 part 'more_screen.dart';
+part 'production_screen.dart';
+part 'sales_screen.dart';
+part 'purchases_screen.dart';
+part 'services_screen.dart';
+part 'catalog_screen.dart';
 part 'business_widgets.dart';
 part 'business_models.dart';
 
@@ -88,7 +95,16 @@ class _BusinessShellState extends State<BusinessShell> {
     ),
   ];
 
+  static const _prefKey = 'nav_tabs';
+
   BusinessTab _activeTab = BusinessTab.dashboard;
+  List<BusinessTab> _activeTabs = const [
+    BusinessTab.dashboard,
+    BusinessTab.crm,
+    BusinessTab.warehouse,
+    BusinessTab.catalog,
+    BusinessTab.more,
+  ];
   bool _isFabExpanded = false;
   late AuthSession _session;
   final GlobalKey<_WarehouseScreenState> _warehouseScreenKey =
@@ -102,6 +118,50 @@ class _BusinessShellState extends State<BusinessShell> {
     super.initState();
     _session = widget.session;
     _loadOverview();
+    _loadTabPrefs();
+  }
+
+  Future<void> _loadTabPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_prefKey);
+    if (stored == null || stored.isEmpty) return;
+    final names = stored.split(',');
+    final middle = names
+        .map(
+          (n) => BusinessTab.values.where((t) => t.name == n).firstOrNull,
+        )
+        .whereType<BusinessTab>()
+        .where((t) => t != BusinessTab.dashboard && t != BusinessTab.more)
+        .toList();
+    if (middle.isEmpty || !mounted) return;
+    setState(() {
+      _activeTabs = [BusinessTab.dashboard, ...middle, BusinessTab.more];
+    });
+  }
+
+  Future<void> _saveAndApplyTabs(List<BusinessTab> middleTabs) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefKey, middleTabs.map((t) => t.name).join(','));
+    if (!mounted) return;
+    setState(() {
+      _activeTabs = [BusinessTab.dashboard, ...middleTabs, BusinessTab.more];
+      _activeTab = BusinessTab.dashboard;
+      _isFabExpanded = false;
+    });
+  }
+
+  void _openNavSettings() {
+    final middleTabs = _activeTabs
+        .where((t) => t != BusinessTab.dashboard && t != BusinessTab.more)
+        .toList();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => NavSettingsScreen(
+          currentMiddleTabs: middleTabs,
+          onSaved: _saveAndApplyTabs,
+        ),
+      ),
+    );
   }
 
   @override
@@ -208,6 +268,61 @@ class _BusinessShellState extends State<BusinessShell> {
     );
   }
 
+  Widget _buildScreen(BusinessTab tab, _OverviewData overview) {
+    switch (tab) {
+      case BusinessTab.dashboard:
+        return _DashboardScreen(session: _session, overview: overview);
+      case BusinessTab.crm:
+        return _CrmScreen(
+          accessToken: _session.accessToken,
+          clients: overview.clients,
+          products: overview.products,
+          accounts: overview.finance.accounts,
+          businessGateway: widget.businessGateway,
+          onClientsChanged: _loadOverview,
+        );
+      case BusinessTab.warehouse:
+        return _WarehouseScreen(
+          key: _warehouseScreenKey,
+          accessToken: _session.accessToken,
+          products: overview.products,
+          clients: overview.clients,
+          businessGateway: widget.businessGateway,
+          onProductsChanged: _loadOverview,
+        );
+      case BusinessTab.finance:
+        return _FinanceScreen(
+          accessToken: _session.accessToken,
+          finance: overview.finance,
+          businessGateway: widget.businessGateway,
+          onFinanceChanged: _loadOverview,
+        );
+      case BusinessTab.more:
+        return _MoreScreen(
+          session: _session,
+          overview: overview,
+          onLogout: widget.onLogout,
+          onOpenProfile: _openProfileEditor,
+          onNavSettingsOpen: _openNavSettings,
+        );
+      case BusinessTab.production:
+        return const _ProductionScreen();
+      case BusinessTab.sales:
+        return const _SalesScreen();
+      case BusinessTab.purchases:
+        return const _PurchasesScreen();
+      case BusinessTab.services:
+        return const _ServicesScreen();
+      case BusinessTab.catalog:
+        return _CatalogScreen(
+          accessToken: _session.accessToken,
+          products: overview.products,
+          businessGateway: widget.businessGateway,
+          onProductsChanged: _loadOverview,
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final showFab = _activeTab != BusinessTab.more;
@@ -259,36 +374,10 @@ class _BusinessShellState extends State<BusinessShell> {
             )
           else
             IndexedStack(
-              index: _activeTab.index,
-              children: [
-                _DashboardScreen(session: _session, overview: overview),
-                _CrmScreen(
-                  accessToken: _session.accessToken,
-                  clients: overview.clients,
-                  businessGateway: widget.businessGateway,
-                  onClientsChanged: _loadOverview,
-                ),
-                _WarehouseScreen(
-                  key: _warehouseScreenKey,
-                  accessToken: _session.accessToken,
-                  products: overview.products,
-                  clients: overview.clients,
-                  businessGateway: widget.businessGateway,
-                  onProductsChanged: _loadOverview,
-                ),
-                _FinanceScreen(
-                  accessToken: _session.accessToken,
-                  finance: overview.finance,
-                  businessGateway: widget.businessGateway,
-                  onFinanceChanged: _loadOverview,
-                ),
-                _MoreScreen(
-                  session: _session,
-                  overview: overview,
-                  onLogout: widget.onLogout,
-                  onOpenProfile: _openProfileEditor,
-                ),
-              ],
+              index: _activeTabs.indexOf(_activeTab),
+              children: _activeTabs
+                  .map((tab) => _buildScreen(tab, overview))
+                  .toList(),
             ),
           if (showFab)
             Positioned(
@@ -309,6 +398,7 @@ class _BusinessShellState extends State<BusinessShell> {
       ),
       bottomNavigationBar: _BottomNavBar(
         activeTab: _activeTab,
+        tabs: _activeTabs,
         onTabSelected: (tab) {
           setState(() {
             _activeTab = tab;

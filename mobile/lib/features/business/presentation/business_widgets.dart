@@ -1,6 +1,67 @@
 part of 'business_shell.dart';
 
-enum BusinessTab { dashboard, crm, warehouse, finance, more }
+enum BusinessTab {
+  dashboard,
+  crm,
+  warehouse,
+  finance,
+  more,
+  production,
+  sales,
+  purchases,
+  services,
+  catalog,
+}
+
+String tabLabel(BusinessTab tab) {
+  switch (tab) {
+    case BusinessTab.dashboard:
+      return 'Главная';
+    case BusinessTab.crm:
+      return 'CRM';
+    case BusinessTab.warehouse:
+      return 'Склад';
+    case BusinessTab.finance:
+      return 'Финансы';
+    case BusinessTab.more:
+      return 'Еще';
+    case BusinessTab.production:
+      return 'Производство';
+    case BusinessTab.sales:
+      return 'Продажи';
+    case BusinessTab.purchases:
+      return 'Закупки';
+    case BusinessTab.services:
+      return 'Услуги';
+    case BusinessTab.catalog:
+      return 'Справочник';
+  }
+}
+
+IconData tabIcon(BusinessTab tab) {
+  switch (tab) {
+    case BusinessTab.dashboard:
+      return Icons.home_rounded;
+    case BusinessTab.crm:
+      return Icons.group_rounded;
+    case BusinessTab.warehouse:
+      return Icons.inventory_2_rounded;
+    case BusinessTab.finance:
+      return Icons.account_balance_wallet_rounded;
+    case BusinessTab.more:
+      return Icons.more_horiz_rounded;
+    case BusinessTab.production:
+      return Icons.precision_manufacturing_rounded;
+    case BusinessTab.sales:
+      return Icons.shopping_bag_rounded;
+    case BusinessTab.purchases:
+      return Icons.shopping_cart_rounded;
+    case BusinessTab.services:
+      return Icons.handyman_rounded;
+    case BusinessTab.catalog:
+      return Icons.menu_book_rounded;
+  }
+}
 
 enum StatusKind { success, warning, error, info, neutral }
 
@@ -30,22 +91,16 @@ enum TransactionType { income, expense }
 class _BottomNavBar extends StatelessWidget {
   const _BottomNavBar({
     required this.activeTab,
+    required this.tabs,
     required this.onTabSelected,
   });
 
   final BusinessTab activeTab;
+  final List<BusinessTab> tabs;
   final ValueChanged<BusinessTab> onTabSelected;
 
   @override
   Widget build(BuildContext context) {
-    const tabs = [
-      (BusinessTab.dashboard, Icons.home_rounded, 'Главная'),
-      (BusinessTab.crm, Icons.group_rounded, 'CRM'),
-      (BusinessTab.warehouse, Icons.inventory_2_rounded, 'Склад'),
-      (BusinessTab.finance, Icons.account_balance_wallet_rounded, 'Финансы'),
-      (BusinessTab.more, Icons.more_horiz_rounded, 'Еще'),
-    ];
-
     return DecoratedBox(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -63,22 +118,22 @@ class _BottomNavBar extends StatelessWidget {
           height: 72,
           child: Row(
             children: tabs.map((tab) {
-              final isActive = tab.$1 == activeTab;
+              final isActive = tab == activeTab;
               return Expanded(
                 child: InkWell(
-                  onTap: () => onTabSelected(tab.$1),
+                  onTap: () => onTabSelected(tab),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        tab.$2,
+                        tabIcon(tab),
                         color: isActive
                             ? const Color(0xFF00A86B)
                             : const Color(0xFF7B8794),
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        tab.$3,
+                        tabLabel(tab),
                         style: TextStyle(
                           color: isActive
                               ? const Color(0xFF00A86B)
@@ -1362,6 +1417,61 @@ class _SwitchTile extends StatelessWidget {
           onChanged: onChanged,
         ),
       ],
+    );
+  }
+}
+
+class _PlaceholderScreen extends StatelessWidget {
+  const _PlaceholderScreen({
+    required this.icon,
+    required this.title,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String title;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      bottom: false,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 44, color: color),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Раздел в разработке',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: Color(0xFF64748B),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

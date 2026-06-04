@@ -125,8 +125,142 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 			},
 		)
 	}
+	if err := interactionRows.Err(); err != nil {
+		return nil, err
+	}
 
-	return clients, interactionRows.Err()
+	financialRows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    c.id::text,
+		    COALESCE(sales.total_sales, 0),
+		    COALESCE(docs.receivable, 0),
+		    COALESCE(docs.payable, 0)
+		 FROM clients c
+		 LEFT JOIN (
+		   SELECT d.client_id,
+		          COALESCE(SUM(l.line_total), 0) AS total_sales
+		   FROM inventory_documents d
+		   JOIN inventory_document_lines l ON l.document_id = d.id
+		   WHERE d.company_id = $1::uuid
+		     AND d.client_id IS NOT NULL
+		     AND d.document_type = 'sale_issue'
+		   GROUP BY d.client_id
+		 ) sales ON sales.client_id = c.id
+		 LEFT JOIN (
+		   SELECT d.client_id,
+		          COALESCE(SUM(CASE WHEN d.document_type = 'sale_receivable' THEN line_amounts.total_amount - paid.paid_amount ELSE 0 END), 0) AS receivable,
+		          COALESCE(SUM(CASE WHEN d.document_type = 'purchase_payable' THEN line_amounts.total_amount - paid.paid_amount ELSE 0 END), 0) AS payable
+		   FROM money_documents d
+		   LEFT JOIN (
+		     SELECT l.document_id, COALESCE(SUM(l.amount), 0) AS total_amount
+		     FROM money_document_lines l
+		     GROUP BY l.document_id
+		   ) line_amounts ON line_amounts.document_id = d.id
+		   LEFT JOIN (
+		     SELECT mm.document_id, COALESCE(SUM(mm.amount), 0) AS paid_amount
+		     FROM money_movements mm
+		     GROUP BY mm.document_id
+		   ) paid ON paid.document_id = d.id
+		   WHERE d.company_id = $1::uuid
+		     AND d.client_id IS NOT NULL
+		     AND d.document_type IN ('sale_receivable', 'purchase_payable')
+		     AND (COALESCE(line_amounts.total_amount, 0) - COALESCE(paid.paid_amount, 0)) > 0
+		   GROUP BY d.client_id
+		 ) docs ON docs.client_id = c.id
+		 WHERE c.company_id = $1::uuid AND c.archived_at IS NULL`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer financialRows.Close()
+
+	for financialRows.Next() {
+		var clientID string
+		var totalSales float64
+		var receivable float64
+		var payable float64
+		if err := financialRows.Scan(&clientID, &totalSales, &receivable, &payable); err != nil {
+			return nil, err
+		}
+		index, ok := indexByID[clientID]
+		if !ok {
+			continue
+		}
+		clients[index].TotalSales = int(totalSales)
+		clients[index].Receivable = int(receivable)
+		clients[index].Payable = int(payable)
+		clients[index].Debt = clients[index].Receivable
+	}
+	if err := financialRows.Err(); err != nil {
+		return nil, err
+	}
+
+	documentRows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    d.client_id::text,
+		    d.id::text,
+		    d.document_no,
+		    d.document_type,
+		    d.status,
+		    d.operation_date,
+		    COALESCE(line_amounts.total_amount, 0),
+		    COALESCE(paid.paid_amount, 0)
+		 FROM money_documents d
+		 LEFT JOIN (
+		   SELECT l.document_id, COALESCE(SUM(l.amount), 0) AS total_amount
+		   FROM money_document_lines l
+		   GROUP BY l.document_id
+		 ) line_amounts ON line_amounts.document_id = d.id
+		 LEFT JOIN (
+		   SELECT mm.document_id, COALESCE(SUM(mm.amount), 0) AS paid_amount
+		   FROM money_movements mm
+		   GROUP BY mm.document_id
+		 ) paid ON paid.document_id = d.id
+		 WHERE d.company_id = $1::uuid
+		   AND d.client_id IS NOT NULL
+		   AND d.document_type IN ('sale_receivable', 'purchase_payable')
+		   AND (COALESCE(line_amounts.total_amount, 0) - COALESCE(paid.paid_amount, 0)) > 0
+		 ORDER BY d.operation_date DESC, d.created_at DESC`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer documentRows.Close()
+
+	for documentRows.Next() {
+		var clientID string
+		var document ClientDebtDocument
+		var operationDate time.Time
+		var amount float64
+		var paidAmount float64
+		if err := documentRows.Scan(
+			&clientID,
+			&document.DocumentID,
+			&document.DocumentNo,
+			&document.DocumentType,
+			&document.Status,
+			&operationDate,
+			&amount,
+			&paidAmount,
+		); err != nil {
+			return nil, err
+		}
+		index, ok := indexByID[clientID]
+		if !ok {
+			continue
+		}
+		document.OperationDate = operationDate.Format("2006-01-02")
+		document.Amount = int(amount)
+		document.PaidAmount = int(paidAmount)
+		document.RemainingAmount = document.Amount - document.PaidAmount
+		clients[index].OpenDocuments = append(clients[index].OpenDocuments, document)
+	}
+
+	return clients, documentRows.Err()
 }
 
 func (s *PostgresStore) SaveClients(user auth.User, clients []Client) error {
@@ -228,6 +362,9 @@ func (s *PostgresStore) ListProducts(user auth.User) ([]Product, error) {
 		    p.name,
 		    p.sku,
 		    COALESCE(pc.name, ''),
+		    p.product_type,
+		    p.unit_name,
+		    p.allowed_to_sell,
 		    COALESCE(SUM(ib.quantity_on_hand), 0),
 		    p.min_quantity,
 		    p.sale_price,
@@ -237,7 +374,8 @@ func (s *PostgresStore) ListProducts(user auth.User) ([]Product, error) {
 		 LEFT JOIN product_categories pc ON pc.id = p.category_id
 		 LEFT JOIN inventory_balances ib ON ib.product_id = p.id AND ib.company_id = p.company_id
 		 WHERE p.company_id = $1 AND p.archived_at IS NULL
-		 GROUP BY p.id, p.name, p.sku, pc.name, p.min_quantity, p.sale_price, p.cost_price, p.barcode, p.created_at
+		 GROUP BY p.id, p.name, p.sku, pc.name, p.product_type, p.unit_name, p.allowed_to_sell,
+		          p.min_quantity, p.sale_price, p.cost_price, p.barcode, p.created_at
 		 ORDER BY p.created_at DESC`,
 		companyID,
 	)
@@ -259,6 +397,9 @@ func (s *PostgresStore) ListProducts(user auth.User) ([]Product, error) {
 			&product.Name,
 			&product.SKU,
 			&product.Category,
+			&product.ProductType,
+			&product.UnitName,
+			&product.AllowedToSell,
 			&quantity,
 			&minQuantity,
 			&price,
@@ -362,9 +503,11 @@ func (s *PostgresStore) CreateProduct(user auth.User, input CreateProductInput) 
 	if _, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO products (
-		   id, company_id, category_id, sku, barcode, name, unit_name, tracking_type, min_quantity, sale_price, cost_price, is_active, created_at, updated_at
+		   id, company_id, category_id, sku, barcode, name, unit_name, product_type, allowed_to_sell,
+		   tracking_type, min_quantity, sale_price, cost_price, is_active, created_at, updated_at
 		 ) VALUES (
-		   $1::uuid, $2::uuid, $3::uuid, $4, NULLIF($5, ''), $6, 'pcs', 'none', $7, $8, $9, TRUE, NOW(), NOW()
+		   $1::uuid, $2::uuid, $3::uuid, $4, NULLIF($5, ''), $6, $7, $8, $9,
+		   'none', $10, $11, $12, TRUE, NOW(), NOW()
 		 )`,
 		product.ID,
 		companyID,
@@ -372,6 +515,9 @@ func (s *PostgresStore) CreateProduct(user auth.User, input CreateProductInput) 
 		product.SKU,
 		product.Barcode,
 		product.Name,
+		product.UnitName,
+		product.ProductType,
+		product.AllowedToSell,
 		product.MinQuantity,
 		product.Price,
 		product.Cost,
@@ -425,14 +571,17 @@ func (s *PostgresStore) UpdateProduct(user auth.User, productID string, input Cr
 	if _, err = tx.ExecContext(
 		ctx,
 		`UPDATE products
-		 SET category_id = $3::uuid,
-		     sku = $4,
-		     barcode = NULLIF($5, ''),
-		     name = $6,
-		     min_quantity = $7,
-		     sale_price = $8,
-		     cost_price = $9,
-		     updated_at = NOW()
+		 SET category_id    = $3::uuid,
+		     sku             = $4,
+		     barcode         = NULLIF($5, ''),
+		     name            = $6,
+		     unit_name       = $7,
+		     product_type    = $8,
+		     allowed_to_sell = $9,
+		     min_quantity    = $10,
+		     sale_price      = $11,
+		     cost_price      = $12,
+		     updated_at      = NOW()
 		 WHERE id = $1::uuid AND company_id = $2::uuid`,
 		productID,
 		companyID,
@@ -440,6 +589,9 @@ func (s *PostgresStore) UpdateProduct(user auth.User, productID string, input Cr
 		updated.SKU,
 		updated.Barcode,
 		updated.Name,
+		updated.UnitName,
+		updated.ProductType,
+		updated.AllowedToSell,
 		updated.MinQuantity,
 		updated.Price,
 		updated.Cost,
@@ -1449,11 +1601,11 @@ func (s *PostgresStore) ListMoneyDocuments(user auth.User, documentType string, 
 		    COALESCE(d.description, ''),
 		    COALESCE(pa.name, ''),
 		    COALESCE(sa.name, ''),
-		    COALESCE(SUM(l.amount), 0)
+		    COALESCE((SELECT SUM(l.amount) FROM money_document_lines l WHERE l.document_id = d.id), 0),
+		    COALESCE((SELECT SUM(mm.amount) FROM money_movements mm WHERE mm.document_id = d.id), 0)
 		 FROM money_documents d
 		 LEFT JOIN cash_accounts pa ON pa.id = d.primary_account_id
 		 LEFT JOIN cash_accounts sa ON sa.id = d.secondary_account_id
-		 LEFT JOIN money_document_lines l ON l.document_id = d.id
 		 WHERE d.company_id = $1::uuid
 		   AND ($2 = '' OR d.document_type = $2)
 		   AND (
@@ -1463,7 +1615,6 @@ func (s *PostgresStore) ListMoneyDocuments(user auth.User, documentType string, 
 		     OR COALESCE(pa.name, '') ILIKE '%' || $3 || '%'
 		     OR COALESCE(sa.name, '') ILIKE '%' || $3 || '%'
 		   )
-		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.operation_date, d.description, pa.name, sa.name
 		 ORDER BY d.operation_date DESC, d.created_at DESC
 		 LIMIT 100`,
 		companyID,
@@ -1480,6 +1631,7 @@ func (s *PostgresStore) ListMoneyDocuments(user auth.User, documentType string, 
 		var document MoneyDocumentSummary
 		var operationDate time.Time
 		var amount float64
+		var paidAmount float64
 		if err := rows.Scan(
 			&document.ID,
 			&document.DocumentNo,
@@ -1490,11 +1642,14 @@ func (s *PostgresStore) ListMoneyDocuments(user auth.User, documentType string, 
 			&document.PrimaryAccount,
 			&document.SecondaryAccount,
 			&amount,
+			&paidAmount,
 		); err != nil {
 			return nil, err
 		}
 		document.OperationDate = operationDate.Format("2006-01-02")
 		document.Amount = int(amount)
+		document.PaidAmount = int(paidAmount)
+		document.RemainingAmount = document.Amount - document.PaidAmount
 		documents = append(documents, document)
 	}
 
@@ -1513,6 +1668,7 @@ func (s *PostgresStore) GetMoneyDocument(user auth.User, documentID string) (Mon
 	var detail MoneyDocumentDetail
 	var operationDate time.Time
 	var amount float64
+	var paidAmount float64
 	err = s.db.QueryRowContext(
 		ctx,
 		`SELECT
@@ -1524,13 +1680,12 @@ func (s *PostgresStore) GetMoneyDocument(user auth.User, documentID string) (Mon
 		    COALESCE(d.description, ''),
 		    COALESCE(pa.name, ''),
 		    COALESCE(sa.name, ''),
-		    COALESCE(SUM(l.amount), 0)
+		    COALESCE((SELECT SUM(l.amount) FROM money_document_lines l WHERE l.document_id = d.id), 0),
+		    COALESCE((SELECT SUM(mm.amount) FROM money_movements mm WHERE mm.document_id = d.id), 0)
 		 FROM money_documents d
 		 LEFT JOIN cash_accounts pa ON pa.id = d.primary_account_id
 		 LEFT JOIN cash_accounts sa ON sa.id = d.secondary_account_id
-		 LEFT JOIN money_document_lines l ON l.document_id = d.id
-		 WHERE d.company_id = $1::uuid AND d.id = $2::uuid
-		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.operation_date, d.description, pa.name, sa.name`,
+		 WHERE d.company_id = $1::uuid AND d.id = $2::uuid`,
 		companyID,
 		documentID,
 	).Scan(
@@ -1543,12 +1698,15 @@ func (s *PostgresStore) GetMoneyDocument(user auth.User, documentID string) (Mon
 		&detail.Summary.PrimaryAccount,
 		&detail.Summary.SecondaryAccount,
 		&amount,
+		&paidAmount,
 	)
 	if err != nil {
 		return MoneyDocumentDetail{}, err
 	}
 	detail.Summary.OperationDate = operationDate.Format("2006-01-02")
 	detail.Summary.Amount = int(amount)
+	detail.Summary.PaidAmount = int(paidAmount)
+	detail.Summary.RemainingAmount = detail.Summary.Amount - detail.Summary.PaidAmount
 
 	rows, err := s.db.QueryContext(
 		ctx,
@@ -1579,6 +1737,234 @@ func (s *PostgresStore) GetMoneyDocument(user auth.User, documentID string) (Mon
 	}
 
 	return detail, rows.Err()
+}
+
+func (s *PostgresStore) SettleMoneyDocument(user auth.User, documentID string, input SettleMoneyDocumentInput) error {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	normalized := NormalizeSettleMoneyDocumentInput(input)
+	operationDate := time.Now()
+	if normalized.OperationDate != "" {
+		operationDate, err = time.Parse("2006-01-02", normalized.OperationDate)
+		if err != nil {
+			return fmt.Errorf("%w: operation date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+
+	account, err := s.findCashAccount(ctx, tx, companyID, normalized.AccountID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: account not found", ErrValidation)
+		}
+		return err
+	}
+
+	var draftType string
+	var draftStatus string
+	var clientID string
+	var currentDescription string
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT
+		    d.document_type,
+		    d.status,
+		    COALESCE(d.client_id::text, ''),
+		    COALESCE(d.description, '')
+		 FROM money_documents d
+		 WHERE d.company_id = $1::uuid AND d.id = $2::uuid`,
+		companyID,
+		documentID,
+	).Scan(&draftType, &draftStatus, &clientID, &currentDescription)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: money document not found", ErrValidation)
+		}
+		return err
+	}
+
+	if draftStatus != "draft" && draftStatus != "partial" {
+		return fmt.Errorf("%w: only draft or partial money documents can be settled", ErrValidation)
+	}
+
+	direction := ""
+	categoryName := ""
+	switch draftType {
+	case "sale_receivable":
+		direction = "income"
+		categoryName = "Продажи"
+	case "purchase_payable":
+		direction = "expense"
+		categoryName = "Закуп"
+	default:
+		return fmt.Errorf("%w: this document type cannot be settled", ErrValidation)
+	}
+
+	categoryID, err := s.ensureMoneyCategory(ctx, tx, companyID, direction, categoryName)
+	if err != nil {
+		return err
+	}
+
+	lineRows, err := tx.QueryContext(
+		ctx,
+		`SELECT id::text, amount
+		 FROM money_document_lines
+		 WHERE document_id = $1::uuid
+		 ORDER BY line_no ASC`,
+		documentID,
+	)
+	if err != nil {
+		return err
+	}
+	defer lineRows.Close()
+
+	type moneyDraftLine struct {
+		id     string
+		amount int
+	}
+	lines := make([]moneyDraftLine, 0)
+	for lineRows.Next() {
+		var lineID string
+		var amount float64
+		if err := lineRows.Scan(&lineID, &amount); err != nil {
+			return err
+		}
+		lines = append(lines, moneyDraftLine{id: lineID, amount: int(amount)})
+	}
+	if err := lineRows.Err(); err != nil {
+		return err
+	}
+	if len(lines) == 0 {
+		return fmt.Errorf("%w: money document has no lines", ErrValidation)
+	}
+
+	paidRows, err := tx.QueryContext(
+		ctx,
+		`SELECT document_line_id::text, COALESCE(SUM(amount), 0)
+		 FROM money_movements
+		 WHERE document_id = $1::uuid
+		 GROUP BY document_line_id`,
+		documentID,
+	)
+	if err != nil {
+		return err
+	}
+	defer paidRows.Close()
+
+	paidByLineID := make(map[string]int, len(lines))
+	totalAmount := 0
+	paidAmount := 0
+	for _, line := range lines {
+		totalAmount += line.amount
+	}
+	for paidRows.Next() {
+		var lineID string
+		var amount float64
+		if err := paidRows.Scan(&lineID, &amount); err != nil {
+			return err
+		}
+		paidByLineID[lineID] = int(amount)
+		paidAmount += int(amount)
+	}
+	if err := paidRows.Err(); err != nil {
+		return err
+	}
+
+	remainingAmount := totalAmount - paidAmount
+	if remainingAmount <= 0 {
+		return fmt.Errorf("%w: money document is already fully settled", ErrValidation)
+	}
+	if normalized.Amount > remainingAmount {
+		return fmt.Errorf("%w: amount exceeds remaining balance", ErrValidation)
+	}
+
+	description := normalized.Description
+	if description == "" {
+		description = currentDescription
+	}
+
+	currentBalance := account.Balance
+	amountToSettle := normalized.Amount
+	for _, line := range lines {
+		if amountToSettle == 0 {
+			break
+		}
+
+		lineRemaining := line.amount - paidByLineID[line.id]
+		if lineRemaining <= 0 {
+			continue
+		}
+		movementAmount := lineRemaining
+		if movementAmount > amountToSettle {
+			movementAmount = amountToSettle
+		}
+
+		if direction == "income" {
+			currentBalance += movementAmount
+			if err = s.insertMoneyMovement(ctx, tx, companyID, account.ID, documentID, line.id, clientID, categoryID, "", "income", movementAmount, movementAmount, currentBalance, operationDate); err != nil {
+				return err
+			}
+		} else {
+			currentBalance -= movementAmount
+			if err = s.insertMoneyMovement(ctx, tx, companyID, account.ID, documentID, line.id, clientID, categoryID, "", "expense", movementAmount, -movementAmount, currentBalance, operationDate); err != nil {
+				return err
+			}
+		}
+		amountToSettle -= movementAmount
+	}
+	if amountToSettle != 0 {
+		return fmt.Errorf("%w: unable to distribute settlement amount", ErrValidation)
+	}
+
+	if err = s.upsertCashAccountBalance(ctx, tx, account.ID, currentBalance); err != nil {
+		return err
+	}
+
+	newPaidAmount := paidAmount + normalized.Amount
+	newStatus := "partial"
+	if newPaidAmount >= totalAmount {
+		newStatus = "posted"
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`UPDATE money_documents
+		 SET primary_account_id = $3::uuid,
+		     status = $4,
+		     operation_date = $5,
+		     description = $6,
+		     posted_by_user_id = $7,
+		     posted_at = NOW(),
+		     updated_at = NOW()
+		 WHERE company_id = $1::uuid AND id = $2::uuid`,
+		companyID,
+		documentID,
+		account.ID,
+		newStatus,
+		operationDate.Format("2006-01-02"),
+		description,
+		user.ID,
+	); err != nil {
+		return err
+	}
+
+	err = tx.Commit()
+	return err
 }
 
 func (s *PostgresStore) ensurePrimaryCompany(ctx context.Context, user auth.User) (string, error) {
@@ -2387,4 +2773,266 @@ func subjectTitle(interactionType string, subject string) string {
 	default:
 		return "Заметка"
 	}
+}
+
+// ─── Services ────────────────────────────────────────────────────────────────
+
+func (s *PostgresStore) ListServices(user auth.User) ([]Service, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id::text, name, description, price, allowed_to_sell
+		 FROM services
+		 WHERE company_id = $1 AND archived_at IS NULL
+		 ORDER BY created_at DESC`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	services := make([]Service, 0)
+	indexByID := make(map[string]int)
+	for rows.Next() {
+		var svc Service
+		if err := rows.Scan(&svc.ID, &svc.Name, &svc.Description, &svc.Price, &svc.AllowedToSell); err != nil {
+			return nil, err
+		}
+		svc.Materials = []ServiceMaterial{}
+		indexByID[svc.ID] = len(services)
+		services = append(services, svc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(services) == 0 {
+		return []Service{}, nil
+	}
+
+	matRows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    sm.id::text,
+		    sm.service_id::text,
+		    sm.material_type,
+		    COALESCE(sm.product_id::text, ''),
+		    COALESCE(p.name, ''),
+		    COALESCE(sm.sub_service_id::text, ''),
+		    COALESCE(ss.name, ''),
+		    sm.external_service_name,
+		    sm.quantity,
+		    sm.cost
+		 FROM service_materials sm
+		 LEFT JOIN products p ON p.id = sm.product_id
+		 LEFT JOIN services ss ON ss.id = sm.sub_service_id
+		 WHERE sm.service_id IN (
+		   SELECT id FROM services WHERE company_id = $1 AND archived_at IS NULL
+		 )`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer matRows.Close()
+
+	for matRows.Next() {
+		var m ServiceMaterial
+		var serviceID string
+		if err := matRows.Scan(
+			&m.ID, &serviceID, &m.MaterialType,
+			&m.ProductID, &m.ProductName,
+			&m.SubServiceID, &m.SubServiceName,
+			&m.ExternalServiceName, &m.Quantity, &m.Cost,
+		); err != nil {
+			return nil, err
+		}
+		if idx, ok := indexByID[serviceID]; ok {
+			services[idx].Materials = append(services[idx].Materials, m)
+		}
+	}
+
+	return services, matRows.Err()
+}
+
+func (s *PostgresStore) CreateService(user auth.User, input CreateServiceInput) (Service, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return Service{}, err
+	}
+
+	normalized := NormalizeServiceInput(input)
+	if err := ValidateServiceInput(normalized); err != nil {
+		return Service{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Service{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	serviceID := mustGenerateProductID()
+	if _, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO services (id, company_id, name, description, price, allowed_to_sell, created_at, updated_at)
+		 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, NOW(), NOW())`,
+		serviceID, companyID, normalized.Name, normalized.Description, normalized.Price, normalized.AllowedToSell,
+	); err != nil {
+		return Service{}, err
+	}
+
+	svc := Service{
+		ID:            serviceID,
+		Name:          normalized.Name,
+		Description:   normalized.Description,
+		Price:         normalized.Price,
+		AllowedToSell: normalized.AllowedToSell,
+		Materials:     []ServiceMaterial{},
+	}
+
+	for _, m := range normalized.Materials {
+		matID := mustGenerateProductID()
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO service_materials
+			   (id, service_id, material_type, product_id, sub_service_id, external_service_name, quantity, cost, created_at)
+			 VALUES
+			   ($1::uuid, $2::uuid, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7, $8, NOW())`,
+			matID, serviceID, m.MaterialType, m.ProductID, m.SubServiceID, m.ExternalServiceName, m.Quantity, m.Cost,
+		); err != nil {
+			return Service{}, err
+		}
+		svc.Materials = append(svc.Materials, ServiceMaterial{
+			ID:                  matID,
+			MaterialType:        m.MaterialType,
+			ProductID:           m.ProductID,
+			SubServiceID:        m.SubServiceID,
+			ExternalServiceName: m.ExternalServiceName,
+			Quantity:            m.Quantity,
+			Cost:                m.Cost,
+		})
+	}
+
+	if err = tx.Commit(); err != nil {
+		return Service{}, err
+	}
+	return svc, nil
+}
+
+func (s *PostgresStore) UpdateService(user auth.User, serviceID string, input CreateServiceInput) (Service, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return Service{}, err
+	}
+
+	normalized := NormalizeServiceInput(input)
+	if err := ValidateServiceInput(normalized); err != nil {
+		return Service{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Service{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	result, err := tx.ExecContext(
+		ctx,
+		`UPDATE services SET name=$3, description=$4, price=$5, allowed_to_sell=$6, updated_at=NOW()
+		 WHERE id=$1::uuid AND company_id=$2::uuid AND archived_at IS NULL`,
+		serviceID, companyID, normalized.Name, normalized.Description, normalized.Price, normalized.AllowedToSell,
+	)
+	if err != nil {
+		return Service{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return Service{}, fmt.Errorf("%w: service not found", ErrValidation)
+	}
+
+	if _, err = tx.ExecContext(ctx, `DELETE FROM service_materials WHERE service_id = $1::uuid`, serviceID); err != nil {
+		return Service{}, err
+	}
+
+	svc := Service{
+		ID:            serviceID,
+		Name:          normalized.Name,
+		Description:   normalized.Description,
+		Price:         normalized.Price,
+		AllowedToSell: normalized.AllowedToSell,
+		Materials:     []ServiceMaterial{},
+	}
+
+	for _, m := range normalized.Materials {
+		matID := mustGenerateProductID()
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO service_materials
+			   (id, service_id, material_type, product_id, sub_service_id, external_service_name, quantity, cost, created_at)
+			 VALUES
+			   ($1::uuid, $2::uuid, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7, $8, NOW())`,
+			matID, serviceID, m.MaterialType, m.ProductID, m.SubServiceID, m.ExternalServiceName, m.Quantity, m.Cost,
+		); err != nil {
+			return Service{}, err
+		}
+		svc.Materials = append(svc.Materials, ServiceMaterial{
+			ID:                  matID,
+			MaterialType:        m.MaterialType,
+			ProductID:           m.ProductID,
+			SubServiceID:        m.SubServiceID,
+			ExternalServiceName: m.ExternalServiceName,
+			Quantity:            m.Quantity,
+			Cost:                m.Cost,
+		})
+	}
+
+	if err = tx.Commit(); err != nil {
+		return Service{}, err
+	}
+	return svc, nil
+}
+
+func (s *PostgresStore) DeleteService(user auth.User, serviceID string) error {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return err
+	}
+
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE services SET archived_at=NOW(), is_active=FALSE, updated_at=NOW()
+		 WHERE id=$1::uuid AND company_id=$2::uuid AND archived_at IS NULL`,
+		serviceID, companyID,
+	)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return fmt.Errorf("%w: service not found", ErrValidation)
+	}
+	return nil
 }

@@ -59,17 +59,31 @@ type Activity struct {
 }
 
 type Client struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	Contact      string        `json:"contact"`
-	Phone        string        `json:"phone"`
-	Email        string        `json:"email"`
-	Segment      string        `json:"segment"`
-	TotalSales   int           `json:"total_sales"`
-	Debt         int           `json:"debt"`
-	BIN          string        `json:"bin,omitempty"`
-	IIN          string        `json:"iin,omitempty"`
-	Interactions []Interaction `json:"interactions"`
+	ID            string               `json:"id"`
+	Name          string               `json:"name"`
+	Contact       string               `json:"contact"`
+	Phone         string               `json:"phone"`
+	Email         string               `json:"email"`
+	Segment       string               `json:"segment"`
+	TotalSales    int                  `json:"total_sales"`
+	Debt          int                  `json:"debt"`
+	Receivable    int                  `json:"receivable"`
+	Payable       int                  `json:"payable"`
+	BIN           string               `json:"bin,omitempty"`
+	IIN           string               `json:"iin,omitempty"`
+	Interactions  []Interaction        `json:"interactions"`
+	OpenDocuments []ClientDebtDocument `json:"open_documents"`
+}
+
+type ClientDebtDocument struct {
+	DocumentID      string `json:"document_id"`
+	DocumentNo      string `json:"document_no"`
+	DocumentType    string `json:"document_type"`
+	Status          string `json:"status"`
+	OperationDate   string `json:"operation_date"`
+	Amount          int    `json:"amount"`
+	PaidAmount      int    `json:"paid_amount"`
+	RemainingAmount int    `json:"remaining_amount"`
 }
 
 type CreateClientInput struct {
@@ -89,28 +103,72 @@ type Interaction struct {
 }
 
 type Product struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	SKU         string          `json:"sku"`
-	Category    string          `json:"category"`
-	Quantity    int             `json:"quantity"`
-	MinQuantity int             `json:"min_quantity"`
-	Price       int             `json:"price"`
-	Cost        int             `json:"cost"`
-	Barcode     string          `json:"barcode"`
-	Status      string          `json:"status"`
-	Movements   []StockMovement `json:"movements"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	SKU           string          `json:"sku"`
+	Category      string          `json:"category"`
+	ProductType   string          `json:"product_type"`
+	UnitName      string          `json:"unit_name"`
+	AllowedToSell bool            `json:"allowed_to_sell"`
+	Quantity      int             `json:"quantity"`
+	MinQuantity   int             `json:"min_quantity"`
+	Price         int             `json:"price"`
+	Cost          int             `json:"cost"`
+	Barcode       string          `json:"barcode"`
+	Status        string          `json:"status"`
+	Movements     []StockMovement `json:"movements"`
 }
 
 type CreateProductInput struct {
 	Name            string `json:"name"`
 	SKU             string `json:"sku"`
 	Category        string `json:"category"`
+	ProductType     string `json:"product_type"`
+	UnitName        string `json:"unit_name"`
+	AllowedToSell   bool   `json:"allowed_to_sell"`
 	InitialQuantity int    `json:"initial_quantity"`
 	MinQuantity     int    `json:"min_quantity"`
 	Price           int    `json:"price"`
 	Cost            int    `json:"cost"`
 	Barcode         string `json:"barcode"`
+}
+
+type Service struct {
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description"`
+	Price         float64           `json:"price"`
+	AllowedToSell bool              `json:"allowed_to_sell"`
+	Materials     []ServiceMaterial `json:"materials"`
+}
+
+type ServiceMaterial struct {
+	ID                  string  `json:"id"`
+	MaterialType        string  `json:"material_type"`
+	ProductID           string  `json:"product_id,omitempty"`
+	ProductName         string  `json:"product_name,omitempty"`
+	SubServiceID        string  `json:"sub_service_id,omitempty"`
+	SubServiceName      string  `json:"sub_service_name,omitempty"`
+	ExternalServiceName string  `json:"external_service_name,omitempty"`
+	Quantity            float64 `json:"quantity"`
+	Cost                float64 `json:"cost"`
+}
+
+type CreateServiceMaterialInput struct {
+	MaterialType        string  `json:"material_type"`
+	ProductID           string  `json:"product_id,omitempty"`
+	SubServiceID        string  `json:"sub_service_id,omitempty"`
+	ExternalServiceName string  `json:"external_service_name,omitempty"`
+	Quantity            float64 `json:"quantity"`
+	Cost                float64 `json:"cost"`
+}
+
+type CreateServiceInput struct {
+	Name          string                       `json:"name"`
+	Description   string                       `json:"description"`
+	Price         float64                      `json:"price"`
+	AllowedToSell bool                         `json:"allowed_to_sell"`
+	Materials     []CreateServiceMaterialInput `json:"materials"`
 }
 
 type CreateInventoryDocumentLineInput struct {
@@ -201,6 +259,13 @@ type CreateMoneyOperationInput struct {
 	OperationDate         string `json:"operation_date,omitempty"`
 }
 
+type SettleMoneyDocumentInput struct {
+	AccountID     string `json:"account_id"`
+	Amount        int    `json:"amount"`
+	OperationDate string `json:"operation_date,omitempty"`
+	Description   string `json:"description,omitempty"`
+}
+
 type BankAccount struct {
 	ID      string `json:"id,omitempty"`
 	Name    string `json:"name"`
@@ -234,6 +299,8 @@ type MoneyDocumentSummary struct {
 	PrimaryAccount   string `json:"primary_account"`
 	SecondaryAccount string `json:"secondary_account,omitempty"`
 	Amount           int    `json:"amount"`
+	PaidAmount       int    `json:"paid_amount"`
+	RemainingAmount  int    `json:"remaining_amount"`
 }
 
 type MoneyDocumentLine struct {
@@ -354,17 +421,20 @@ func ValidateClientInput(input CreateClientInput) error {
 func NewClientFromInput(input CreateClientInput) Client {
 	normalized := NormalizeClientInput(input)
 	return Client{
-		ID:           mustGenerateClientID(),
-		Name:         normalized.Name,
-		Contact:      normalized.Contact,
-		Phone:        normalized.Phone,
-		Email:        normalized.Email,
-		Segment:      normalized.Segment,
-		BIN:          normalized.BIN,
-		IIN:          normalized.IIN,
-		TotalSales:   0,
-		Debt:         0,
-		Interactions: []Interaction{},
+		ID:            mustGenerateClientID(),
+		Name:          normalized.Name,
+		Contact:       normalized.Contact,
+		Phone:         normalized.Phone,
+		Email:         normalized.Email,
+		Segment:       normalized.Segment,
+		BIN:           normalized.BIN,
+		IIN:           normalized.IIN,
+		TotalSales:    0,
+		Debt:          0,
+		Receivable:    0,
+		Payable:       0,
+		Interactions:  []Interaction{},
+		OpenDocuments: []ClientDebtDocument{},
 	}
 }
 
@@ -385,6 +455,33 @@ func NormalizeProductInput(input CreateProductInput) CreateProductInput {
 	input.SKU = strings.TrimSpace(strings.ToUpper(input.SKU))
 	input.Category = strings.TrimSpace(input.Category)
 	input.Barcode = normalizeDigits(input.Barcode)
+	input.UnitName = strings.TrimSpace(input.UnitName)
+	input.ProductType = strings.TrimSpace(input.ProductType)
+	if input.UnitName == "" {
+		input.UnitName = "шт"
+	}
+	if input.ProductType == "" {
+		input.ProductType = "consumer_goods"
+	}
+	return input
+}
+
+func NormalizeServiceInput(input CreateServiceInput) CreateServiceInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Description = strings.TrimSpace(input.Description)
+	if input.Price < 0 {
+		input.Price = 0
+	}
+	for i := range input.Materials {
+		input.Materials[i].MaterialType = strings.TrimSpace(input.Materials[i].MaterialType)
+		input.Materials[i].ExternalServiceName = strings.TrimSpace(input.Materials[i].ExternalServiceName)
+		if input.Materials[i].Quantity <= 0 {
+			input.Materials[i].Quantity = 1
+		}
+		if input.Materials[i].Cost < 0 {
+			input.Materials[i].Cost = 0
+		}
+	}
 	return input
 }
 
@@ -432,6 +529,13 @@ func NormalizeMoneyOperationInput(input CreateMoneyOperationInput) CreateMoneyOp
 	return input
 }
 
+func NormalizeSettleMoneyDocumentInput(input SettleMoneyDocumentInput) SettleMoneyDocumentInput {
+	input.AccountID = strings.TrimSpace(input.AccountID)
+	input.OperationDate = strings.TrimSpace(input.OperationDate)
+	input.Description = strings.TrimSpace(input.Description)
+	return input
+}
+
 func ValidateCashAccountInput(input CreateCashAccountInput) error {
 	if strings.TrimSpace(input.Name) == "" {
 		return fmt.Errorf("%w: account name is required", ErrValidation)
@@ -472,6 +576,21 @@ func ValidateMoneyOperationInput(input CreateMoneyOperationInput) error {
 	}
 	if input.Direction != "transfer" && input.Category == "" {
 		return fmt.Errorf("%w: category is required", ErrValidation)
+	}
+	if input.OperationDate != "" {
+		if _, err := time.Parse("2006-01-02", input.OperationDate); err != nil {
+			return fmt.Errorf("%w: operation date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+	return nil
+}
+
+func ValidateSettleMoneyDocumentInput(input SettleMoneyDocumentInput) error {
+	if input.AccountID == "" {
+		return fmt.Errorf("%w: account id is required", ErrValidation)
+	}
+	if input.Amount <= 0 {
+		return fmt.Errorf("%w: amount must be greater than zero", ErrValidation)
 	}
 	if input.OperationDate != "" {
 		if _, err := time.Parse("2006-01-02", input.OperationDate); err != nil {
@@ -525,6 +644,14 @@ func ValidateProductInput(input CreateProductInput) error {
 	if strings.TrimSpace(input.SKU) == "" {
 		return fmt.Errorf("%w: product sku is required", ErrValidation)
 	}
+	if strings.TrimSpace(input.UnitName) == "" {
+		return fmt.Errorf("%w: unit name is required", ErrValidation)
+	}
+	switch input.ProductType {
+	case "raw_material", "finished_product", "consumer_goods":
+	default:
+		return fmt.Errorf("%w: product type is invalid", ErrValidation)
+	}
 	if input.InitialQuantity < 0 {
 		return fmt.Errorf("%w: initial quantity must be zero or greater", ErrValidation)
 	}
@@ -543,20 +670,55 @@ func ValidateProductInput(input CreateProductInput) error {
 	return nil
 }
 
+func ValidateServiceInput(input CreateServiceInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("%w: service name is required", ErrValidation)
+	}
+	if input.Price < 0 {
+		return fmt.Errorf("%w: price must be zero or greater", ErrValidation)
+	}
+	for i, m := range input.Materials {
+		switch m.MaterialType {
+		case "product", "sub_service", "external_service":
+		default:
+			return fmt.Errorf("%w: materials[%d].material_type is invalid", ErrValidation, i)
+		}
+		if m.MaterialType == "product" && strings.TrimSpace(m.ProductID) == "" {
+			return fmt.Errorf("%w: materials[%d].product_id is required for product material", ErrValidation, i)
+		}
+		if m.MaterialType == "sub_service" && strings.TrimSpace(m.SubServiceID) == "" {
+			return fmt.Errorf("%w: materials[%d].sub_service_id is required for sub_service material", ErrValidation, i)
+		}
+		if m.MaterialType == "external_service" && strings.TrimSpace(m.ExternalServiceName) == "" {
+			return fmt.Errorf("%w: materials[%d].external_service_name is required", ErrValidation, i)
+		}
+		if m.Quantity <= 0 {
+			return fmt.Errorf("%w: materials[%d].quantity must be greater than zero", ErrValidation, i)
+		}
+		if m.Cost < 0 {
+			return fmt.Errorf("%w: materials[%d].cost must be zero or greater", ErrValidation, i)
+		}
+	}
+	return nil
+}
+
 func NewProductFromInput(input CreateProductInput) Product {
 	normalized := NormalizeProductInput(input)
 	return Product{
-		ID:          mustGenerateProductID(),
-		Name:        normalized.Name,
-		SKU:         normalized.SKU,
-		Category:    normalized.Category,
-		Quantity:    normalized.InitialQuantity,
-		MinQuantity: normalized.MinQuantity,
-		Price:       normalized.Price,
-		Cost:        normalized.Cost,
-		Barcode:     normalized.Barcode,
-		Status:      productStatus(normalized.InitialQuantity, normalized.MinQuantity),
-		Movements:   []StockMovement{},
+		ID:            mustGenerateProductID(),
+		Name:          normalized.Name,
+		SKU:           normalized.SKU,
+		Category:      normalized.Category,
+		ProductType:   normalized.ProductType,
+		UnitName:      normalized.UnitName,
+		AllowedToSell: normalized.AllowedToSell,
+		Quantity:      normalized.InitialQuantity,
+		MinQuantity:   normalized.MinQuantity,
+		Price:         normalized.Price,
+		Cost:          normalized.Cost,
+		Barcode:       normalized.Barcode,
+		Status:        productStatus(normalized.InitialQuantity, normalized.MinQuantity),
+		Movements:     []StockMovement{},
 	}
 }
 
@@ -565,6 +727,9 @@ func UpdatedProductFromInput(existing Product, input CreateProductInput) Product
 	existing.Name = normalized.Name
 	existing.SKU = normalized.SKU
 	existing.Category = normalized.Category
+	existing.ProductType = normalized.ProductType
+	existing.UnitName = normalized.UnitName
+	existing.AllowedToSell = normalized.AllowedToSell
 	existing.MinQuantity = normalized.MinQuantity
 	existing.Price = normalized.Price
 	existing.Cost = normalized.Cost

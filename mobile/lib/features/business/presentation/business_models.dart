@@ -42,7 +42,10 @@ class _Client {
     required this.segment,
     required this.totalSales,
     required this.debt,
+    required this.receivable,
+    required this.payable,
     required this.interactions,
+    required this.openDocuments,
     this.bin,
     this.iin,
   });
@@ -57,7 +60,10 @@ class _Client {
   final String segment;
   final int totalSales;
   final int debt;
+  final int receivable;
+  final int payable;
   final List<_Interaction> interactions;
+  final List<_ClientDebtDocument> openDocuments;
 
   String get binOrIinLabel => bin != null ? 'БИН: $bin' : 'ИИН: $iin';
 }
@@ -74,12 +80,37 @@ class _Interaction {
   final String note;
 }
 
+class _ClientDebtDocument {
+  const _ClientDebtDocument({
+    required this.documentId,
+    required this.documentNo,
+    required this.documentType,
+    required this.status,
+    required this.operationDate,
+    required this.amount,
+    required this.paidAmount,
+    required this.remainingAmount,
+  });
+
+  final String documentId;
+  final String documentNo;
+  final String documentType;
+  final String status;
+  final String operationDate;
+  final int amount;
+  final int paidAmount;
+  final int remainingAmount;
+}
+
 class _Product {
   const _Product({
     required this.id,
     required this.name,
     required this.sku,
     required this.category,
+    required this.productType,
+    required this.unitName,
+    required this.allowedToSell,
     required this.quantity,
     required this.minQuantity,
     required this.price,
@@ -93,6 +124,9 @@ class _Product {
   final String name;
   final String sku;
   final String category;
+  final String productType;
+  final String unitName;
+  final bool allowedToSell;
   final int quantity;
   final int minQuantity;
   final int price;
@@ -100,6 +134,17 @@ class _Product {
   final String barcode;
   final ProductStatus status;
   final List<_StockMovement> movements;
+
+  String get productTypeLabel {
+    switch (productType) {
+      case 'raw_material':
+        return 'Сырье';
+      case 'finished_product':
+        return 'ГП';
+      default:
+        return 'ТНП';
+    }
+  }
 
   String get statusLabel {
     switch (status) {
@@ -186,6 +231,8 @@ class _MoneyDocument {
     required this.primaryAccount,
     required this.secondaryAccount,
     required this.amount,
+    required this.paidAmount,
+    required this.remainingAmount,
   });
 
   final String id;
@@ -197,6 +244,8 @@ class _MoneyDocument {
   final String primaryAccount;
   final String secondaryAccount;
   final int amount;
+  final int paidAmount;
+  final int remainingAmount;
 }
 
 class _InventoryDocumentLine {
@@ -510,9 +559,15 @@ _Client _clientFromJson(Map<String, dynamic> json) => _Client(
       segment: json['segment'] as String? ?? 'Regular',
       totalSales: json['total_sales'] as int? ?? 0,
       debt: json['debt'] as int? ?? 0,
+      receivable: json['receivable'] as int? ?? 0,
+      payable: json['payable'] as int? ?? 0,
       interactions: (json['interactions'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(_interactionFromJson)
+          .toList(growable: false),
+      openDocuments: (json['open_documents'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_clientDebtDocumentFromJson)
           .toList(growable: false),
     );
 
@@ -522,11 +577,26 @@ _Interaction _interactionFromJson(Map<String, dynamic> json) => _Interaction(
       note: json['note'] as String? ?? '',
     );
 
+_ClientDebtDocument _clientDebtDocumentFromJson(Map<String, dynamic> json) =>
+    _ClientDebtDocument(
+      documentId: json['document_id'] as String? ?? '',
+      documentNo: json['document_no'] as String? ?? '',
+      documentType: json['document_type'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      operationDate: json['operation_date'] as String? ?? '',
+      amount: json['amount'] as int? ?? 0,
+      paidAmount: json['paid_amount'] as int? ?? 0,
+      remainingAmount: json['remaining_amount'] as int? ?? 0,
+    );
+
 _Product _productFromJson(Map<String, dynamic> json) => _Product(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
       sku: json['sku'] as String? ?? '',
       category: json['category'] as String? ?? '',
+      productType: json['product_type'] as String? ?? 'consumer_goods',
+      unitName: json['unit_name'] as String? ?? 'шт',
+      allowedToSell: json['allowed_to_sell'] as bool? ?? true,
       quantity: json['quantity'] as int? ?? 0,
       minQuantity: json['min_quantity'] as int? ?? 0,
       price: json['price'] as int? ?? 0,
@@ -587,6 +657,8 @@ _MoneyDocument _moneyDocumentFromJson(Map<String, dynamic> json) =>
       primaryAccount: json['primary_account'] as String? ?? '',
       secondaryAccount: json['secondary_account'] as String? ?? '',
       amount: json['amount'] as int? ?? 0,
+      paidAmount: json['paid_amount'] as int? ?? 0,
+      remainingAmount: json['remaining_amount'] as int? ?? 0,
     );
 
 _InventoryDocumentLine _inventoryDocumentLineFromJson(
@@ -732,3 +804,94 @@ String initialsOf(String value) {
   }
   return words.map((word) => word.characters.first.toUpperCase()).join();
 }
+
+// ─── Services ────────────────────────────────────────────────────────────────
+
+class _ServiceMaterial {
+  const _ServiceMaterial({
+    required this.id,
+    required this.materialType,
+    this.productId = '',
+    this.productName = '',
+    this.subServiceId = '',
+    this.subServiceName = '',
+    this.externalServiceName = '',
+    required this.quantity,
+    required this.cost,
+  });
+
+  final String id;
+  final String materialType;
+  final String productId;
+  final String productName;
+  final String subServiceId;
+  final String subServiceName;
+  final String externalServiceName;
+  final double quantity;
+  final double cost;
+
+  String get displayName {
+    if (materialType == 'product') return productName;
+    if (materialType == 'sub_service') return subServiceName;
+    return externalServiceName;
+  }
+
+  String get typeLabel {
+    switch (materialType) {
+      case 'product':
+        return 'Товар';
+      case 'sub_service':
+        return 'Подуслуга';
+      default:
+        return 'Внешняя услуга';
+    }
+  }
+}
+
+class _Service {
+  const _Service({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.price,
+    required this.allowedToSell,
+    required this.materials,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+  final double price;
+  final bool allowedToSell;
+  final List<_ServiceMaterial> materials;
+
+  double get estimatedCost => materials.fold(
+        0.0,
+        (sum, m) => sum + m.cost * m.quantity,
+      );
+}
+
+_ServiceMaterial _serviceMaterialFromJson(Map<String, dynamic> json) =>
+    _ServiceMaterial(
+      id: json['id'] as String? ?? '',
+      materialType: json['material_type'] as String? ?? 'external_service',
+      productId: json['product_id'] as String? ?? '',
+      productName: json['product_name'] as String? ?? '',
+      subServiceId: json['sub_service_id'] as String? ?? '',
+      subServiceName: json['sub_service_name'] as String? ?? '',
+      externalServiceName: json['external_service_name'] as String? ?? '',
+      quantity: (json['quantity'] as num?)?.toDouble() ?? 1.0,
+      cost: (json['cost'] as num?)?.toDouble() ?? 0.0,
+    );
+
+_Service _serviceFromJson(Map<String, dynamic> json) => _Service(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      price: (json['price'] as num?)?.toDouble() ?? 0.0,
+      allowedToSell: json['allowed_to_sell'] as bool? ?? true,
+      materials: (json['materials'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_serviceMaterialFromJson)
+          .toList(growable: false),
+    );
