@@ -180,6 +180,18 @@ func (s *Service) DeleteProfile(accessToken string) error {
 		return err
 	}
 
+	blocker, blocked, err := s.store.GetUserDeletionBlocker(user.ID)
+	if err != nil {
+		return fmt.Errorf("check delete blockers: %w", err)
+	}
+	if blocked {
+		message := strings.TrimSpace(blocker.Message)
+		if message == "" {
+			message = "account cannot be deleted"
+		}
+		return newPublicError(ErrValidation, message)
+	}
+
 	if err := s.store.DeleteUser(user.ID); err != nil {
 		if err == ErrNotFound {
 			_ = s.store.DeleteSession(session.Token)

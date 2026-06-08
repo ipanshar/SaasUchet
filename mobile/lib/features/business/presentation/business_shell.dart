@@ -6,6 +6,7 @@ import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/company_profile.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/user_profile.dart';
 import 'package:saas_uchet_mobile/features/business/domain/business_gateway.dart';
+import 'package:saas_uchet_mobile/features/business/presentation/company_editor_screen.dart';
 import 'package:saas_uchet_mobile/features/business/presentation/nav_settings_screen.dart';
 import 'package:saas_uchet_mobile/features/business/presentation/profile_editor_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -76,6 +77,12 @@ class _BusinessShellState extends State<BusinessShell> {
 
   static const List<_FabMenuAction> _warehouseFabActions = [
     _FabMenuAction(
+      id: 'warehouse_add',
+      label: 'Новый склад',
+      icon: Icons.add_business_rounded,
+      color: Color(0xFF7C3AED),
+    ),
+    _FabMenuAction(
       id: 'warehouse_documents',
       label: 'Документы',
       icon: Icons.description_rounded,
@@ -96,6 +103,10 @@ class _BusinessShellState extends State<BusinessShell> {
   ];
 
   static const _prefKey = 'nav_tabs';
+  static const _activeCompanyKey = 'active_company_id';
+
+  List<_Company> _companies = const [];
+  String? _activeCompanyId;
 
   BusinessTab _activeTab = BusinessTab.dashboard;
   List<BusinessTab> _activeTabs = const [
@@ -117,8 +128,121 @@ class _BusinessShellState extends State<BusinessShell> {
   void initState() {
     super.initState();
     _session = widget.session;
-    _loadOverview();
+    _bootstrap();
     _loadTabPrefs();
+  }
+
+  Future<void> _bootstrap() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _activeCompanyId = prefs.getString(_activeCompanyKey);
+      if (_activeCompanyId != null && _activeCompanyId!.isNotEmpty) {
+        widget.businessGateway.activeCompanyId = _activeCompanyId;
+      }
+    } catch (_) {
+      // Preferences unavailable (e.g. in tests) — fall back to default company.
+    }
+    // Load the overview first so the loading spinner clears even if the
+    // companies request is slow, then refresh the switcher list.
+    await _loadOverview();
+    await _loadCompanies();
+  }
+
+  Future<void> _loadCompanies() async {
+    try {
+      final raw = await widget.businessGateway.fetchCompanies(
+        accessToken: _session.accessToken,
+      );
+      final companies = raw
+          .map(_companyFromJson)
+          .where((company) => company.id.isNotEmpty)
+          .toList(growable: false);
+
+      // Validate the stored active company; otherwise fall back to default.
+      var active = _activeCompanyId;
+      if (active == null || !companies.any((c) => c.id == active)) {
+        final defaults = companies.where((c) => c.isDefault).toList();
+        active = defaults.isNotEmpty
+            ? defaults.first.id
+            : (companies.isNotEmpty ? companies.first.id : null);
+        widget.businessGateway.activeCompanyId = active;
+        _activeCompanyId = active;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _companies = companies;
+        _activeTabs = _normalizeTabsForRole(_activeTabs);
+        if (!_activeTabs.contains(_activeTab)) {
+          _activeTab = BusinessTab.dashboard;
+        }
+      });
+    } catch (_) {
+      // Non-fatal: switcher just stays empty/unchanged.
+    }
+  }
+
+  Future<void> _switchCompany(String companyId) async {
+    if (companyId == _activeCompanyId) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_activeCompanyKey, companyId);
+    widget.businessGateway.activeCompanyId = companyId;
+    setState(() {
+      _activeCompanyId = companyId;
+      _activeTab = BusinessTab.dashboard;
+      _isFabExpanded = false;
+    });
+    await _loadOverview();
+  }
+
+  Future<void> _setDefaultCompany(String companyId) async {
+    try {
+      await widget.businessGateway.setDefaultCompany(
+        accessToken: _session.accessToken,
+        companyId: companyId,
+      );
+      await _loadCompanies();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Компания по умолчанию обновлена')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+
+  Future<void> _createCompany(Map<String, dynamic> payload) async {
+    final created = await widget.businessGateway.createCompany(
+      accessToken: _session.accessToken,
+      payload: payload,
+    );
+    await _loadCompanies();
+    final id = created['id'] as String?;
+    if (id != null && id.isNotEmpty) {
+      await _switchCompany(id);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Компания создана')),
+    );
+  }
+
+  Future<void> _addCompanyMember(
+    String companyId,
+    Map<String, dynamic> payload,
+  ) async {
+    await widget.businessGateway.addCompanyMember(
+      accessToken: _session.accessToken,
+      companyId: companyId,
+      payload: payload,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Сотрудник добавлен')),
+    );
   }
 
   Future<void> _loadTabPrefs() async {
@@ -135,7 +259,11 @@ class _BusinessShellState extends State<BusinessShell> {
         .toList();
     if (middle.isEmpty || !mounted) return;
     setState(() {
-      _activeTabs = [BusinessTab.dashboard, ...middle, BusinessTab.more];
+      _activeTabs = _normalizeTabsForRole([
+        BusinessTab.dashboard,
+        ...middle,
+        BusinessTab.more,
+      ]);
     });
   }
 
@@ -144,7 +272,11 @@ class _BusinessShellState extends State<BusinessShell> {
     await prefs.setString(_prefKey, middleTabs.map((t) => t.name).join(','));
     if (!mounted) return;
     setState(() {
-      _activeTabs = [BusinessTab.dashboard, ...middleTabs, BusinessTab.more];
+      _activeTabs = _normalizeTabsForRole([
+        BusinessTab.dashboard,
+        ...middleTabs,
+        BusinessTab.more,
+      ]);
       _activeTab = BusinessTab.dashboard;
       _isFabExpanded = false;
     });
@@ -217,6 +349,7 @@ class _BusinessShellState extends State<BusinessShell> {
       MaterialPageRoute<void>(
         builder: (context) => ProfileEditorScreen(
           authGateway: widget.authGateway,
+          businessGateway: widget.businessGateway,
           session: _session,
           onLogout: widget.onLogout,
           onSessionChanged: _handleSessionChanged,
@@ -227,6 +360,31 @@ class _BusinessShellState extends State<BusinessShell> {
     _loadOverview();
   }
 
+  Future<void> _openCompanyEditor() async {
+    final id = _activeCompanyId;
+    if (id == null) return;
+    if (!_canAccessCompanySettings()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('У вас нет доступа к настройкам компании')),
+      );
+      return;
+    }
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CompanyEditorScreen(
+          businessGateway: widget.businessGateway,
+          accessToken: _session.accessToken,
+          companyId: id,
+        ),
+      ),
+    );
+    if (changed == true) {
+      await _loadOverview();
+    }
+  }
+
   List<_FabMenuAction> _fabActionsForCurrentTab() {
     switch (_activeTab) {
       case BusinessTab.warehouse:
@@ -234,6 +392,72 @@ class _BusinessShellState extends State<BusinessShell> {
       default:
         return _defaultFabActions;
     }
+  }
+
+  String _currentCompanyRole() {
+    final active = _activeCompanyId;
+    if (active == null || active.isEmpty) {
+      final defaultCompany = _companies.where((c) => c.isDefault).firstOrNull;
+      return defaultCompany?.role ?? 'owner';
+    }
+    return _companies.where((c) => c.id == active).firstOrNull?.role ?? 'owner';
+  }
+
+  bool _canAccessCompanySettings() {
+    final role = _currentCompanyRole();
+    return role == 'owner' || role == 'admin';
+  }
+
+  List<BusinessTab> _allowedMiddleTabsForRole(String role) {
+    switch (role) {
+      case 'owner':
+      case 'admin':
+        return const [
+          BusinessTab.crm,
+          BusinessTab.warehouse,
+          BusinessTab.finance,
+          BusinessTab.catalog,
+          BusinessTab.production,
+          BusinessTab.sales,
+          BusinessTab.purchases,
+          BusinessTab.services,
+        ];
+      case 'manager':
+        return const [
+          BusinessTab.crm,
+          BusinessTab.warehouse,
+          BusinessTab.finance,
+          BusinessTab.catalog,
+          BusinessTab.production,
+        ];
+      case 'accountant':
+        return const [
+          BusinessTab.crm,
+          BusinessTab.finance,
+        ];
+      case 'warehouse':
+        return const [
+          BusinessTab.warehouse,
+          BusinessTab.catalog,
+        ];
+      case 'sales':
+        return const [
+          BusinessTab.crm,
+          BusinessTab.warehouse,
+          BusinessTab.catalog,
+        ];
+      default:
+        return const [];
+    }
+  }
+
+  List<BusinessTab> _normalizeTabsForRole(List<BusinessTab> tabs) {
+    final allowed = _allowedMiddleTabsForRole(_currentCompanyRole()).toSet();
+    final middle = tabs
+        .where((tab) => tab != BusinessTab.dashboard && tab != BusinessTab.more)
+        .where(allowed.contains)
+        .toList(growable: false);
+    return [BusinessTab.dashboard, ...middle, BusinessTab.more];
   }
 
   Future<void> _handleFabAction(_FabMenuAction action) async {
@@ -248,6 +472,9 @@ class _BusinessShellState extends State<BusinessShell> {
       }
 
       switch (action.id) {
+        case 'warehouse_add':
+          await warehouseState.openCreateWarehouse();
+          return;
         case 'warehouse_documents':
           await warehouseState.openInventoryDocuments();
           return;
@@ -271,7 +498,16 @@ class _BusinessShellState extends State<BusinessShell> {
   Widget _buildScreen(BusinessTab tab, _OverviewData overview) {
     switch (tab) {
       case BusinessTab.dashboard:
-        return _DashboardScreen(session: _session, overview: overview);
+        return _DashboardScreen(
+          session: _session,
+          overview: overview,
+          companies: _companies,
+          activeCompanyId: _activeCompanyId,
+          onSwitchCompany: _switchCompany,
+          onSetDefaultCompany: _setDefaultCompany,
+          onCreateCompany: _createCompany,
+          onAddCompanyMember: _addCompanyMember,
+        );
       case BusinessTab.crm:
         return _CrmScreen(
           accessToken: _session.accessToken,
@@ -304,9 +540,18 @@ class _BusinessShellState extends State<BusinessShell> {
           onLogout: widget.onLogout,
           onOpenProfile: _openProfileEditor,
           onNavSettingsOpen: _openNavSettings,
+          businessGateway: widget.businessGateway,
+          onOpenCompanyEditor: _openCompanyEditor,
+          activeCompany: _activeCompanyId != null
+              ? _companies.where((c) => c.id == _activeCompanyId).firstOrNull
+              : null,
         );
       case BusinessTab.production:
-        return const _ProductionScreen();
+        return _ProductionScreen(
+          accessToken: _session.accessToken,
+          products: overview.products,
+          businessGateway: widget.businessGateway,
+        );
       case BusinessTab.sales:
         return const _SalesScreen();
       case BusinessTab.purchases:
@@ -325,7 +570,10 @@ class _BusinessShellState extends State<BusinessShell> {
 
   @override
   Widget build(BuildContext context) {
-    final showFab = _activeTab != BusinessTab.more;
+    final showFab = _activeTab != BusinessTab.more &&
+        _activeTab != BusinessTab.catalog &&
+        _activeTab != BusinessTab.crm &&
+        _activeTab != BusinessTab.production;
     final fabActions = _fabActionsForCurrentTab();
     final overview = _overview;
 

@@ -3,12 +3,14 @@ package business
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/auth"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const defaultQueryTimeout = 5 * time.Second
@@ -69,7 +71,14 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 
 		client.Debt = int(creditLimit)
 		client.TotalSales = 0
+		client.SalesCount = 0
+		client.AverageSale = 0
+		client.PaymentsIn = 0
+		client.PaymentsOut = 0
+		client.OverdueAmount = 0
 		client.Interactions = []Interaction{}
+		client.OpenDocuments = []ClientDebtDocument{}
+		client.Timeline = []ClientTimelineItem{}
 		indexByID[client.ID] = len(clients)
 		clients = append(clients, client)
 	}
@@ -134,12 +143,17 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 		`SELECT
 		    c.id::text,
 		    COALESCE(sales.total_sales, 0),
+		    COALESCE(sales.sales_count, 0),
 		    COALESCE(docs.receivable, 0),
-		    COALESCE(docs.payable, 0)
+		    COALESCE(docs.payable, 0),
+		    COALESCE(docs.payments_in, 0),
+		    COALESCE(docs.payments_out, 0),
+		    COALESCE(docs.overdue_receivable, 0)
 		 FROM clients c
 		 LEFT JOIN (
 		   SELECT d.client_id,
-		          COALESCE(SUM(l.line_total), 0) AS total_sales
+		          COALESCE(SUM(l.line_total), 0) AS total_sales,
+		          COUNT(DISTINCT d.id) AS sales_count
 		   FROM inventory_documents d
 		   JOIN inventory_document_lines l ON l.document_id = d.id
 		   WHERE d.company_id = $1::uuid
@@ -150,7 +164,18 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 		 LEFT JOIN (
 		   SELECT d.client_id,
 		          COALESCE(SUM(CASE WHEN d.document_type = 'sale_receivable' THEN line_amounts.total_amount - paid.paid_amount ELSE 0 END), 0) AS receivable,
-		          COALESCE(SUM(CASE WHEN d.document_type = 'purchase_payable' THEN line_amounts.total_amount - paid.paid_amount ELSE 0 END), 0) AS payable
+		          COALESCE(SUM(CASE WHEN d.document_type = 'purchase_payable' THEN line_amounts.total_amount - paid.paid_amount ELSE 0 END), 0) AS payable,
+		          COALESCE(SUM(CASE WHEN d.document_type = 'sale_receivable' THEN paid.paid_amount ELSE 0 END), 0) AS payments_in,
+		          COALESCE(SUM(CASE WHEN d.document_type = 'purchase_payable' THEN paid.paid_amount ELSE 0 END), 0) AS payments_out,
+		          COALESCE(SUM(
+		            CASE
+		              WHEN d.document_type = 'sale_receivable'
+		               AND (COALESCE(line_amounts.total_amount, 0) - COALESCE(paid.paid_amount, 0)) > 0
+		               AND d.operation_date < CURRENT_DATE
+		              THEN line_amounts.total_amount - paid.paid_amount
+		              ELSE 0
+		            END
+		          ), 0) AS overdue_receivable
 		   FROM money_documents d
 		   LEFT JOIN (
 		     SELECT l.document_id, COALESCE(SUM(l.amount), 0) AS total_amount
@@ -179,9 +204,22 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 	for financialRows.Next() {
 		var clientID string
 		var totalSales float64
+		var salesCount int
 		var receivable float64
 		var payable float64
-		if err := financialRows.Scan(&clientID, &totalSales, &receivable, &payable); err != nil {
+		var paymentsIn float64
+		var paymentsOut float64
+		var overdueReceivable float64
+		if err := financialRows.Scan(
+			&clientID,
+			&totalSales,
+			&salesCount,
+			&receivable,
+			&payable,
+			&paymentsIn,
+			&paymentsOut,
+			&overdueReceivable,
+		); err != nil {
 			return nil, err
 		}
 		index, ok := indexByID[clientID]
@@ -189,8 +227,15 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 			continue
 		}
 		clients[index].TotalSales = int(totalSales)
+		clients[index].SalesCount = salesCount
+		if salesCount > 0 {
+			clients[index].AverageSale = int(totalSales) / salesCount
+		}
 		clients[index].Receivable = int(receivable)
 		clients[index].Payable = int(payable)
+		clients[index].PaymentsIn = int(paymentsIn)
+		clients[index].PaymentsOut = int(paymentsOut)
+		clients[index].OverdueAmount = int(overdueReceivable)
 		clients[index].Debt = clients[index].Receivable
 	}
 	if err := financialRows.Err(); err != nil {
@@ -260,7 +305,145 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 		clients[index].OpenDocuments = append(clients[index].OpenDocuments, document)
 	}
 
-	return clients, documentRows.Err()
+	if err := documentRows.Err(); err != nil {
+		return nil, err
+	}
+
+	timelineRows, err := s.db.QueryContext(
+		ctx,
+		`WITH client_timeline AS (
+		   SELECT
+		     d.client_id::text AS client_id,
+		     d.id::text AS document_id,
+		     d.document_type,
+		     d.document_type AS event_type,
+		     CASE
+		       WHEN d.document_type = 'sale_issue' THEN 'Продажа'
+		       WHEN d.document_type = 'purchase_receipt' THEN 'Закуп'
+		       ELSE 'Складской документ'
+		     END AS title,
+		     COALESCE(d.document_no, d.document_type) AS subtitle,
+		     d.document_date AS event_date,
+		     COALESCE(line_amounts.total_amount, 0) AS amount,
+		     CASE
+		       WHEN d.document_type = 'sale_issue' THEN 'success'
+		       WHEN d.document_type = 'purchase_receipt' THEN 'info'
+		       ELSE 'neutral'
+		     END AS tone,
+		     ROW_NUMBER() OVER (
+		       PARTITION BY d.client_id
+		       ORDER BY d.document_date DESC, d.created_at DESC
+		     ) AS position
+		   FROM inventory_documents d
+		   LEFT JOIN (
+		     SELECT document_id, COALESCE(SUM(line_total), 0) AS total_amount
+		     FROM inventory_document_lines
+		     GROUP BY document_id
+		   ) line_amounts ON line_amounts.document_id = d.id
+		   WHERE d.company_id = $1::uuid
+		     AND d.client_id IS NOT NULL
+		     AND d.document_type IN ('sale_issue', 'purchase_receipt')
+
+		   UNION ALL
+
+		   SELECT
+		     d.client_id::text AS client_id,
+		     d.id::text AS document_id,
+		     d.document_type,
+		     CASE
+		       WHEN d.document_type = 'sale_receivable' THEN 'payment_in'
+		       WHEN d.document_type = 'purchase_payable' THEN 'payment_out'
+		       ELSE 'payment'
+		     END AS event_type,
+		     CASE
+		       WHEN d.document_type = 'sale_receivable' THEN 'Оплата от клиента'
+		       WHEN d.document_type = 'purchase_payable' THEN 'Оплата поставщику'
+		       ELSE 'Оплата'
+		     END AS title,
+		     COALESCE(ca.name, 'Без счета') AS subtitle,
+		     mm.happened_at AS event_date,
+		     mm.amount AS amount,
+		     CASE
+		       WHEN d.document_type = 'sale_receivable' THEN 'success'
+		       WHEN d.document_type = 'purchase_payable' THEN 'warning'
+		       ELSE 'neutral'
+		     END AS tone,
+		     ROW_NUMBER() OVER (
+		       PARTITION BY d.client_id
+		       ORDER BY mm.happened_at DESC, mm.created_at DESC
+		     ) AS position
+		   FROM money_movements mm
+		   JOIN money_documents d ON d.id = mm.document_id
+		   LEFT JOIN cash_accounts ca ON ca.id = mm.account_id
+		   WHERE d.company_id = $1::uuid
+		     AND d.client_id IS NOT NULL
+		     AND d.document_type IN ('sale_receivable', 'purchase_payable')
+		 ),
+		 ranked AS (
+		   SELECT
+		     client_id,
+		     document_id,
+		     document_type,
+		     event_type,
+		     title,
+		     subtitle,
+		     event_date,
+		     amount,
+		     tone,
+		     ROW_NUMBER() OVER (
+		       PARTITION BY client_id
+		       ORDER BY event_date DESC, document_id DESC
+		     ) AS client_rank
+		   FROM client_timeline
+		 )
+		 SELECT
+		   client_id,
+		   document_id,
+		   document_type,
+		   event_type,
+		   title,
+		   subtitle,
+		   event_date,
+		   amount,
+		   tone
+		 FROM ranked
+		 WHERE client_rank <= 6
+		 ORDER BY event_date DESC, document_id DESC`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer timelineRows.Close()
+
+	for timelineRows.Next() {
+		var clientID string
+		var item ClientTimelineItem
+		var eventDate time.Time
+		var amount float64
+		if err := timelineRows.Scan(
+			&clientID,
+			&item.DocumentID,
+			&item.DocumentType,
+			&item.EventType,
+			&item.Title,
+			&item.Subtitle,
+			&eventDate,
+			&amount,
+			&item.Tone,
+		); err != nil {
+			return nil, err
+		}
+		index, ok := indexByID[clientID]
+		if !ok {
+			continue
+		}
+		item.EventDate = eventDate.Format("2006-01-02")
+		item.Amount = int(amount)
+		clients[index].Timeline = append(clients[index].Timeline, item)
+	}
+
+	return clients, timelineRows.Err()
 }
 
 func (s *PostgresStore) SaveClients(user auth.User, clients []Client) error {
@@ -344,6 +527,258 @@ func (s *PostgresStore) SaveClients(user auth.User, clients []Client) error {
 
 	err = tx.Commit()
 	return err
+}
+
+func (s *PostgresStore) ListWarehouses(user auth.User) ([]Warehouse, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id::text, name, COALESCE(code, ''), is_default
+		 FROM warehouses
+		 WHERE company_id = $1::uuid AND archived_at IS NULL
+		 ORDER BY is_default DESC, created_at ASC`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	warehouses := make([]Warehouse, 0)
+	for rows.Next() {
+		var warehouse Warehouse
+		if err := rows.Scan(&warehouse.ID, &warehouse.Name, &warehouse.Code, &warehouse.IsDefault); err != nil {
+			return nil, err
+		}
+		warehouses = append(warehouses, warehouse)
+	}
+
+	return warehouses, rows.Err()
+}
+
+func (s *PostgresStore) CreateWarehouse(user auth.User, input CreateWarehouseInput) (Warehouse, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return Warehouse{}, err
+	}
+
+	normalized := NormalizeWarehouseInput(input)
+	if err := ValidateWarehouseInput(normalized); err != nil {
+		return Warehouse{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Warehouse{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	warehouseID, _, err := s.ensureWarehouse(
+		ctx,
+		tx,
+		companyID,
+		normalized.Name,
+		normalized.Code,
+		"storage",
+	)
+	if err != nil {
+		return Warehouse{}, err
+	}
+
+	if normalized.Code != "" {
+		if _, err = tx.ExecContext(
+			ctx,
+			`UPDATE warehouses
+			 SET code = $3, updated_at = NOW()
+			 WHERE company_id = $1::uuid AND id = $2::uuid`,
+			companyID,
+			warehouseID,
+			normalized.Code,
+		); err != nil {
+			return Warehouse{}, err
+		}
+	}
+
+	var warehouse Warehouse
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT id::text, name, COALESCE(code, ''), is_default
+		 FROM warehouses
+		 WHERE company_id = $1::uuid AND id = $2::uuid`,
+		companyID,
+		warehouseID,
+	).Scan(&warehouse.ID, &warehouse.Name, &warehouse.Code, &warehouse.IsDefault)
+	if err != nil {
+		return Warehouse{}, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return Warehouse{}, err
+	}
+
+	return warehouse, nil
+}
+
+func (s *PostgresStore) ListWarehouseStock(user auth.User, warehouseID string, search string) ([]WarehouseStockItem, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	loweredSearch := strings.ToLower(strings.TrimSpace(search))
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    p.id::text,
+		    p.name,
+		    p.sku,
+		    COALESCE(pc.name, ''),
+		    p.unit_name,
+		    COALESCE(ib.quantity_on_hand, 0),
+		    p.min_quantity
+		 FROM inventory_balances ib
+		 JOIN products p ON p.id = ib.product_id
+		 LEFT JOIN product_categories pc ON pc.id = p.category_id
+		 WHERE ib.company_id = $1::uuid
+		   AND ib.warehouse_id = $2::uuid
+		   AND p.archived_at IS NULL
+		   AND COALESCE(ib.quantity_on_hand, 0) <> 0
+		   AND (
+		     $3 = ''
+		     OR LOWER(p.name) LIKE '%' || $3 || '%'
+		     OR LOWER(p.sku) LIKE '%' || $3 || '%'
+		   )
+		 ORDER BY p.name ASC`,
+		companyID,
+		warehouseID,
+		loweredSearch,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]WarehouseStockItem, 0)
+	for rows.Next() {
+		var item WarehouseStockItem
+		var available float64
+		var minQuantity float64
+		if err := rows.Scan(
+			&item.ProductID,
+			&item.ProductName,
+			&item.SKU,
+			&item.Category,
+			&item.UnitName,
+			&available,
+			&minQuantity,
+		); err != nil {
+			return nil, err
+		}
+		item.Available = int(available)
+		item.MinQuantity = int(minQuantity)
+		item.Status = productStatus(item.Available, item.MinQuantity)
+		items = append(items, item)
+	}
+
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) ListWarehouseMovements(user auth.User, warehouseID string, search string) ([]WarehouseMovement, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	loweredSearch := strings.ToLower(strings.TrimSpace(search))
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    m.id::text,
+		    m.document_id::text,
+		    COALESCE(d.document_no, d.document_type),
+		    d.document_type,
+		    m.movement_type,
+		    p.id::text,
+		    p.name,
+		    p.sku,
+		    m.quantity_delta,
+		    COALESCE(m.balance_after, 0),
+		    m.happened_at,
+		    w.name,
+		    COALESCE(rw.name, '')
+		 FROM inventory_movements m
+		 JOIN inventory_documents d ON d.id = m.document_id
+		 JOIN products p ON p.id = m.product_id
+		 JOIN warehouses w ON w.id = m.warehouse_id
+		 LEFT JOIN warehouses rw ON rw.id = d.related_warehouse_id
+		 WHERE m.company_id = $1::uuid
+		   AND m.warehouse_id = $2::uuid
+		   AND (
+		     $3 = ''
+		     OR LOWER(COALESCE(d.document_no, d.document_type)) LIKE '%' || $3 || '%'
+		     OR LOWER(p.name) LIKE '%' || $3 || '%'
+		     OR LOWER(p.sku) LIKE '%' || $3 || '%'
+		   )
+		 ORDER BY m.happened_at DESC, m.created_at DESC`,
+		companyID,
+		warehouseID,
+		loweredSearch,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	movements := make([]WarehouseMovement, 0)
+	for rows.Next() {
+		var movement WarehouseMovement
+		var quantity float64
+		var balanceAfter float64
+		var happenedAt time.Time
+		if err := rows.Scan(
+			&movement.ID,
+			&movement.DocumentID,
+			&movement.DocumentNo,
+			&movement.DocumentType,
+			&movement.MovementType,
+			&movement.ProductID,
+			&movement.ProductName,
+			&movement.SKU,
+			&quantity,
+			&balanceAfter,
+			&happenedAt,
+			&movement.WarehouseName,
+			&movement.RelatedWarehouse,
+		); err != nil {
+			return nil, err
+		}
+		movement.Quantity = int(quantity)
+		movement.BalanceAfter = int(balanceAfter)
+		movement.DocumentDate = happenedAt.Format("2006-01-02")
+		movements = append(movements, movement)
+	}
+
+	return movements, rows.Err()
 }
 
 func (s *PostgresStore) ListProducts(user auth.User) ([]Product, error) {
@@ -739,72 +1174,120 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 	totalQuantity := 0
 	totalAmount := 0
 	for index, inputLine := range normalized.Lines {
-		product, productErr := s.findProductByID(ctx, companyID, inputLine.ProductID)
-		if productErr != nil {
-			if errors.Is(productErr, sql.ErrNoRows) {
-				return InventoryDocumentDetail{}, fmt.Errorf("%w: product not found", ErrValidation)
-			}
-			return InventoryDocumentDetail{}, productErr
-		}
-
 		unitPrice := inputLine.UnitPrice
-		if unitPrice == 0 {
-			unitPrice = product.Price
-		}
 		unitCost := inputLine.UnitCost
-		if unitCost == 0 {
-			unitCost = product.Cost
-		}
-
-		var lineID string
-		if err = tx.QueryRowContext(
-			ctx,
-			`INSERT INTO inventory_document_lines (
-			   document_id, line_no, product_id, quantity, unit_price, unit_cost, note, created_at
-			 ) VALUES (
-			   $1::uuid, $2, $3::uuid, $4, $5, $6, NULLIF($7, ''), NOW()
-			 )
-			 RETURNING id::text`,
-			documentID,
-			index+1,
-			product.ID,
-			inputLine.Quantity,
-			unitPrice,
-			unitCost,
-			inputLine.Note,
-		).Scan(&lineID); err != nil {
-			return InventoryDocumentDetail{}, err
-		}
-
 		lineTotal := inputLine.Quantity * unitPrice
-		if err = s.applyInventoryMovement(
-			ctx,
-			tx,
-			companyID,
-			normalized.DocumentType,
-			sourceWarehouseID,
-			relatedWarehouseID,
-			product,
-			documentID,
-			lineID,
-			inputLine.Quantity,
-			unitCost,
-			documentDate,
-		); err != nil {
-			return InventoryDocumentDetail{}, err
-		}
 
-		totalQuantity += inputLine.Quantity
-		totalAmount += lineTotal
-		detail.Lines = append(detail.Lines, InventoryDocumentLine{
-			ProductName: product.Name,
-			SKU:         product.SKU,
-			Quantity:    inputLine.Quantity,
-			UnitPrice:   unitPrice,
-			UnitCost:    unitCost,
-			LineTotal:   lineTotal,
-			Note:        inputLine.Note,
-		})
+		if strings.TrimSpace(inputLine.ServiceID) != "" {
+			// Service line — no inventory movement
+			var svcName string
+			if err = tx.QueryRowContext(
+				ctx,
+				`SELECT name FROM services WHERE id = $1::uuid AND company_id = $2::uuid AND archived_at IS NULL`,
+				inputLine.ServiceID,
+				companyID,
+			).Scan(&svcName); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return InventoryDocumentDetail{}, fmt.Errorf("%w: service not found", ErrValidation)
+				}
+				return InventoryDocumentDetail{}, err
+			}
+			if err = tx.QueryRowContext(
+				ctx,
+				`INSERT INTO inventory_document_lines (
+				   document_id, line_no, service_id, quantity, unit_price, unit_cost, note, created_at
+				 ) VALUES (
+				   $1::uuid, $2, $3::uuid, $4, $5, $6, NULLIF($7, ''), NOW()
+				 )
+				 RETURNING id::text`,
+				documentID,
+				index+1,
+				inputLine.ServiceID,
+				inputLine.Quantity,
+				unitPrice,
+				unitCost,
+				inputLine.Note,
+			).Scan(new(string)); err != nil {
+				return InventoryDocumentDetail{}, err
+			}
+			totalQuantity += inputLine.Quantity
+			totalAmount += lineTotal
+			detail.Lines = append(detail.Lines, InventoryDocumentLine{
+				ItemName:  svcName,
+				ItemType:  "service",
+				Quantity:  inputLine.Quantity,
+				UnitPrice: unitPrice,
+				UnitCost:  unitCost,
+				LineTotal: lineTotal,
+				Note:      inputLine.Note,
+			})
+		} else {
+			// Product line — apply inventory movement
+			product, productErr := s.findProductByID(ctx, companyID, inputLine.ProductID)
+			if productErr != nil {
+				if errors.Is(productErr, sql.ErrNoRows) {
+					return InventoryDocumentDetail{}, fmt.Errorf("%w: product not found", ErrValidation)
+				}
+				return InventoryDocumentDetail{}, productErr
+			}
+			if unitPrice == 0 {
+				unitPrice = product.Price
+			}
+			if unitCost == 0 {
+				unitCost = product.Cost
+			}
+			lineTotal = inputLine.Quantity * unitPrice
+
+			var lineID string
+			if err = tx.QueryRowContext(
+				ctx,
+				`INSERT INTO inventory_document_lines (
+				   document_id, line_no, product_id, quantity, unit_price, unit_cost, note, created_at
+				 ) VALUES (
+				   $1::uuid, $2, $3::uuid, $4, $5, $6, NULLIF($7, ''), NOW()
+				 )
+				 RETURNING id::text`,
+				documentID,
+				index+1,
+				product.ID,
+				inputLine.Quantity,
+				unitPrice,
+				unitCost,
+				inputLine.Note,
+			).Scan(&lineID); err != nil {
+				return InventoryDocumentDetail{}, err
+			}
+
+			if err = s.applyInventoryMovement(
+				ctx,
+				tx,
+				companyID,
+				normalized.DocumentType,
+				sourceWarehouseID,
+				relatedWarehouseID,
+				product,
+				documentID,
+				lineID,
+				inputLine.Quantity,
+				unitCost,
+				documentDate,
+			); err != nil {
+				return InventoryDocumentDetail{}, err
+			}
+
+			totalQuantity += inputLine.Quantity
+			totalAmount += lineTotal
+			detail.Lines = append(detail.Lines, InventoryDocumentLine{
+				ItemName:  product.Name,
+				ItemType:  "product",
+				SKU:       product.SKU,
+				Quantity:  inputLine.Quantity,
+				UnitPrice: unitPrice,
+				UnitCost:  unitCost,
+				LineTotal: lineTotal,
+				Note:      inputLine.Note,
+			})
+		}
 	}
 
 	detail.Summary.TotalQuantity = totalQuantity
@@ -972,7 +1455,8 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 	rows, err := s.db.QueryContext(
 		ctx,
 		`SELECT
-		    COALESCE(p.name, ''),
+		    CASE WHEN l.service_id IS NOT NULL THEN 'service' ELSE 'product' END,
+		    COALESCE(p.name, s.name, ''),
 		    COALESCE(p.sku, ''),
 		    l.quantity,
 		    l.unit_price,
@@ -980,7 +1464,8 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		    COALESCE(l.line_total, 0),
 		    COALESCE(l.note, '')
 		 FROM inventory_document_lines l
-		 JOIN products p ON p.id = l.product_id
+		 LEFT JOIN products p ON p.id = l.product_id
+		 LEFT JOIN services s ON s.id = l.service_id
 		 WHERE l.document_id = $1::uuid
 		 ORDER BY l.line_no ASC`,
 		documentID,
@@ -998,7 +1483,8 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		var unitCost float64
 		var lineTotal float64
 		if err := rows.Scan(
-			&line.ProductName,
+			&line.ItemType,
+			&line.ItemName,
 			&line.SKU,
 			&quantity,
 			&unitPrice,
@@ -1968,6 +2454,28 @@ func (s *PostgresStore) SettleMoneyDocument(user auth.User, documentID string, i
 }
 
 func (s *PostgresStore) ensurePrimaryCompany(ctx context.Context, user auth.User) (string, error) {
+	// If the request specifies an active company, use it after verifying the
+	// user is a member of it. This powers multi-company switching.
+	if active := strings.TrimSpace(user.ActiveCompanyID); active != "" {
+		var found string
+		err := s.db.QueryRowContext(
+			ctx,
+			`SELECT cm.company_id::text
+			 FROM company_memberships cm
+			 WHERE cm.user_id = $1 AND cm.company_id = $2::uuid
+			 LIMIT 1`,
+			user.ID,
+			active,
+		).Scan(&found)
+		if err == nil {
+			return found, nil
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("%w: no access to the requested company", ErrValidation)
+		}
+		return "", err
+	}
+
 	var companyID string
 	err := s.db.QueryRowContext(
 		ctx,
@@ -2048,8 +2556,646 @@ func (s *PostgresStore) provisionCompanies(ctx context.Context, user auth.User) 
 	return defaultCompanyID, nil
 }
 
+func (s *PostgresStore) ListUserCompanies(user auth.User) ([]CompanyMembership, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	// Ensure the user has at least the default company provisioned.
+	if _, err := s.ensurePrimaryCompanyDefault(ctx, user); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    c.id::text,
+		    c.name,
+		    c.country_code,
+		    COALESCE(c.tax_identifier, ''),
+		    cm.role,
+		    cm.is_default_company
+		 FROM company_memberships cm
+		 JOIN companies c ON c.id = cm.company_id
+		 WHERE cm.user_id = $1 AND c.archived_at IS NULL
+		 ORDER BY cm.is_default_company DESC, c.created_at ASC`,
+		user.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	companies := make([]CompanyMembership, 0)
+	for rows.Next() {
+		var company CompanyMembership
+		if err := rows.Scan(
+			&company.ID,
+			&company.Name,
+			&company.Country,
+			&company.IIN,
+			&company.Role,
+			&company.IsDefault,
+		); err != nil {
+			return nil, err
+		}
+		companies = append(companies, company)
+	}
+	return companies, rows.Err()
+}
+
+// ensurePrimaryCompanyDefault resolves (and lazily provisions) the user's
+// default company, ignoring any active-company header. Used when we explicitly
+// need the user to have at least one company.
+func (s *PostgresStore) ensurePrimaryCompanyDefault(ctx context.Context, user auth.User) (string, error) {
+	plain := user
+	plain.ActiveCompanyID = ""
+	return s.ensurePrimaryCompany(ctx, plain)
+}
+
+func (s *PostgresStore) CreateCompany(user auth.User, input CreateCompanyInput) (CompanyMembership, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	normalized := NormalizeCompanyInput(input)
+	if err := ValidateCompanyInput(normalized); err != nil {
+		return CompanyMembership{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CompanyMembership{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var companyID string
+	if err = tx.QueryRowContext(
+		ctx,
+		`INSERT INTO companies (
+		   owner_user_id, name, country_code, tax_identifier, created_at, updated_at
+		 ) VALUES ($1, $2, $3, NULLIF($4, ''), NOW(), NOW())
+		 RETURNING id::text`,
+		user.ID,
+		normalized.Name,
+		normalized.Country,
+		normalized.IIN,
+	).Scan(&companyID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return CompanyMembership{}, fmt.Errorf("%w: компания с таким названием уже существует", ErrValidation)
+		}
+		return CompanyMembership{}, err
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO company_memberships (
+		   company_id, user_id, role, is_default_company, accepted_at, created_at, updated_at
+		 ) VALUES ($1::uuid, $2, 'owner', FALSE, NOW(), NOW(), NOW())`,
+		companyID,
+		user.ID,
+	); err != nil {
+		return CompanyMembership{}, err
+	}
+
+	if err = s.syncOwnedCompaniesSnapshot(ctx, tx, user.ID); err != nil {
+		return CompanyMembership{}, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return CompanyMembership{}, err
+	}
+
+	return CompanyMembership{
+		ID:        companyID,
+		Name:      normalized.Name,
+		Country:   normalized.Country,
+		IIN:       normalized.IIN,
+		Role:      "owner",
+		IsDefault: false,
+	}, nil
+}
+
+func (s *PostgresStore) ListCompanyMembers(user auth.User, companyID string) ([]CompanyMember, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	actorRole, err := s.actorRoleForCompany(ctx, user.ID, companyID)
+	if err != nil {
+		return nil, err
+	}
+	if actorRole != "owner" && actorRole != "admin" {
+		return nil, fmt.Errorf("%w: no access to the requested company", ErrValidation)
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    u.id,
+		    u.full_name,
+		    u.phone,
+		    cm.role,
+		    cm.created_at
+		 FROM company_memberships cm
+		 JOIN users u ON u.id = cm.user_id
+		 WHERE cm.company_id = $1::uuid
+		 ORDER BY
+		   CASE cm.role
+		     WHEN 'owner' THEN 0
+		     WHEN 'admin' THEN 1
+		     WHEN 'manager' THEN 2
+		     WHEN 'accountant' THEN 3
+		     WHEN 'warehouse' THEN 4
+		     WHEN 'sales' THEN 5
+		     ELSE 6
+		   END,
+		   cm.created_at ASC`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := make([]CompanyMember, 0)
+	for rows.Next() {
+		var member CompanyMember
+		var joinedAt time.Time
+		if err := rows.Scan(
+			&member.UserID,
+			&member.FullName,
+			&member.Phone,
+			&member.Role,
+			&joinedAt,
+		); err != nil {
+			return nil, err
+		}
+		member.RoleLabel = companyRoleLabel(member.Role)
+		member.IsOwner = member.Role == "owner"
+		member.IsCurrentUser = member.UserID == user.ID
+		member.JoinedAt = joinedAt.UTC().Format(time.RFC3339)
+		members = append(members, member)
+	}
+	return members, rows.Err()
+}
+
+func (s *PostgresStore) AddCompanyMember(user auth.User, companyID string, input AddCompanyMemberInput) (CompanyMember, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	normalized := NormalizeAddCompanyMemberInput(input)
+	if err := ValidateAddCompanyMemberInput(normalized); err != nil {
+		return CompanyMember{}, err
+	}
+
+	// Only owners/admins of the company may add members.
+	actorRole, err := s.actorRoleForCompany(ctx, user.ID, companyID)
+	if err != nil {
+		return CompanyMember{}, err
+	}
+	if actorRole != "owner" && actorRole != "admin" {
+		return CompanyMember{}, fmt.Errorf("%w: only owners or admins can add members", ErrValidation)
+	}
+
+	// Find the invited user by phone.
+	var invitedUserID string
+	var invitedFullName string
+	var invitedPhone string
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT id, full_name, phone FROM users WHERE phone = $1`,
+		normalized.Phone,
+	).Scan(&invitedUserID, &invitedFullName, &invitedPhone)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CompanyMember{}, fmt.Errorf("%w: no registered user with this phone", ErrValidation)
+		}
+		return CompanyMember{}, err
+	}
+
+	var joinedAt time.Time
+	err = s.db.QueryRowContext(
+		ctx,
+		`INSERT INTO company_memberships (
+		   company_id, user_id, role, is_default_company, accepted_at, created_at, updated_at
+		 ) VALUES ($1::uuid, $2, $3, FALSE, NOW(), NOW(), NOW())
+		 ON CONFLICT (company_id, user_id)
+		 DO UPDATE SET role = EXCLUDED.role, accepted_at = NOW(), updated_at = NOW()
+		 RETURNING created_at`,
+		companyID,
+		invitedUserID,
+		normalized.Role,
+	).Scan(&joinedAt)
+	if err != nil {
+		return CompanyMember{}, err
+	}
+
+	return CompanyMember{
+		UserID:        invitedUserID,
+		FullName:      invitedFullName,
+		Phone:         invitedPhone,
+		Role:          normalized.Role,
+		RoleLabel:     companyRoleLabel(normalized.Role),
+		IsOwner:       false,
+		IsCurrentUser: invitedUserID == user.ID,
+		JoinedAt:      joinedAt.UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func (s *PostgresStore) UpdateCompanyMemberRole(user auth.User, companyID string, memberUserID string, input UpdateCompanyMemberRoleInput) (CompanyMember, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	normalized := NormalizeUpdateCompanyMemberRoleInput(input)
+	if err := ValidateUpdateCompanyMemberRoleInput(normalized); err != nil {
+		return CompanyMember{}, err
+	}
+
+	actorRole, err := s.actorRoleForCompany(ctx, user.ID, companyID)
+	if err != nil {
+		return CompanyMember{}, err
+	}
+	if actorRole != "owner" && actorRole != "admin" {
+		return CompanyMember{}, fmt.Errorf("%w: only owners or admins can manage members", ErrValidation)
+	}
+	if actorRole == "admin" && memberUserID == user.ID {
+		return CompanyMember{}, fmt.Errorf("%w: admins cannot change their own role", ErrValidation)
+	}
+
+	var targetRole string
+	var joinedAt time.Time
+	var fullName string
+	var phone string
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT cm.role, cm.created_at, u.full_name, u.phone
+		 FROM company_memberships cm
+		 JOIN users u ON u.id = cm.user_id
+		 WHERE cm.company_id = $1::uuid AND cm.user_id = $2`,
+		companyID,
+		memberUserID,
+	).Scan(&targetRole, &joinedAt, &fullName, &phone)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CompanyMember{}, fmt.Errorf("%w: member not found", ErrValidation)
+		}
+		return CompanyMember{}, err
+	}
+	if targetRole == "owner" {
+		return CompanyMember{}, fmt.Errorf("%w: owner role cannot be changed", ErrValidation)
+	}
+
+	if _, err = s.db.ExecContext(
+		ctx,
+		`UPDATE company_memberships
+		 SET role = $3, updated_at = NOW()
+		 WHERE company_id = $1::uuid AND user_id = $2`,
+		companyID,
+		memberUserID,
+		normalized.Role,
+	); err != nil {
+		return CompanyMember{}, err
+	}
+
+	return CompanyMember{
+		UserID:        memberUserID,
+		FullName:      fullName,
+		Phone:         phone,
+		Role:          normalized.Role,
+		RoleLabel:     companyRoleLabel(normalized.Role),
+		IsOwner:       false,
+		IsCurrentUser: memberUserID == user.ID,
+		JoinedAt:      joinedAt.UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func (s *PostgresStore) RemoveCompanyMember(user auth.User, companyID string, memberUserID string) error {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	actorRole, err := s.actorRoleForCompany(ctx, user.ID, companyID)
+	if err != nil {
+		return err
+	}
+	if actorRole != "owner" && actorRole != "admin" {
+		return fmt.Errorf("%w: only owners or admins can manage members", ErrValidation)
+	}
+	if actorRole == "admin" && memberUserID == user.ID {
+		return fmt.Errorf("%w: admins cannot remove themselves", ErrValidation)
+	}
+
+	var targetRole string
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT role
+		 FROM company_memberships
+		 WHERE company_id = $1::uuid AND user_id = $2`,
+		companyID,
+		memberUserID,
+	).Scan(&targetRole)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: member not found", ErrValidation)
+		}
+		return err
+	}
+	if targetRole == "owner" {
+		return fmt.Errorf("%w: owner cannot be removed", ErrValidation)
+	}
+
+	result, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM company_memberships
+		 WHERE company_id = $1::uuid AND user_id = $2`,
+		companyID,
+		memberUserID,
+	)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("%w: member not found", ErrValidation)
+	}
+	return nil
+}
+
+func (s *PostgresStore) SetDefaultCompany(user auth.User, companyID string) error {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Verify membership.
+	var exists string
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT company_id::text FROM company_memberships
+		 WHERE user_id = $1 AND company_id = $2::uuid`,
+		user.ID,
+		companyID,
+	).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: no access to the requested company", ErrValidation)
+		}
+		return err
+	}
+
+	// Clear the current default first (partial unique index requires it).
+	if _, err = tx.ExecContext(
+		ctx,
+		`UPDATE company_memberships
+		 SET is_default_company = FALSE, updated_at = NOW()
+		 WHERE user_id = $1 AND is_default_company = TRUE`,
+		user.ID,
+	); err != nil {
+		return err
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`UPDATE company_memberships
+		 SET is_default_company = TRUE, updated_at = NOW()
+		 WHERE user_id = $1 AND company_id = $2::uuid`,
+		user.ID,
+		companyID,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *PostgresStore) actorRoleForCompany(ctx context.Context, userID string, companyID string) (string, error) {
+	var actorRole string
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT role FROM company_memberships
+		 WHERE user_id = $1 AND company_id = $2::uuid`,
+		userID,
+		companyID,
+	).Scan(&actorRole)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("%w: no access to the requested company", ErrValidation)
+		}
+		return "", err
+	}
+	return actorRole, nil
+}
+
+func (s *PostgresStore) GetCompany(user auth.User, companyID string) (CompanyDetail, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	var detail CompanyDetail
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    c.id::text,
+		    c.name,
+		    COALESCE(c.legal_form, ''),
+		    c.country_code,
+		    COALESCE(c.tax_identifier, ''),
+		    COALESCE(c.registration_number, ''),
+		    COALESCE(c.email, ''),
+		    COALESCE(c.phone, ''),
+		    COALESCE(c.address_line, ''),
+		    COALESCE(c.city, ''),
+		    COALESCE(c.region, ''),
+		    COALESCE(c.postal_code, ''),
+		    COALESCE(c.bank_name, ''),
+		    COALESCE(c.bank_account, ''),
+		    COALESCE(c.bank_bik, ''),
+		    c.is_vat_payer,
+		    cm.role,
+		    cm.is_default_company
+		 FROM companies c
+		 JOIN company_memberships cm
+		   ON cm.company_id = c.id AND cm.user_id = $1
+		 WHERE c.id = $2::uuid AND c.archived_at IS NULL`,
+		user.ID,
+		companyID,
+	).Scan(
+		&detail.ID,
+		&detail.Name,
+		&detail.LegalForm,
+		&detail.Country,
+		&detail.IIN,
+		&detail.RegistrationNo,
+		&detail.Email,
+		&detail.Phone,
+		&detail.AddressLine,
+		&detail.City,
+		&detail.Region,
+		&detail.PostalCode,
+		&detail.BankName,
+		&detail.BankAccount,
+		&detail.BankBik,
+		&detail.IsVatPayer,
+		&detail.Role,
+		&detail.IsDefault,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CompanyDetail{}, fmt.Errorf("%w: company not found or no access", ErrValidation)
+		}
+		return CompanyDetail{}, err
+	}
+	return detail, nil
+}
+
+func (s *PostgresStore) UpdateCompany(user auth.User, companyID string, input UpdateCompanyInput) (CompanyDetail, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	normalized := NormalizeUpdateCompanyInput(input)
+	if err := ValidateUpdateCompanyInput(normalized); err != nil {
+		return CompanyDetail{}, err
+	}
+
+	// Only owners and admins may edit company data.
+	var actorRole string
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT role FROM company_memberships
+		 WHERE user_id = $1 AND company_id = $2::uuid`,
+		user.ID,
+		companyID,
+	).Scan(&actorRole)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CompanyDetail{}, fmt.Errorf("%w: no access to the requested company", ErrValidation)
+		}
+		return CompanyDetail{}, err
+	}
+	if actorRole != "owner" && actorRole != "admin" {
+		return CompanyDetail{}, fmt.Errorf("%w: only owners and admins can edit company details", ErrValidation)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CompanyDetail{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var pgErr *pgconn.PgError
+	_, err = tx.ExecContext(
+		ctx,
+		`UPDATE companies SET
+		    name              = $3,
+		    legal_form        = NULLIF($4, ''),
+		    country_code      = $5,
+		    tax_identifier    = NULLIF($6, ''),
+		    email             = NULLIF($7, ''),
+		    phone             = NULLIF($8, ''),
+		    address_line      = NULLIF($9, ''),
+		    city              = NULLIF($10, ''),
+		    region            = NULLIF($11, ''),
+		    postal_code       = NULLIF($12, ''),
+		    bank_name         = NULLIF($13, ''),
+		    bank_account      = NULLIF($14, ''),
+		    bank_bik          = NULLIF($15, ''),
+		    is_vat_payer      = $16,
+		    updated_at        = NOW()
+		 WHERE id = $1::uuid AND owner_user_id = $2`,
+		companyID,
+		user.ID,
+		normalized.Name,
+		normalized.LegalForm,
+		normalized.Country,
+		normalized.IIN,
+		normalized.Email,
+		normalized.Phone,
+		normalized.AddressLine,
+		normalized.City,
+		normalized.Region,
+		normalized.PostalCode,
+		normalized.BankName,
+		normalized.BankAccount,
+		normalized.BankBik,
+		normalized.IsVatPayer,
+	)
+	if err != nil {
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return CompanyDetail{}, fmt.Errorf("%w: компания с таким названием уже существует", ErrValidation)
+		}
+		return CompanyDetail{}, err
+	}
+
+	if err = s.syncOwnedCompaniesSnapshot(ctx, tx, user.ID); err != nil {
+		return CompanyDetail{}, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return CompanyDetail{}, err
+	}
+
+	return s.GetCompany(user, companyID)
+}
+
 func (s *PostgresStore) withTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), s.queryTimeout)
+}
+
+func (s *PostgresStore) syncOwnedCompaniesSnapshot(ctx context.Context, tx *sql.Tx, userID string) error {
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT name, country_code, COALESCE(tax_identifier, '')
+		 FROM companies
+		 WHERE owner_user_id = $1 AND archived_at IS NULL
+		 ORDER BY created_at ASC`,
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	companies := make([]auth.Company, 0)
+	for rows.Next() {
+		var company auth.Company
+		if err := rows.Scan(&company.Name, &company.Country, &company.IIN); err != nil {
+			return err
+		}
+		companies = append(companies, company)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(companies)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`UPDATE users
+		 SET companies_json = $2
+		 WHERE id = $1`,
+		userID,
+		string(payload),
+	)
+	return err
 }
 
 func (s *PostgresStore) findProductByID(ctx context.Context, companyID string, productID string) (Product, error) {
@@ -3035,4 +4181,472 @@ func (s *PostgresStore) DeleteService(user auth.User, serviceID string) error {
 		return fmt.Errorf("%w: service not found", ErrValidation)
 	}
 	return nil
+}
+
+// ── Recipes ───────────────────────────────────────────────────────────────────
+
+func (s *PostgresStore) ListRecipes(user auth.User) ([]Recipe, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id::text, name, description
+		 FROM recipes
+		 WHERE company_id = $1 AND archived_at IS NULL
+		 ORDER BY created_at DESC`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	recipes := make([]Recipe, 0)
+	indexByID := make(map[string]int)
+	for rows.Next() {
+		var r Recipe
+		if err := rows.Scan(&r.ID, &r.Name, &r.Description); err != nil {
+			return nil, err
+		}
+		r.Ingredients = []RecipeIngredient{}
+		r.Services = []RecipeService{}
+		r.Outputs = []RecipeOutput{}
+		indexByID[r.ID] = len(recipes)
+		recipes = append(recipes, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(recipes) == 0 {
+		return []Recipe{}, nil
+	}
+
+	ingRows, err := s.db.QueryContext(
+		ctx,
+		`SELECT ri.id::text, ri.recipe_id::text, ri.product_id::text,
+		        COALESCE(p.name,''), COALESCE(ri.unit_name,'шт'), ri.quantity
+		 FROM recipe_ingredients ri
+		 LEFT JOIN products p ON p.id = ri.product_id
+		 WHERE ri.recipe_id IN (SELECT id FROM recipes WHERE company_id=$1 AND archived_at IS NULL)`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer ingRows.Close()
+	for ingRows.Next() {
+		var ing RecipeIngredient
+		var recipeID string
+		if err := ingRows.Scan(&ing.ID, &recipeID, &ing.ProductID, &ing.ProductName, &ing.UnitName, &ing.Quantity); err != nil {
+			return nil, err
+		}
+		if idx, ok := indexByID[recipeID]; ok {
+			recipes[idx].Ingredients = append(recipes[idx].Ingredients, ing)
+		}
+	}
+	if err := ingRows.Err(); err != nil {
+		return nil, err
+	}
+
+	svcRows, err := s.db.QueryContext(
+		ctx,
+		`SELECT rs.id::text, rs.recipe_id::text, rs.service_id::text,
+		        COALESCE(sv.name,''), rs.quantity
+		 FROM recipe_services rs
+		 LEFT JOIN services sv ON sv.id = rs.service_id
+		 WHERE rs.recipe_id IN (SELECT id FROM recipes WHERE company_id=$1 AND archived_at IS NULL)`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer svcRows.Close()
+	for svcRows.Next() {
+		var rs RecipeService
+		var recipeID string
+		if err := svcRows.Scan(&rs.ID, &recipeID, &rs.ServiceID, &rs.ServiceName, &rs.Quantity); err != nil {
+			return nil, err
+		}
+		if idx, ok := indexByID[recipeID]; ok {
+			recipes[idx].Services = append(recipes[idx].Services, rs)
+		}
+	}
+	if err := svcRows.Err(); err != nil {
+		return nil, err
+	}
+
+	outRows, err := s.db.QueryContext(
+		ctx,
+		`SELECT ro.id::text, ro.recipe_id::text, ro.product_id::text,
+		        COALESCE(p.name,''), COALESCE(ro.unit_name,'шт'), ro.quantity
+		 FROM recipe_outputs ro
+		 LEFT JOIN products p ON p.id = ro.product_id
+		 WHERE ro.recipe_id IN (SELECT id FROM recipes WHERE company_id=$1 AND archived_at IS NULL)`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer outRows.Close()
+	for outRows.Next() {
+		var out RecipeOutput
+		var recipeID string
+		if err := outRows.Scan(&out.ID, &recipeID, &out.ProductID, &out.ProductName, &out.UnitName, &out.Quantity); err != nil {
+			return nil, err
+		}
+		if idx, ok := indexByID[recipeID]; ok {
+			recipes[idx].Outputs = append(recipes[idx].Outputs, out)
+		}
+	}
+	return recipes, outRows.Err()
+}
+
+func (s *PostgresStore) CreateRecipe(user auth.User, input CreateRecipeInput) (Recipe, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return Recipe{}, err
+	}
+
+	normalized := NormalizeRecipeInput(input)
+	if err := ValidateRecipeInput(normalized); err != nil {
+		return Recipe{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Recipe{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	recipeID := mustGenerateProductID()
+	if _, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO recipes (id, company_id, name, description, created_at, updated_at)
+		 VALUES ($1::uuid, $2::uuid, $3, $4, NOW(), NOW())`,
+		recipeID, companyID, normalized.Name, normalized.Description,
+	); err != nil {
+		return Recipe{}, err
+	}
+
+	recipe := Recipe{
+		ID: recipeID, Name: normalized.Name, Description: normalized.Description,
+		Ingredients: []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
+	}
+
+	for _, ing := range normalized.Ingredients {
+		id := mustGenerateProductID()
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO recipe_ingredients (id, recipe_id, product_id, quantity, unit_name, created_at)
+			 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW())`,
+			id, recipeID, ing.ProductID, ing.Quantity, ing.UnitName,
+		); err != nil {
+			return Recipe{}, err
+		}
+		recipe.Ingredients = append(recipe.Ingredients, RecipeIngredient{ID: id, ProductID: ing.ProductID, UnitName: ing.UnitName, Quantity: ing.Quantity})
+	}
+
+	for _, svc := range normalized.Services {
+		id := mustGenerateProductID()
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO recipe_services (id, recipe_id, service_id, quantity, created_at)
+			 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, NOW())`,
+			id, recipeID, svc.ServiceID, svc.Quantity,
+		); err != nil {
+			return Recipe{}, err
+		}
+		recipe.Services = append(recipe.Services, RecipeService{ID: id, ServiceID: svc.ServiceID, Quantity: svc.Quantity})
+	}
+
+	for _, out := range normalized.Outputs {
+		id := mustGenerateProductID()
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO recipe_outputs (id, recipe_id, product_id, quantity, unit_name, created_at)
+			 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW())`,
+			id, recipeID, out.ProductID, out.Quantity, out.UnitName,
+		); err != nil {
+			return Recipe{}, err
+		}
+		recipe.Outputs = append(recipe.Outputs, RecipeOutput{ID: id, ProductID: out.ProductID, UnitName: out.UnitName, Quantity: out.Quantity})
+	}
+
+	if err = tx.Commit(); err != nil {
+		return Recipe{}, err
+	}
+	return recipe, nil
+}
+
+func (s *PostgresStore) UpdateRecipe(user auth.User, recipeID string, input CreateRecipeInput) (Recipe, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return Recipe{}, err
+	}
+
+	normalized := NormalizeRecipeInput(input)
+	if err := ValidateRecipeInput(normalized); err != nil {
+		return Recipe{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Recipe{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	result, err := tx.ExecContext(ctx,
+		`UPDATE recipes SET name=$3, description=$4, updated_at=NOW()
+		 WHERE id=$1::uuid AND company_id=$2::uuid AND archived_at IS NULL`,
+		recipeID, companyID, normalized.Name, normalized.Description,
+	)
+	if err != nil {
+		return Recipe{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return Recipe{}, fmt.Errorf("%w: recipe not found", ErrValidation)
+	}
+
+	for _, tbl := range []string{"recipe_ingredients", "recipe_services", "recipe_outputs"} {
+		if _, err = tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE recipe_id = $1::uuid", tbl), recipeID); err != nil {
+			return Recipe{}, err
+		}
+	}
+
+	recipe := Recipe{
+		ID: recipeID, Name: normalized.Name, Description: normalized.Description,
+		Ingredients: []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
+	}
+
+	for _, ing := range normalized.Ingredients {
+		id := mustGenerateProductID()
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO recipe_ingredients (id, recipe_id, product_id, quantity, unit_name, created_at)
+			 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW())`,
+			id, recipeID, ing.ProductID, ing.Quantity, ing.UnitName,
+		); err != nil {
+			return Recipe{}, err
+		}
+		recipe.Ingredients = append(recipe.Ingredients, RecipeIngredient{ID: id, ProductID: ing.ProductID, UnitName: ing.UnitName, Quantity: ing.Quantity})
+	}
+
+	for _, svc := range normalized.Services {
+		id := mustGenerateProductID()
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO recipe_services (id, recipe_id, service_id, quantity, created_at)
+			 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, NOW())`,
+			id, recipeID, svc.ServiceID, svc.Quantity,
+		); err != nil {
+			return Recipe{}, err
+		}
+		recipe.Services = append(recipe.Services, RecipeService{ID: id, ServiceID: svc.ServiceID, Quantity: svc.Quantity})
+	}
+
+	for _, out := range normalized.Outputs {
+		id := mustGenerateProductID()
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO recipe_outputs (id, recipe_id, product_id, quantity, unit_name, created_at)
+			 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW())`,
+			id, recipeID, out.ProductID, out.Quantity, out.UnitName,
+		); err != nil {
+			return Recipe{}, err
+		}
+		recipe.Outputs = append(recipe.Outputs, RecipeOutput{ID: id, ProductID: out.ProductID, UnitName: out.UnitName, Quantity: out.Quantity})
+	}
+
+	if err = tx.Commit(); err != nil {
+		return Recipe{}, err
+	}
+	return recipe, nil
+}
+
+func (s *PostgresStore) DeleteRecipe(user auth.User, recipeID string) error {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return err
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE recipes SET archived_at=NOW(), is_active=FALSE, updated_at=NOW()
+		 WHERE id=$1::uuid AND company_id=$2::uuid AND archived_at IS NULL`,
+		recipeID, companyID,
+	)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return fmt.Errorf("%w: recipe not found", ErrValidation)
+	}
+	return nil
+}
+
+// ── Production Orders ─────────────────────────────────────────────────────────
+
+func (s *PostgresStore) ListProductionOrders(user auth.User) ([]ProductionOrder, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT
+		    po.id::text,
+		    po.document_no,
+		    COALESCE(po.recipe_id::text, ''),
+		    COALESCE(r.name, ''),
+		    COALESCE(po.source_warehouse_id::text, ''),
+		    COALESCE(sw.name, ''),
+		    COALESCE(po.output_warehouse_id::text, ''),
+		    COALESCE(ow.name, ''),
+		    po.batch_number,
+		    po.responsible_employee,
+		    po.planned_quantity,
+		    po.status,
+		    COALESCE(po.planned_date::text, ''),
+		    po.notes,
+		    po.created_at::text
+		 FROM production_orders po
+		 LEFT JOIN recipes r ON r.id = po.recipe_id
+		 LEFT JOIN warehouses sw ON sw.id = po.source_warehouse_id
+		 LEFT JOIN warehouses ow ON ow.id = po.output_warehouse_id
+		 WHERE po.company_id = $1
+		 ORDER BY po.created_at DESC`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := make([]ProductionOrder, 0)
+	for rows.Next() {
+		var o ProductionOrder
+		if err := rows.Scan(
+			&o.ID, &o.DocumentNo, &o.RecipeID, &o.RecipeName,
+			&o.SourceWarehouseID, &o.SourceWarehouseName,
+			&o.OutputWarehouseID, &o.OutputWarehouseName,
+			&o.BatchNumber, &o.ResponsibleEmployee,
+			&o.PlannedQuantity, &o.Status, &o.PlannedDate, &o.Notes, &o.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		orders = append(orders, o)
+	}
+	return orders, rows.Err()
+}
+
+func (s *PostgresStore) CreateProductionOrder(user auth.User, input CreateProductionOrderInput) (ProductionOrder, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return ProductionOrder{}, err
+	}
+
+	normalized := NormalizeProductionOrderInput(input)
+	if err := ValidateProductionOrderInput(normalized); err != nil {
+		return ProductionOrder{}, err
+	}
+
+	if normalized.DocumentNo == "" {
+		normalized.DocumentNo = fmt.Sprintf("PRD-%d", time.Now().UnixMilli())
+	}
+
+	orderID := mustGenerateProductID()
+	var plannedDate *string
+	if normalized.PlannedDate != "" {
+		plannedDate = &normalized.PlannedDate
+	}
+
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO production_orders
+		   (id, company_id, document_no, recipe_id, source_warehouse_id, output_warehouse_id,
+		    batch_number, responsible_employee, planned_quantity, status, planned_date, notes,
+		    created_by_user_id, created_at, updated_at)
+		 VALUES
+		   ($1::uuid, $2::uuid, $3,
+		    NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, NULLIF($6,'')::uuid,
+		    $7, $8, $9, 'draft', $10::date, $11, NULLIF($12,''), NOW(), NOW())`,
+		orderID, companyID, normalized.DocumentNo,
+		normalized.RecipeID, normalized.SourceWarehouseID, normalized.OutputWarehouseID,
+		normalized.BatchNumber, normalized.ResponsibleEmployee, normalized.PlannedQuantity,
+		plannedDate, normalized.Notes, user.ID,
+	)
+	if err != nil {
+		return ProductionOrder{}, err
+	}
+
+	orders, err := s.ListProductionOrders(user)
+	if err != nil {
+		return ProductionOrder{}, err
+	}
+	for _, o := range orders {
+		if o.ID == orderID {
+			return o, nil
+		}
+	}
+	return ProductionOrder{ID: orderID, DocumentNo: normalized.DocumentNo, Status: "draft"}, nil
+}
+
+func (s *PostgresStore) UpdateProductionOrderStatus(user auth.User, orderID string, input UpdateProductionOrderStatusInput) (ProductionOrder, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return ProductionOrder{}, err
+	}
+
+	switch input.Status {
+	case "draft", "in_progress", "completed", "cancelled":
+	default:
+		return ProductionOrder{}, fmt.Errorf("%w: invalid status", ErrValidation)
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE production_orders SET status=$3, updated_at=NOW()
+		 WHERE id=$1::uuid AND company_id=$2::uuid`,
+		orderID, companyID, input.Status,
+	)
+	if err != nil {
+		return ProductionOrder{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ProductionOrder{}, fmt.Errorf("%w: production order not found", ErrValidation)
+	}
+
+	orders, err := s.ListProductionOrders(user)
+	if err != nil {
+		return ProductionOrder{}, err
+	}
+	for _, o := range orders {
+		if o.ID == orderID {
+			return o, nil
+		}
+	}
+	return ProductionOrder{ID: orderID, Status: input.Status}, nil
 }

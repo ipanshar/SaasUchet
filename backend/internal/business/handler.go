@@ -30,20 +30,11 @@ func (h Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	if !h.requireActiveCompanyPermission(w, user) {
 		return
 	}
 
@@ -68,24 +59,42 @@ func (h Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response.JSON(w, http.StatusOK, buildOverview(user, clients, products, finance))
+	companyName := h.resolveActiveCompanyName(user)
+
+	response.JSON(w, http.StatusOK, buildOverview(user, companyName, clients, products, finance))
+}
+
+// resolveActiveCompanyName returns the name of the user's active company (or
+// the default one). Empty string falls back to the legacy companies_json name.
+func (h Handler) resolveActiveCompanyName(user auth.User) string {
+	companies, err := h.store.ListUserCompanies(user)
+	if err != nil || len(companies) == 0 {
+		return ""
+	}
+	active := strings.TrimSpace(user.ActiveCompanyID)
+	for _, company := range companies {
+		if active != "" && company.ID == active {
+			return company.Name
+		}
+	}
+	for _, company := range companies {
+		if company.IsDefault {
+			return company.Name
+		}
+	}
+	return companies[0].Name
 }
 
 func (h Handler) Clients(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	permission := permCRMRead
+	if r.Method != http.MethodGet {
+		permission = permCRMWrite
+	}
+	if !h.requireActiveCompanyPermission(w, user, permission) {
 		return
 	}
 
@@ -100,26 +109,17 @@ func (h Handler) Clients(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ClientByID(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 
 	clientID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/clients/"))
 	if clientID == "" || strings.Contains(clientID, "/") {
 		response.Error(w, http.StatusNotFound, "client not found")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permCRMWrite) {
 		return
 	}
 
@@ -134,20 +134,15 @@ func (h Handler) ClientByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) Products(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	permission := permCatalogRead
+	if r.Method != http.MethodGet {
+		permission = permCatalogWrite
+	}
+	if !h.requireActiveCompanyPermission(w, user, permission) {
 		return
 	}
 
@@ -184,27 +179,65 @@ func (h Handler) Products(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h Handler) ProductByID(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+func (h Handler) Warehouses(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+	permission := permWarehouseRead
+	if r.Method != http.MethodGet {
+		permission = permWarehouseWrite
+	}
+	if !h.requireActiveCompanyPermission(w, user, permission) {
 		return
 	}
 
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
+	switch r.Method {
+	case http.MethodGet:
+		warehouses, err := h.store.ListWarehouses(user)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
+		response.JSON(w, http.StatusOK, map[string]any{"warehouses": warehouses})
+	case http.MethodPost:
+		var input CreateWarehouseInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		input = NormalizeWarehouseInput(input)
+		if err := ValidateWarehouseInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		warehouse, err := h.store.CreateWarehouse(user, input)
+		if err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusCreated, warehouse)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
 
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+func (h Handler) ProductByID(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 
 	productID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/products/"))
 	if productID == "" || strings.Contains(productID, "/") {
 		response.Error(w, http.StatusNotFound, "product not found")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permCatalogWrite) {
 		return
 	}
 
@@ -242,20 +275,15 @@ func (h Handler) ProductByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) Accounts(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	permission := permFinanceRead
+	if r.Method != http.MethodGet {
+		permission = permFinanceWrite
+	}
+	if !h.requireActiveCompanyPermission(w, user, permission) {
 		return
 	}
 
@@ -300,20 +328,11 @@ func (h Handler) Accounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) MoneyOperations(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	if !h.requireActiveCompanyPermission(w, user, permFinanceWrite) {
 		return
 	}
 
@@ -349,20 +368,15 @@ func (h Handler) MoneyOperations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) InventoryDocuments(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	permission := permWarehouseRead
+	if r.Method != http.MethodGet {
+		permission = permWarehouseWrite
+	}
+	if !h.requireActiveCompanyPermission(w, user, permission) {
 		return
 	}
 
@@ -409,25 +423,16 @@ func (h Handler) InventoryDocuments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) InventoryDocumentByID(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 
 	if r.Method != http.MethodGet {
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permWarehouseRead) {
 		return
 	}
 
@@ -445,26 +450,70 @@ func (h Handler) InventoryDocumentByID(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, document)
 }
 
-func (h Handler) MoneyDocuments(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+func (h Handler) WarehouseByID(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
+	path := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/warehouses/"))
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+		response.Error(w, http.StatusNotFound, "warehouse not found")
+		return
+	}
+
+	warehouseID := strings.TrimSpace(parts[0])
+	action := strings.TrimSpace(parts[1])
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permWarehouseRead) {
+		return
+	}
+
+	switch action {
+	case "stock":
+		items, err := h.store.ListWarehouseStock(user, warehouseID, search)
+		if err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusNotFound, "warehouse not found")
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
+		response.JSON(w, http.StatusOK, map[string]any{"items": items})
+	case "movements":
+		movements, err := h.store.ListWarehouseMovements(user, warehouseID, search)
+		if err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusNotFound, "warehouse not found")
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{"movements": movements})
+	default:
+		response.Error(w, http.StatusNotFound, "warehouse section not found")
+	}
+}
 
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+func (h Handler) MoneyDocuments(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 
 	if r.Method != http.MethodGet {
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permFinanceRead) {
 		return
 	}
 
@@ -482,20 +531,8 @@ func (h Handler) MoneyDocuments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) MoneyDocumentByID(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 
@@ -506,6 +543,9 @@ func (h Handler) MoneyDocumentByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasSuffix(path, "/settle") {
+		if !h.requireActiveCompanyPermission(w, user, permFinanceWrite) {
+			return
+		}
 		if r.Method != http.MethodPost {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -544,6 +584,9 @@ func (h Handler) MoneyDocumentByID(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodGet {
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permFinanceRead) {
 		return
 	}
 
@@ -674,19 +717,15 @@ func indexOfClient(clients []Client, clientID string) int {
 }
 
 func (h Handler) Services(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	permission := permCatalogRead
+	if r.Method != http.MethodGet {
+		permission = permCatalogWrite
+	}
+	if !h.requireActiveCompanyPermission(w, user, permission) {
 		return
 	}
 
@@ -721,25 +760,17 @@ func (h Handler) Services(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ServiceByID(w http.ResponseWriter, r *http.Request) {
-	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		response.Error(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-
-	user, err := h.authenticator.Authenticate(accessToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrUnauthorized) {
-			response.Error(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	user, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 
 	serviceID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/catalog/services/"))
 	if serviceID == "" || strings.Contains(serviceID, "/") {
 		response.Error(w, http.StatusNotFound, "service not found")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permCatalogWrite) {
 		return
 	}
 
@@ -770,6 +801,476 @@ func (h Handler) ServiceByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (h Handler) Recipes(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+	permission := permProductionRead
+	if r.Method != http.MethodGet {
+		permission = permProductionWrite
+	}
+	if !h.requireActiveCompanyPermission(w, user, permission) {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		recipes, err := h.store.ListRecipes(user)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{"recipes": recipes})
+	case http.MethodPost:
+		var input CreateRecipeInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		input = NormalizeRecipeInput(input)
+		if err := ValidateRecipeInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		recipe, err := h.store.CreateRecipe(user, input)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusCreated, recipe)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) RecipeByID(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	recipeID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/production/recipes/"))
+	if recipeID == "" || strings.Contains(recipeID, "/") {
+		response.Error(w, http.StatusNotFound, "recipe not found")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permProductionWrite) {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var input CreateRecipeInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		input = NormalizeRecipeInput(input)
+		if err := ValidateRecipeInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		recipe, err := h.store.UpdateRecipe(user, recipeID, input)
+		if err != nil {
+			response.Error(w, http.StatusNotFound, "recipe not found")
+			return
+		}
+		response.JSON(w, http.StatusOK, recipe)
+	case http.MethodDelete:
+		if err := h.store.DeleteRecipe(user, recipeID); err != nil {
+			response.Error(w, http.StatusNotFound, "recipe not found")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) ProductionOrders(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+	permission := permProductionRead
+	if r.Method != http.MethodGet {
+		permission = permProductionWrite
+	}
+	if !h.requireActiveCompanyPermission(w, user, permission) {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		orders, err := h.store.ListProductionOrders(user)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{"orders": orders})
+	case http.MethodPost:
+		var input CreateProductionOrderInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		input = NormalizeProductionOrderInput(input)
+		if err := ValidateProductionOrderInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		order, err := h.store.CreateProductionOrder(user, input)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusCreated, order)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) ProductionOrderByID(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	orderID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/production/orders/"))
+	if orderID == "" || strings.Contains(orderID, "/") {
+		response.Error(w, http.StatusNotFound, "order not found")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permProductionWrite) {
+		return
+	}
+
+	if r.Method != http.MethodPatch {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var input UpdateProductionOrderStatusInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	order, err := h.store.UpdateProductionOrderStatus(user, orderID, input)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "order not found")
+		return
+	}
+	response.JSON(w, http.StatusOK, order)
+}
+
+func (h Handler) Companies(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		companies, err := h.store.ListUserCompanies(user)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{"companies": companies})
+	case http.MethodPost:
+		var input CreateCompanyInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		company, err := h.store.CreateCompany(user, input)
+		if err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusCreated, company)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h Handler) CompanyByID(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	rest := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/companies/"))
+	if rest == "" {
+		response.Error(w, http.StatusNotFound, "company not found")
+		return
+	}
+
+	parts := strings.Split(rest, "/")
+	companyID := parts[0]
+	action := ""
+	memberID := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+	if len(parts) > 2 {
+		memberID = parts[2]
+	}
+	if companyID == "" {
+		response.Error(w, http.StatusNotFound, "company not found")
+		return
+	}
+
+	switch action {
+	case "":
+		permission := permCompanySettingsRead
+		if r.Method != http.MethodGet {
+			permission = permCompanySettingsWrite
+		}
+		if !h.requireCompanyPermission(w, user, companyID, permission) {
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			detail, err := h.store.GetCompany(user, companyID)
+			if err != nil {
+				if errors.Is(err, ErrValidation) {
+					response.Error(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				response.Error(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			response.JSON(w, http.StatusOK, detail)
+		case http.MethodPut:
+			var input UpdateCompanyInput
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				response.Error(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			detail, err := h.store.UpdateCompany(user, companyID, input)
+			if err != nil {
+				if errors.Is(err, ErrValidation) {
+					response.Error(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				response.Error(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			response.JSON(w, http.StatusOK, detail)
+		default:
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	case "members":
+		switch r.Method {
+		case http.MethodGet:
+			if memberID != "" {
+				response.Error(w, http.StatusNotFound, "not found")
+				return
+			}
+			if !h.requireCompanyPermission(w, user, companyID, permCompanyMembersRead) {
+				return
+			}
+			members, err := h.store.ListCompanyMembers(user, companyID)
+			if err != nil {
+				if errors.Is(err, ErrValidation) {
+					response.Error(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				response.Error(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			response.JSON(w, http.StatusOK, map[string]any{"members": members})
+		case http.MethodPost:
+			if memberID != "" {
+				response.Error(w, http.StatusNotFound, "not found")
+				return
+			}
+			if !h.requireCompanyPermission(w, user, companyID, permCompanyMembersWrite) {
+				return
+			}
+			var input AddCompanyMemberInput
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				response.Error(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			member, err := h.store.AddCompanyMember(user, companyID, input)
+			if err != nil {
+				if errors.Is(err, ErrValidation) {
+					response.Error(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				response.Error(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			response.JSON(w, http.StatusCreated, member)
+		case http.MethodPut:
+			if memberID == "" {
+				response.Error(w, http.StatusNotFound, "not found")
+				return
+			}
+			if !h.requireCompanyPermission(w, user, companyID, permCompanyMembersWrite) {
+				return
+			}
+			var input UpdateCompanyMemberRoleInput
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				response.Error(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			member, err := h.store.UpdateCompanyMemberRole(user, companyID, memberID, input)
+			if err != nil {
+				if errors.Is(err, ErrValidation) {
+					response.Error(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				response.Error(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			response.JSON(w, http.StatusOK, member)
+		case http.MethodDelete:
+			if memberID == "" {
+				response.Error(w, http.StatusNotFound, "not found")
+				return
+			}
+			if !h.requireCompanyPermission(w, user, companyID, permCompanyMembersWrite) {
+				return
+			}
+			if err := h.store.RemoveCompanyMember(user, companyID, memberID); err != nil {
+				if errors.Is(err, ErrValidation) {
+					response.Error(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				response.Error(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	case "default":
+		if !h.requireCompanyMembership(w, user, companyID) {
+			return
+		}
+		if r.Method != http.MethodPut {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if err := h.store.SetDefaultCompany(user, companyID); err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	default:
+		response.Error(w, http.StatusNotFound, "not found")
+	}
+}
+
+func (h Handler) requireActiveCompanyPermission(w http.ResponseWriter, user auth.User, permissions ...string) bool {
+	membership, ok, err := h.resolveUserCompanyMembership(user, strings.TrimSpace(user.ActiveCompanyID))
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return false
+	}
+	if !ok {
+		response.Error(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+	if len(permissions) == 0 || membership.Role == "owner" || membership.Role == "admin" {
+		return true
+	}
+	for _, permission := range permissions {
+		if hasPermission(membership.Role, permission) {
+			return true
+		}
+	}
+	response.Error(w, http.StatusForbidden, "forbidden")
+	return false
+}
+
+func (h Handler) requireCompanyPermission(w http.ResponseWriter, user auth.User, companyID string, permission string) bool {
+	membership, ok, err := h.resolveUserCompanyMembership(user, companyID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return false
+	}
+	if !ok || !hasPermission(membership.Role, permission) {
+		response.Error(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+	return true
+}
+
+func (h Handler) requireCompanyMembership(w http.ResponseWriter, user auth.User, companyID string) bool {
+	_, ok, err := h.resolveUserCompanyMembership(user, companyID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return false
+	}
+	if !ok {
+		response.Error(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+	return true
+}
+
+func (h Handler) resolveUserCompanyMembership(user auth.User, companyID string) (CompanyMembership, bool, error) {
+	companies, err := h.store.ListUserCompanies(user)
+	if err != nil {
+		return CompanyMembership{}, false, err
+	}
+	if len(companies) == 0 {
+		return CompanyMembership{}, false, nil
+	}
+	targetID := strings.TrimSpace(companyID)
+	if targetID != "" {
+		for _, company := range companies {
+			if company.ID == targetID {
+				return company, true, nil
+			}
+		}
+		return CompanyMembership{}, false, nil
+	}
+	for _, company := range companies {
+		if company.IsDefault {
+			return company, true, nil
+		}
+	}
+	return companies[0], true, nil
+}
+
+// authorize resolves the authenticated user and the active company (from the
+// X-Company-Id header). On failure it writes the appropriate HTTP error and
+// returns ok=false so the caller can simply return.
+func (h Handler) authorize(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
+	accessToken, err := extractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return auth.User{}, false
+	}
+
+	user, err := h.authenticator.Authenticate(accessToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			response.Error(w, http.StatusUnauthorized, err.Error())
+		} else {
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+		}
+		return auth.User{}, false
+	}
+
+	user.ActiveCompanyID = strings.TrimSpace(r.Header.Get("X-Company-Id"))
+	return user, true
 }
 
 func extractBearerToken(headerValue string) (string, error) {

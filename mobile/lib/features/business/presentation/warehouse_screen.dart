@@ -20,11 +20,30 @@ class _WarehouseScreen extends StatefulWidget {
   State<_WarehouseScreen> createState() => _WarehouseScreenState();
 }
 
-class _WarehouseScreenState extends State<_WarehouseScreen> {
-  String _query = '';
-  WarehouseFilter _filter = WarehouseFilter.all;
-  _Product? _selectedProduct;
+class _WarehouseScreenState extends State<_WarehouseScreen>
+    with SingleTickerProviderStateMixin {
+  String _stockQuery = '';
+  String _movementQuery = '';
+  late final TabController _tabController;
+  List<_Warehouse> _warehouses = const [];
+  _Warehouse? _selectedWarehouse;
+  List<_WarehouseStockItem> _stockItems = const [];
+  List<_WarehouseMovement> _movements = const [];
+  bool _isLoadingWarehouseData = true;
   bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _loadWarehouses();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   Future<void> openInventoryDocuments() async {
     if (_isSubmitting) {
@@ -47,408 +66,306 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
     await _showProductSheet();
   }
 
+  Future<void> openCreateWarehouse() async {
+    if (_isSubmitting) {
+      return;
+    }
+    await _showCreateWarehouseSheet();
+  }
+
+  Future<void> _loadWarehouses() async {
+    setState(() {
+      _isLoadingWarehouseData = true;
+    });
+
+    try {
+      final payload = await widget.businessGateway.fetchWarehouses(
+        accessToken: widget.accessToken,
+      );
+      final warehouses = payload
+          .map(_warehouseFromJson)
+          .where((item) => item.id.isNotEmpty)
+          .toList(growable: false);
+      final selected = warehouses.firstWhere(
+        (item) => item.id == _selectedWarehouse?.id,
+        orElse: () => warehouses.isNotEmpty
+            ? warehouses.first
+            : const _Warehouse(id: '', name: '', code: '', isDefault: false),
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _warehouses = warehouses;
+        _selectedWarehouse = selected.id.isEmpty ? null : selected;
+      });
+      await _reloadWarehouseSection();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingWarehouseData = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+
+  Future<void> _reloadWarehouseSection() async {
+    final warehouse = _selectedWarehouse;
+    if (warehouse == null) {
+      if (mounted) {
+        setState(() {
+          _stockItems = const [];
+          _movements = const [];
+          _isLoadingWarehouseData = false;
+        });
+      }
+      return;
+    }
+
+    setState(() {
+      _isLoadingWarehouseData = true;
+    });
+
+    try {
+      final stockPayload = await widget.businessGateway.fetchWarehouseStock(
+        accessToken: widget.accessToken,
+        warehouseId: warehouse.id,
+        search: _stockQuery,
+      );
+      final movementPayload =
+          await widget.businessGateway.fetchWarehouseMovements(
+        accessToken: widget.accessToken,
+        warehouseId: warehouse.id,
+        search: _movementQuery,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _stockItems = stockPayload
+            .map(_warehouseStockItemFromJson)
+            .toList(growable: false);
+        _movements = movementPayload
+            .map(_warehouseMovementFromJson)
+            .toList(growable: false);
+        _isLoadingWarehouseData = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingWarehouseData = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final products = widget.products.where((product) {
-      final matchesQuery =
-          product.name.toLowerCase().contains(_query.toLowerCase()) ||
-              product.sku.toLowerCase().contains(_query.toLowerCase());
-
-      switch (_filter) {
-        case WarehouseFilter.low:
-          return matchesQuery && product.status == ProductStatus.lowStock;
-        case WarehouseFilter.out:
-          return matchesQuery && product.status == ProductStatus.outOfStock;
-        case WarehouseFilter.all:
-          return matchesQuery;
-      }
-    }).toList();
-
-    final lowCount = widget.products
-        .where((product) => product.status == ProductStatus.lowStock)
-        .length;
-    final outCount = widget.products
-        .where((product) => product.status == ProductStatus.outOfStock)
-        .length;
-
-    if (_selectedProduct != null) {
-      final product = _selectedProduct!;
-      final markupPercent = product.cost <= 0
-          ? 0.0
-          : ((product.price - product.cost) / product.cost) * 100;
-      return SafeArea(
-        bottom: false,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-          children: [
-            TextButton.icon(
-              onPressed: () => setState(() => _selectedProduct = null),
-              icon: const Icon(Icons.arrow_back_rounded),
-              label: const Text('Назад'),
-            ),
-            const SizedBox(height: 8),
-            _BusinessCard(
-              background: const LinearGradient(
-                colors: [Color(0xFF00A86B), Color(0xFF008F5B)],
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        children: [
+          _GradientHeader(
+            title: 'Склад',
+            subtitle: '${_warehouses.length} '
+                '${_warehouses.length == 1 ? 'склад' : _warehouses.length < 5 ? 'склада' : 'складов'}',
+            child: TabBar(
+              controller: _tabController,
+              labelColor: Colors.white,
+              unselectedLabelColor: const Color(0xCCFFFFFF),
+              indicatorColor: Colors.white,
+              indicatorWeight: 3,
+              labelStyle: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product.name,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'SKU: ${product.sku}',
-                    style: const TextStyle(color: Color(0xCCFFFFFF)),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      _HeroStat(
-                        label: 'Остаток',
-                        value: '${product.quantity} шт',
-                      ),
-                      const SizedBox(width: 16),
-                      _HeroStat(
-                        label: 'Цена продажи',
-                        value: formatMoney(product.price),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+              tabs: const [
+                Tab(text: 'Остатки'),
+                Tab(text: 'Движения'),
+              ],
             ),
-            const SizedBox(height: 16),
-            Row(
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Row(
               children: [
                 Expanded(
-                  child: _BusinessCard(
-                    child: _LabelValue(
-                      label: 'Себестоимость',
-                      value: formatMoney(product.cost),
-                    ),
+                  child: _MetricCard(
+                    title: 'Позиций',
+                    value: '${_stockItems.length}',
+                    tone: const Color(0x14F59E0B),
+                    accent: const Color(0xFFF59E0B),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: _BusinessCard(
-                    child: _LabelValue(
-                      label: 'Наценка',
-                      value: '${markupPercent.toStringAsFixed(1)}%',
-                      valueColor: const Color(0xFF16A34A),
-                    ),
+                  child: _MetricCard(
+                    title: 'Движений',
+                    value: '${_movements.length}',
+                    tone: const Color(0x14EF4444),
+                    accent: const Color(0xFFEF4444),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            _BusinessCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Штрих-код',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: const Icon(Icons.qr_code_2_rounded, size: 34),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: DropdownButtonFormField<String>(
+              key: ValueKey(_selectedWarehouse?.id ?? 'none'),
+              initialValue: _selectedWarehouse?.id,
+              decoration: const InputDecoration(
+                labelText: 'Выбрать склад',
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(18)),
+                  borderSide: BorderSide.none,
+                ),
+                isDense: true,
+              ),
+              items: _warehouses
+                  .map(
+                    (w) => DropdownMenuItem<String>(
+                      value: w.id,
+                      child: Text(w.name),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: (value) async {
+                final warehouse =
+                    _warehouses.where((w) => w.id == value).firstOrNull;
+                if (warehouse == null) return;
+                setState(() => _selectedWarehouse = warehouse);
+                await _reloadWarehouseSection();
+              },
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildWarehouseStockSection(),
+                _buildWarehouseMovementsSection(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWarehouseStockSection() {
+    if (_isLoadingWarehouseData) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+      children: [
+        _SearchField(
+          hintText: 'Поиск товара по названию или SKU...',
+          icon: Icons.search_rounded,
+          onChanged: (value) {
+            _stockQuery = value;
+            _reloadWarehouseSection();
+          },
+        ),
+        const SizedBox(height: 12),
+        if (_stockItems.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text(
+                'В этом складе пока нет остатков',
+                style: TextStyle(color: Color(0xFF94A3B8)),
+              ),
+            ),
+          )
+        else
+          ..._stockItems.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x08000000),
+                      blurRadius: 8,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0x1400A86B),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      const SizedBox(width: 12),
-                      Column(
+                      child: const Icon(
+                        Icons.inventory_2_rounded,
+                        color: Color(0xFF00A86B),
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            product.barcode.isEmpty
-                                ? 'Не указан'
-                                : product.barcode,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          Text(
-                            product.category.isEmpty
-                                ? 'Без категории'
-                                : product.category,
+                            item.productName,
                             style: const TextStyle(
-                              color: Color(0xFF7B8794),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'SKU: ${item.sku}${item.category.isEmpty ? '' : ' · ${item.category}'}',
+                            style: const TextStyle(
+                              color: Color(0xFF94A3B8),
                               fontSize: 12,
                             ),
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            _BusinessCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Движение товара',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 14),
-                  if (product.movements.isEmpty)
-                    const Text(
-                      'Движений пока нет',
-                      style: TextStyle(color: Color(0xFF7B8794)),
-                    )
-                  else
-                    ...product.movements.map(
-                      (item) => Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: item.quantity > 0
-                                    ? const Color(0x1422C55E)
-                                    : const Color(0x14F59E0B),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Icon(
-                                Icons.inventory_2_rounded,
-                                color: item.quantity > 0
-                                    ? const Color(0xFF22C55E)
-                                    : const Color(0xFFF59E0B),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.document,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  Text(
-                                    item.date,
-                                    style: const TextStyle(
-                                      color: Color(0xFF7B8794),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  '${item.quantity > 0 ? '+' : ''}${item.quantity}',
-                                  style: TextStyle(
-                                    color: item.quantity > 0
-                                        ? const Color(0xFF22C55E)
-                                        : const Color(0xFFF59E0B),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                Text(
-                                  'Ост: ${item.balance}',
-                                  style: const TextStyle(
-                                    color: Color(0xFF7B8794),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
                     ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () => _showProductSheet(initialProduct: product),
-                    child: const Text('Редактировать'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed:
-                        _isSubmitting ? null : () => _deleteProduct(product),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFDC2626),
-                    ),
-                    child: const Text('Удалить'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-    }
-
-    return SafeArea(
-      bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-        children: [
-          const Text(
-            'Склад',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _SearchField(
-                  hintText: 'Поиск товаров...',
-                  icon: Icons.search_rounded,
-                  onChanged: (value) => setState(() => _query = value),
-                ),
-              ),
-              const SizedBox(width: 10),
-              _SquareIconButton(icon: Icons.tune_rounded, onPressed: () {}),
-            ],
-          ),
-          const SizedBox(height: 14),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _FilterChipButton(
-                  label: 'Все товары',
-                  active: _filter == WarehouseFilter.all,
-                  activeColor: const Color(0xFF00A86B),
-                  onPressed: () =>
-                      setState(() => _filter = WarehouseFilter.all),
-                ),
-                const SizedBox(width: 8),
-                _FilterChipButton(
-                  label: 'Заканчиваются',
-                  active: _filter == WarehouseFilter.low,
-                  activeColor: const Color(0xFFF59E0B),
-                  onPressed: () =>
-                      setState(() => _filter = WarehouseFilter.low),
-                ),
-                const SizedBox(width: 8),
-                _FilterChipButton(
-                  label: 'Нет в наличии',
-                  active: _filter == WarehouseFilter.out,
-                  activeColor: const Color(0xFFEF4444),
-                  onPressed: () =>
-                      setState(() => _filter = WarehouseFilter.out),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _MetricCard(
-                  title: 'Позиций',
-                  value: '${widget.products.length}',
-                  tone: const Color(0x1400A86B),
-                  accent: const Color(0xFF00A86B),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _MetricCard(
-                  title: 'Заканчивается',
-                  value: '$lowCount',
-                  tone: const Color(0x14F59E0B),
-                  accent: const Color(0xFFF59E0B),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _MetricCard(
-                  title: 'Нет в наличии',
-                  value: '$outCount',
-                  tone: const Color(0x14EF4444),
-                  accent: const Color(0xFFEF4444),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          ...products.map(
-            (product) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _BusinessCard(
-                onTap: () => setState(() => _selectedProduct = product),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                product.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'SKU: ${product.sku} • ${product.category.isEmpty ? 'Без категории' : product.category}',
-                                style: const TextStyle(
-                                  color: Color(0xFF7B8794),
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
+                        Text(
+                          '${item.available} ${item.unitName}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            color: Color(0xFF0F172A),
                           ),
                         ),
+                        const SizedBox(height: 4),
                         _StatusBadge(
-                          label: product.statusLabel,
-                          kind: product.status == ProductStatus.outOfStock
+                          label: item.statusLabel,
+                          kind: item.status == ProductStatus.outOfStock
                               ? StatusKind.error
-                              : product.status == ProductStatus.lowStock
+                              : item.status == ProductStatus.lowStock
                                   ? StatusKind.warning
                                   : StatusKind.success,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _LabelValue(
-                            label: 'Цена',
-                            value: formatMoney(product.price),
-                          ),
-                        ),
-                        _LabelValue(
-                          label: 'Остаток',
-                          value: '${product.quantity} шт',
-                          textAlign: TextAlign.right,
                         ),
                       ],
                     ),
@@ -457,8 +374,136 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
               ),
             ),
           ),
-        ],
-      ),
+      ],
+    );
+  }
+
+  Widget _buildWarehouseMovementsSection() {
+    if (_isLoadingWarehouseData) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+      children: [
+        _SearchField(
+          hintText: 'Поиск по документу, товару или SKU...',
+          icon: Icons.search_rounded,
+          onChanged: (value) {
+            _movementQuery = value;
+            _reloadWarehouseSection();
+          },
+        ),
+        const SizedBox(height: 12),
+        if (_movements.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text(
+                'Движений по этому складу пока нет',
+                style: TextStyle(color: Color(0xFF94A3B8)),
+              ),
+            ),
+          )
+        else
+          ..._movements.map(
+            (movement) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: GestureDetector(
+                onTap: () => _openDocumentById(movement.documentId),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x08000000),
+                        blurRadius: 8,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                    border: Border.all(
+                      color: movement.isIncome
+                          ? const Color(0x3322C55E)
+                          : const Color(0x33EF4444),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: movement.isIncome
+                              ? const Color(0x1422C55E)
+                              : const Color(0x14EF4444),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          movement.isIncome
+                              ? Icons.south_west_rounded
+                              : Icons.north_east_rounded,
+                          color: movement.isIncome
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFFDC2626),
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              movement.productName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
+                                color: Color(0xFF0F172A),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${movement.documentNo} · ${movement.documentDate}',
+                              style: const TextStyle(
+                                color: Color(0xFF94A3B8),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${movement.quantity > 0 ? '+' : ''}${movement.quantity}',
+                            style: TextStyle(
+                              color: movement.isIncome
+                                  ? const Color(0xFF16A34A)
+                                  : const Color(0xFFDC2626),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Ост: ${movement.balanceAfter}',
+                            style: const TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -505,13 +550,9 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
         );
       }
       await widget.onProductsChanged();
+      await _reloadWarehouseSection();
       if (!mounted) {
         return;
-      }
-      if (initialProduct != null) {
-        setState(() {
-          _selectedProduct = null;
-        });
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -519,67 +560,6 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
             initialProduct == null ? 'Товар добавлен' : 'Товар обновлен',
           ),
         ),
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _deleteProduct(_Product product) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Удалить товар?'),
-        content: Text('Товар "${product.name}" будет удален со склада.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-            ),
-            child: const Text('Удалить'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) {
-      return;
-    }
-
-    setState(() {
-      _isSubmitting = true;
-    });
-
-    try {
-      await widget.businessGateway.deleteProduct(
-        accessToken: widget.accessToken,
-        productId: product.id,
-      );
-      await widget.onProductsChanged();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _selectedProduct = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Товар удален')),
       );
     } catch (error) {
       if (!mounted) {
@@ -627,20 +607,16 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
   }
 
   Future<void> _showCreateInventoryDocument() async {
-    if (widget.products.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Сначала добавьте товары')),
-      );
-      return;
-    }
-
     final result = await showModalBottomSheet<_CreateInventoryDocumentFormData>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _CreateInventoryDocumentSheet(
+        accessToken: widget.accessToken,
+        businessGateway: widget.businessGateway,
         products: widget.products,
         clients: widget.clients,
+        initialWarehouseName: _selectedWarehouse?.name ?? 'Основной склад',
       ),
     );
 
@@ -665,6 +641,7 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
               .map(
                 (line) => {
                   'product_id': line.productId,
+                  'service_id': line.serviceId,
                   'quantity': line.quantity,
                   'unit_price': line.unitPrice,
                   'unit_cost': line.unitCost,
@@ -675,6 +652,7 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
         },
       );
       await widget.onProductsChanged();
+      await _reloadWarehouseSection();
       if (!mounted) {
         return;
       }
@@ -694,6 +672,140 @@ class _WarehouseScreenState extends State<_WarehouseScreen> {
           _isSubmitting = false;
         });
       }
+    }
+  }
+
+  Future<void> _showCreateWarehouseSheet() async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final created = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF7FAF8),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Center(
+                        child:
+                            SizedBox(width: 48, child: Divider(thickness: 4)),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Новый склад',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _ClientTextField(
+                        controller: controller,
+                        label: 'Название склада',
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Введите название';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: () {
+                            if (!formKey.currentState!.validate()) {
+                              return;
+                            }
+                            Navigator.of(context).pop(controller.text.trim());
+                          },
+                          child: const Text('Сохранить'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    controller.dispose();
+
+    if (created == null || created.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+    try {
+      await widget.businessGateway.createWarehouse(
+        accessToken: widget.accessToken,
+        payload: {'name': created},
+      );
+      await _loadWarehouses();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Склад добавлен')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openDocumentById(String documentId) async {
+    try {
+      final payload = await widget.businessGateway.fetchInventoryDocumentDetail(
+        accessToken: widget.accessToken,
+        documentId: documentId,
+      );
+      if (!mounted) {
+        return;
+      }
+      final detail = _inventoryDocumentDetailFromJson(payload);
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => _InventoryDocumentDetailSheet(detail: detail),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
     }
   }
 }
@@ -1038,6 +1150,7 @@ class _CreateInventoryDocumentFormData {
 class _CreateInventoryDocumentLineFormData {
   const _CreateInventoryDocumentLineFormData({
     required this.productId,
+    required this.serviceId,
     required this.quantity,
     required this.unitPrice,
     required this.unitCost,
@@ -1045,6 +1158,7 @@ class _CreateInventoryDocumentLineFormData {
   });
 
   final String productId;
+  final String serviceId;
   final int quantity;
   final int unitPrice;
   final int unitCost;
@@ -1053,16 +1167,22 @@ class _CreateInventoryDocumentLineFormData {
 
 class _CreateInventoryDocumentSheet extends StatefulWidget {
   const _CreateInventoryDocumentSheet({
+    required this.accessToken,
+    required this.businessGateway,
     required this.products,
     required this.clients,
     this.initialDocumentType = 'purchase_receipt',
     this.initialClientId,
+    this.initialWarehouseName = 'Основной склад',
   });
 
+  final String accessToken;
+  final BusinessGateway businessGateway;
   final List<_Product> products;
   final List<_Client> clients;
   final String initialDocumentType;
   final String? initialClientId;
+  final String initialWarehouseName;
 
   @override
   State<_CreateInventoryDocumentSheet> createState() =>
@@ -1072,19 +1192,39 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
 class _CreateInventoryDocumentSheetState
     extends State<_CreateInventoryDocumentSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _warehouseController = TextEditingController(text: 'Основной склад');
+  late final TextEditingController _warehouseController;
   final _relatedWarehouseController = TextEditingController();
   final _noteController = TextEditingController();
   late final List<_InventoryDocumentDraftLine> _lines;
   late String _documentType;
   String? _clientId;
+  List<_Service> _services = [];
 
   @override
   void initState() {
     super.initState();
+    _warehouseController =
+        TextEditingController(text: widget.initialWarehouseName);
     _documentType = widget.initialDocumentType;
     _clientId = widget.initialClientId;
-    _lines = [_InventoryDocumentDraftLine.fromProduct(widget.products.first)];
+    _lines = [
+      widget.products.isNotEmpty
+          ? _InventoryDocumentDraftLine.fromProduct(widget.products.first)
+          : _InventoryDocumentDraftLine.empty(),
+    ];
+    _loadServices();
+  }
+
+  Future<void> _loadServices() async {
+    try {
+      final raw = await widget.businessGateway.fetchServices(
+        accessToken: widget.accessToken,
+      );
+      if (!mounted) return;
+      setState(() {
+        _services = raw.map(_serviceFromJson).toList(growable: false);
+      });
+    } catch (_) {}
   }
 
   @override
@@ -1259,6 +1399,7 @@ class _CreateInventoryDocumentSheetState
   List<Widget> _buildLineEditors() {
     return List<Widget>.generate(_lines.length, (index) {
       final line = _lines[index];
+      final isService = line.lineType == 'service';
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: _BusinessCard(
@@ -1286,31 +1427,87 @@ class _CreateInventoryDocumentSheetState
                     ),
                 ],
               ),
-              DropdownButtonFormField<String>(
-                initialValue: line.productId,
-                items: widget.products
-                    .map(
-                      (product) => DropdownMenuItem(
-                        value: product.id,
-                        child: Text('${product.name} (${product.sku})'),
-                      ),
-                    )
-                    .toList(growable: false),
-                decoration: const InputDecoration(labelText: 'Товар'),
-                onChanged: (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  final product = widget.products.firstWhere(
-                    (item) => item.id == value,
-                  );
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'product', label: Text('Товар')),
+                  ButtonSegment(value: 'service', label: Text('Услуга')),
+                ],
+                selected: {line.lineType},
+                onSelectionChanged: (selection) {
                   setState(() {
-                    line.productId = value;
-                    line.unitPriceController.text = '${product.price}';
-                    line.unitCostController.text = '${product.cost}';
+                    line.lineType = selection.first;
+                    line.productId = '';
+                    line.serviceId = '';
+                    line.unitPriceController.text = '0';
+                    line.unitCostController.text = '0';
                   });
                 },
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                ),
               ),
+              const SizedBox(height: 8),
+              if (!isService)
+                DropdownButtonFormField<String>(
+                  key: ValueKey('product_${line.productId}_$index'),
+                  initialValue: line.productId.isEmpty ? null : line.productId,
+                  items: widget.products
+                      .map(
+                        (product) => DropdownMenuItem(
+                          value: product.id,
+                          child: Text('${product.name} (${product.sku})'),
+                        ),
+                      )
+                      .toList(growable: false),
+                  decoration: const InputDecoration(labelText: 'Товар'),
+                  validator: (value) {
+                    if (!isService && (value == null || value.isEmpty)) {
+                      return 'Выберите товар';
+                    }
+                    return null;
+                  },
+                  onChanged: (value) {
+                    if (value == null) return;
+                    final product = widget.products.firstWhere(
+                      (item) => item.id == value,
+                    );
+                    setState(() {
+                      line.productId = value;
+                      line.unitPriceController.text = '${product.price}';
+                      line.unitCostController.text = '${product.cost}';
+                    });
+                  },
+                )
+              else
+                DropdownButtonFormField<String>(
+                  key: ValueKey('service_${line.serviceId}_$index'),
+                  initialValue: line.serviceId.isEmpty ? null : line.serviceId,
+                  items: _services
+                      .map(
+                        (svc) => DropdownMenuItem(
+                          value: svc.id,
+                          child: Text(svc.name),
+                        ),
+                      )
+                      .toList(growable: false),
+                  decoration: const InputDecoration(labelText: 'Услуга'),
+                  validator: (value) {
+                    if (isService && (value == null || value.isEmpty)) {
+                      return 'Выберите услугу';
+                    }
+                    return null;
+                  },
+                  onChanged: (value) {
+                    if (value == null) return;
+                    final svc = _services.firstWhere((s) => s.id == value);
+                    setState(() {
+                      line.serviceId = value;
+                      line.unitPriceController.text =
+                          '${svc.price.truncate()}';
+                      line.unitCostController.text = '0';
+                    });
+                  },
+                ),
               const SizedBox(height: 12),
               _ClientTextField(
                 controller: line.quantityController,
@@ -1354,8 +1551,11 @@ class _CreateInventoryDocumentSheetState
 
   void _addLine() {
     setState(() {
-      _lines
-          .add(_InventoryDocumentDraftLine.fromProduct(widget.products.first));
+      _lines.add(
+        widget.products.isNotEmpty
+            ? _InventoryDocumentDraftLine.fromProduct(widget.products.first)
+            : _InventoryDocumentDraftLine.empty(),
+      );
     });
   }
 
@@ -1380,7 +1580,8 @@ class _CreateInventoryDocumentSheetState
         lines: _lines
             .map(
               (line) => _CreateInventoryDocumentLineFormData(
-                productId: line.productId,
+                productId: line.lineType == 'product' ? line.productId : '',
+                serviceId: line.lineType == 'service' ? line.serviceId : '',
                 quantity: int.parse(line.quantityController.text.trim()),
                 unitPrice: int.parse(line.unitPriceController.text.trim()),
                 unitCost: int.parse(line.unitCostController.text.trim()),
@@ -1412,7 +1613,9 @@ class _CreateInventoryDocumentSheetState
 
 class _InventoryDocumentDraftLine {
   _InventoryDocumentDraftLine({
+    required this.lineType,
     required this.productId,
+    required this.serviceId,
     required this.quantityController,
     required this.unitPriceController,
     required this.unitCostController,
@@ -1421,7 +1624,9 @@ class _InventoryDocumentDraftLine {
 
   factory _InventoryDocumentDraftLine.fromProduct(_Product product) {
     return _InventoryDocumentDraftLine(
+      lineType: 'product',
       productId: product.id,
+      serviceId: '',
       quantityController: TextEditingController(text: '1'),
       unitPriceController: TextEditingController(text: '${product.price}'),
       unitCostController: TextEditingController(text: '${product.cost}'),
@@ -1429,7 +1634,21 @@ class _InventoryDocumentDraftLine {
     );
   }
 
+  factory _InventoryDocumentDraftLine.empty() {
+    return _InventoryDocumentDraftLine(
+      lineType: 'product',
+      productId: '',
+      serviceId: '',
+      quantityController: TextEditingController(text: '1'),
+      unitPriceController: TextEditingController(text: '0'),
+      unitCostController: TextEditingController(text: '0'),
+      noteController: TextEditingController(),
+    );
+  }
+
+  String lineType;
   String productId;
+  String serviceId;
   final TextEditingController quantityController;
   final TextEditingController unitPriceController;
   final TextEditingController unitCostController;

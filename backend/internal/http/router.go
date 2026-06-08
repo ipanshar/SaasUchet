@@ -39,6 +39,8 @@ func NewRouter(cfg config.Config, authHandler auth.Handler, businessHandler busi
 	mux.HandleFunc("/api/v1/business/overview", businessHandler.Overview)
 	mux.HandleFunc("/api/v1/business/clients", businessHandler.Clients)
 	mux.HandleFunc("/api/v1/business/clients/", businessHandler.ClientByID)
+	mux.HandleFunc("/api/v1/business/warehouses", businessHandler.Warehouses)
+	mux.HandleFunc("/api/v1/business/warehouses/", businessHandler.WarehouseByID)
 	mux.HandleFunc("/api/v1/business/products", businessHandler.Products)
 	mux.HandleFunc("/api/v1/business/products/", businessHandler.ProductByID)
 	mux.HandleFunc("/api/v1/business/inventory-documents", businessHandler.InventoryDocuments)
@@ -49,6 +51,12 @@ func NewRouter(cfg config.Config, authHandler auth.Handler, businessHandler busi
 	mux.HandleFunc("/api/v1/business/money-documents/", businessHandler.MoneyDocumentByID)
 	mux.HandleFunc("/api/v1/catalog/services", businessHandler.Services)
 	mux.HandleFunc("/api/v1/catalog/services/", businessHandler.ServiceByID)
+	mux.HandleFunc("/api/v1/production/recipes", businessHandler.Recipes)
+	mux.HandleFunc("/api/v1/production/recipes/", businessHandler.RecipeByID)
+	mux.HandleFunc("/api/v1/production/orders", businessHandler.ProductionOrders)
+	mux.HandleFunc("/api/v1/production/orders/", businessHandler.ProductionOrderByID)
+	mux.HandleFunc("/api/v1/companies", businessHandler.Companies)
+	mux.HandleFunc("/api/v1/companies/", businessHandler.CompanyByID)
 
 	return withRecovery(withLogging(withCORS(mux, cfg.AllowedOrigins)))
 }

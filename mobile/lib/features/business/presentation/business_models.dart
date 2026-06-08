@@ -32,6 +32,77 @@ class _Activity {
   final Color tone;
 }
 
+class _Company {
+  const _Company({
+    required this.id,
+    required this.name,
+    required this.country,
+    required this.iin,
+    required this.role,
+    required this.isDefault,
+    this.legalForm,
+    this.email,
+    this.phone,
+    this.addressLine,
+    this.city,
+    this.region,
+    this.bankName,
+    this.bankAccount,
+    this.bankBik,
+  });
+
+  final String id;
+  final String name;
+  final String country;
+  final String iin;
+  final String role;
+  final bool isDefault;
+  final String? legalForm;
+  final String? email;
+  final String? phone;
+  final String? addressLine;
+  final String? city;
+  final String? region;
+  final String? bankName;
+  final String? bankAccount;
+  final String? bankBik;
+
+  bool get isOwner => role == 'owner';
+
+  String get roleLabel => isOwner ? 'Владелец' : 'Сотрудник';
+}
+
+_Company _companyFromJson(Map<String, dynamic> json) {
+  return _Company(
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    country: json['country'] as String? ?? '',
+    iin: json['iin'] as String? ?? '',
+    role: json['role'] as String? ?? 'staff',
+    isDefault: json['is_default'] as bool? ?? false,
+  );
+}
+
+_Company _companyDetailFromJson(Map<String, dynamic> json) {
+  return _Company(
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    country: json['country'] as String? ?? '',
+    iin: json['iin'] as String? ?? '',
+    role: json['role'] as String? ?? 'staff',
+    isDefault: json['is_default'] as bool? ?? false,
+    legalForm: json['legal_form'] as String?,
+    email: json['email'] as String?,
+    phone: json['phone'] as String?,
+    addressLine: json['address_line'] as String?,
+    city: json['city'] as String?,
+    region: json['region'] as String?,
+    bankName: json['bank_name'] as String?,
+    bankAccount: json['bank_account'] as String?,
+    bankBik: json['bank_bik'] as String?,
+  );
+}
+
 class _Client {
   const _Client({
     required this.id,
@@ -44,8 +115,14 @@ class _Client {
     required this.debt,
     required this.receivable,
     required this.payable,
+    required this.salesCount,
+    required this.averageSale,
+    required this.paymentsIn,
+    required this.paymentsOut,
+    required this.overdueAmount,
     required this.interactions,
     required this.openDocuments,
+    required this.timeline,
     this.bin,
     this.iin,
   });
@@ -62,8 +139,14 @@ class _Client {
   final int debt;
   final int receivable;
   final int payable;
+  final int salesCount;
+  final int averageSale;
+  final int paymentsIn;
+  final int paymentsOut;
+  final int overdueAmount;
   final List<_Interaction> interactions;
   final List<_ClientDebtDocument> openDocuments;
+  final List<_ClientTimelineItem> timeline;
 
   String get binOrIinLabel => bin != null ? 'БИН: $bin' : 'ИИН: $iin';
 }
@@ -100,6 +183,28 @@ class _ClientDebtDocument {
   final int amount;
   final int paidAmount;
   final int remainingAmount;
+}
+
+class _ClientTimelineItem {
+  const _ClientTimelineItem({
+    required this.documentId,
+    required this.documentType,
+    required this.eventType,
+    required this.title,
+    required this.subtitle,
+    required this.eventDate,
+    required this.amount,
+    required this.tone,
+  });
+
+  final String documentId;
+  final String documentType;
+  final String eventType;
+  final String title;
+  final String subtitle;
+  final String eventDate;
+  final int amount;
+  final String tone;
 }
 
 class _Product {
@@ -156,6 +261,87 @@ class _Product {
         return 'Нет в наличии';
     }
   }
+}
+
+class _Warehouse {
+  const _Warehouse({
+    required this.id,
+    required this.name,
+    required this.code,
+    required this.isDefault,
+  });
+
+  final String id;
+  final String name;
+  final String code;
+  final bool isDefault;
+}
+
+class _WarehouseStockItem {
+  const _WarehouseStockItem({
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.category,
+    required this.unitName,
+    required this.available,
+    required this.minQuantity,
+    required this.status,
+  });
+
+  final String productId;
+  final String productName;
+  final String sku;
+  final String category;
+  final String unitName;
+  final int available;
+  final int minQuantity;
+  final ProductStatus status;
+
+  String get statusLabel {
+    switch (status) {
+      case ProductStatus.inStock:
+        return 'В наличии';
+      case ProductStatus.lowStock:
+        return 'Заканчивается';
+      case ProductStatus.outOfStock:
+        return 'Нет в наличии';
+    }
+  }
+}
+
+class _WarehouseMovement {
+  const _WarehouseMovement({
+    required this.id,
+    required this.documentId,
+    required this.documentNo,
+    required this.documentType,
+    required this.movementType,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.quantity,
+    required this.balanceAfter,
+    required this.documentDate,
+    required this.warehouseName,
+    required this.relatedWarehouseName,
+  });
+
+  final String id;
+  final String documentId;
+  final String documentNo;
+  final String documentType;
+  final String movementType;
+  final String productId;
+  final String productName;
+  final String sku;
+  final int quantity;
+  final int balanceAfter;
+  final String documentDate;
+  final String warehouseName;
+  final String relatedWarehouseName;
+
+  bool get isIncome => quantity > 0;
 }
 
 class _StockMovement {
@@ -561,6 +747,11 @@ _Client _clientFromJson(Map<String, dynamic> json) => _Client(
       debt: json['debt'] as int? ?? 0,
       receivable: json['receivable'] as int? ?? 0,
       payable: json['payable'] as int? ?? 0,
+      salesCount: json['sales_count'] as int? ?? 0,
+      averageSale: json['average_sale'] as int? ?? 0,
+      paymentsIn: json['payments_in'] as int? ?? 0,
+      paymentsOut: json['payments_out'] as int? ?? 0,
+      overdueAmount: json['overdue_amount'] as int? ?? 0,
       interactions: (json['interactions'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(_interactionFromJson)
@@ -568,6 +759,10 @@ _Client _clientFromJson(Map<String, dynamic> json) => _Client(
       openDocuments: (json['open_documents'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(_clientDebtDocumentFromJson)
+          .toList(growable: false),
+      timeline: (json['timeline'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_clientTimelineItemFromJson)
           .toList(growable: false),
     );
 
@@ -587,6 +782,18 @@ _ClientDebtDocument _clientDebtDocumentFromJson(Map<String, dynamic> json) =>
       amount: json['amount'] as int? ?? 0,
       paidAmount: json['paid_amount'] as int? ?? 0,
       remainingAmount: json['remaining_amount'] as int? ?? 0,
+    );
+
+_ClientTimelineItem _clientTimelineItemFromJson(Map<String, dynamic> json) =>
+    _ClientTimelineItem(
+      documentId: json['document_id'] as String? ?? '',
+      documentType: json['document_type'] as String? ?? '',
+      eventType: json['event_type'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      subtitle: json['subtitle'] as String? ?? '',
+      eventDate: json['event_date'] as String? ?? '',
+      amount: json['amount'] as int? ?? 0,
+      tone: json['tone'] as String? ?? 'neutral',
     );
 
 _Product _productFromJson(Map<String, dynamic> json) => _Product(
@@ -611,6 +818,46 @@ _Product _productFromJson(Map<String, dynamic> json) => _Product(
           .whereType<Map<String, dynamic>>()
           .map(_stockMovementFromJson)
           .toList(growable: false),
+    );
+
+_Warehouse _warehouseFromJson(Map<String, dynamic> json) => _Warehouse(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      code: json['code'] as String? ?? '',
+      isDefault: json['is_default'] as bool? ?? false,
+    );
+
+_WarehouseStockItem _warehouseStockItemFromJson(Map<String, dynamic> json) =>
+    _WarehouseStockItem(
+      productId: json['product_id'] as String? ?? '',
+      productName: json['product_name'] as String? ?? '',
+      sku: json['sku'] as String? ?? '',
+      category: json['category'] as String? ?? '',
+      unitName: json['unit_name'] as String? ?? 'шт',
+      available: json['available'] as int? ?? 0,
+      minQuantity: json['min_quantity'] as int? ?? 0,
+      status: switch (json['status'] as String? ?? '') {
+        'low_stock' => ProductStatus.lowStock,
+        'out_of_stock' => ProductStatus.outOfStock,
+        _ => ProductStatus.inStock,
+      },
+    );
+
+_WarehouseMovement _warehouseMovementFromJson(Map<String, dynamic> json) =>
+    _WarehouseMovement(
+      id: json['id'] as String? ?? '',
+      documentId: json['document_id'] as String? ?? '',
+      documentNo: json['document_no'] as String? ?? '',
+      documentType: json['document_type'] as String? ?? '',
+      movementType: json['movement_type'] as String? ?? '',
+      productId: json['product_id'] as String? ?? '',
+      productName: json['product_name'] as String? ?? '',
+      sku: json['sku'] as String? ?? '',
+      quantity: json['quantity'] as int? ?? 0,
+      balanceAfter: json['balance_after'] as int? ?? 0,
+      documentDate: json['document_date'] as String? ?? '',
+      warehouseName: json['warehouse_name'] as String? ?? '',
+      relatedWarehouseName: json['related_warehouse_name'] as String? ?? '',
     );
 
 _StockMovement _stockMovementFromJson(Map<String, dynamic> json) =>
@@ -894,4 +1141,193 @@ _Service _serviceFromJson(Map<String, dynamic> json) => _Service(
           .whereType<Map<String, dynamic>>()
           .map(_serviceMaterialFromJson)
           .toList(growable: false),
+    );
+
+// ── Production / Recipe models ────────────────────────────────────────────────
+
+class _RecipeIngredient {
+  const _RecipeIngredient({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.unitName,
+    required this.quantity,
+  });
+  final String id;
+  final String productId;
+  final String productName;
+  final String unitName;
+  final double quantity;
+}
+
+class _RecipeService {
+  const _RecipeService({
+    required this.id,
+    required this.serviceId,
+    required this.serviceName,
+    required this.quantity,
+  });
+  final String id;
+  final String serviceId;
+  final String serviceName;
+  final double quantity;
+}
+
+class _RecipeOutput {
+  const _RecipeOutput({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.unitName,
+    required this.quantity,
+  });
+  final String id;
+  final String productId;
+  final String productName;
+  final String unitName;
+  final double quantity;
+}
+
+class _Recipe {
+  const _Recipe({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.ingredients,
+    required this.services,
+    required this.outputs,
+  });
+  final String id;
+  final String name;
+  final String description;
+  final List<_RecipeIngredient> ingredients;
+  final List<_RecipeService> services;
+  final List<_RecipeOutput> outputs;
+
+  int get totalComponents => ingredients.length + services.length;
+}
+
+_RecipeIngredient _recipeIngredientFromJson(Map<String, dynamic> j) =>
+    _RecipeIngredient(
+      id: j['id'] as String? ?? '',
+      productId: j['product_id'] as String? ?? '',
+      productName: j['product_name'] as String? ?? '',
+      unitName: j['unit_name'] as String? ?? 'шт',
+      quantity: (j['quantity'] as num?)?.toDouble() ?? 1.0,
+    );
+
+_RecipeService _recipeServiceFromJson(Map<String, dynamic> j) =>
+    _RecipeService(
+      id: j['id'] as String? ?? '',
+      serviceId: j['service_id'] as String? ?? '',
+      serviceName: j['service_name'] as String? ?? '',
+      quantity: (j['quantity'] as num?)?.toDouble() ?? 1.0,
+    );
+
+_RecipeOutput _recipeOutputFromJson(Map<String, dynamic> j) => _RecipeOutput(
+      id: j['id'] as String? ?? '',
+      productId: j['product_id'] as String? ?? '',
+      productName: j['product_name'] as String? ?? '',
+      unitName: j['unit_name'] as String? ?? 'шт',
+      quantity: (j['quantity'] as num?)?.toDouble() ?? 1.0,
+    );
+
+_Recipe _recipeFromJson(Map<String, dynamic> j) => _Recipe(
+      id: j['id'] as String? ?? '',
+      name: j['name'] as String? ?? '',
+      description: j['description'] as String? ?? '',
+      ingredients: (j['ingredients'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_recipeIngredientFromJson)
+          .toList(growable: false),
+      services: (j['services'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_recipeServiceFromJson)
+          .toList(growable: false),
+      outputs: (j['outputs'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_recipeOutputFromJson)
+          .toList(growable: false),
+    );
+
+// ── ProductionOrder ───────────────────────────────────────────────────────────
+
+class _ProductionOrder {
+  const _ProductionOrder({
+    required this.id,
+    required this.documentNo,
+    required this.recipeId,
+    required this.recipeName,
+    required this.sourceWarehouseId,
+    required this.sourceWarehouseName,
+    required this.outputWarehouseId,
+    required this.outputWarehouseName,
+    required this.batchNumber,
+    required this.responsibleEmployee,
+    required this.plannedQuantity,
+    required this.status,
+    required this.plannedDate,
+    required this.notes,
+    required this.createdAt,
+  });
+  final String id;
+  final String documentNo;
+  final String recipeId;
+  final String recipeName;
+  final String sourceWarehouseId;
+  final String sourceWarehouseName;
+  final String outputWarehouseId;
+  final String outputWarehouseName;
+  final String batchNumber;
+  final String responsibleEmployee;
+  final double plannedQuantity;
+  final String status;
+  final String plannedDate;
+  final String notes;
+  final String createdAt;
+
+  String get statusLabel {
+    switch (status) {
+      case 'in_progress':
+        return 'В работе';
+      case 'completed':
+        return 'Завершён';
+      case 'cancelled':
+        return 'Отменён';
+      default:
+        return 'Черновик';
+    }
+  }
+
+  StatusKind get statusKind {
+    switch (status) {
+      case 'in_progress':
+        return StatusKind.info;
+      case 'completed':
+        return StatusKind.success;
+      case 'cancelled':
+        return StatusKind.error;
+      default:
+        return StatusKind.neutral;
+    }
+  }
+}
+
+_ProductionOrder _productionOrderFromJson(Map<String, dynamic> j) =>
+    _ProductionOrder(
+      id: j['id'] as String? ?? '',
+      documentNo: j['document_no'] as String? ?? '',
+      recipeId: j['recipe_id'] as String? ?? '',
+      recipeName: j['recipe_name'] as String? ?? '',
+      sourceWarehouseId: j['source_warehouse_id'] as String? ?? '',
+      sourceWarehouseName: j['source_warehouse_name'] as String? ?? '',
+      outputWarehouseId: j['output_warehouse_id'] as String? ?? '',
+      outputWarehouseName: j['output_warehouse_name'] as String? ?? '',
+      batchNumber: j['batch_number'] as String? ?? '',
+      responsibleEmployee: j['responsible_employee'] as String? ?? '',
+      plannedQuantity: (j['planned_quantity'] as num?)?.toDouble() ?? 1.0,
+      status: j['status'] as String? ?? 'draft',
+      plannedDate: j['planned_date'] as String? ?? '',
+      notes: j['notes'] as String? ?? '',
+      createdAt: j['created_at'] as String? ?? '',
     );

@@ -206,3 +206,73 @@ func TestServiceDeleteProfileRevokesAccess(t *testing.T) {
 		t.Fatalf("expected ErrUnauthorized after delete, got: %v", err)
 	}
 }
+
+func TestServiceDeleteProfileBlocksOwner(t *testing.T) {
+	store := NewMemoryStore()
+	store.deletionBlocker = &UserDeletionBlocker{
+		HasOwnedCompanies: true,
+		Message:           "Нельзя удалить аккаунт, пока у вас есть собственные компании. Сначала передайте владение или архивируйте компанию.",
+	}
+	service := NewService(store, 24*time.Hour)
+
+	registerResult, err := service.Register(RegisterInput{
+		FullName: "Иван Петров",
+		Phone:    "+77011234567",
+		Password: "StrongPass123",
+	})
+	if err != nil {
+		t.Fatalf("register returned error: %v", err)
+	}
+
+	err = service.DeleteProfile(registerResult.AccessToken)
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation, got: %v", err)
+	}
+	if err == nil || err.Error() != store.deletionBlocker.Message {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestServiceDeleteProfileAllowsMemberWithoutHistory(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(store, 24*time.Hour)
+
+	registerResult, err := service.Register(RegisterInput{
+		FullName: "Иван Петров",
+		Phone:    "+77011234567",
+		Password: "StrongPass123",
+	})
+	if err != nil {
+		t.Fatalf("register returned error: %v", err)
+	}
+
+	if err := service.DeleteProfile(registerResult.AccessToken); err != nil {
+		t.Fatalf("delete profile returned error: %v", err)
+	}
+}
+
+func TestServiceDeleteProfileBlocksMemberWithHistory(t *testing.T) {
+	store := NewMemoryStore()
+	store.deletionBlocker = &UserDeletionBlocker{
+		HasBusinessHistory: true,
+		Message:            "Нельзя удалить аккаунт, потому что в компаниях есть записи, связанные с вашим пользователем.",
+	}
+	service := NewService(store, 24*time.Hour)
+
+	registerResult, err := service.Register(RegisterInput{
+		FullName: "Иван Петров",
+		Phone:    "+77011234567",
+		Password: "StrongPass123",
+	})
+	if err != nil {
+		t.Fatalf("register returned error: %v", err)
+	}
+
+	err = service.DeleteProfile(registerResult.AccessToken)
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected ErrValidation, got: %v", err)
+	}
+	if err == nil || err.Error() != store.deletionBlocker.Message {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}

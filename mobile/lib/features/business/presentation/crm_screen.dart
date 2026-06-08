@@ -25,6 +25,9 @@ class _CrmScreenState extends State<_CrmScreen> {
   String _query = '';
   _Client? _selectedClient;
   bool _isSubmitting = false;
+  bool _showOnlyOverdue = false;
+  _CrmSortMode _sortMode = _CrmSortMode.defaultOrder;
+  bool _isCrmFabExpanded = false;
 
   @override
   void didUpdateWidget(covariant _CrmScreen oldWidget) {
@@ -48,432 +51,83 @@ class _CrmScreenState extends State<_CrmScreen> {
   Widget build(BuildContext context) {
     final clients = widget.clients.where((client) {
       final query = _query.toLowerCase();
-      return client.name.toLowerCase().contains(query) ||
+      final matchesQuery = client.name.toLowerCase().contains(query) ||
           client.contact.toLowerCase().contains(query);
-    }).toList();
+      final matchesOverdue = !_showOnlyOverdue || client.overdueAmount > 0;
+      return matchesQuery && matchesOverdue;
+    }).toList()
+      ..sort((left, right) {
+        switch (_sortMode) {
+          case _CrmSortMode.overdueDesc:
+            final overdueCompare =
+                right.overdueAmount.compareTo(left.overdueAmount);
+            if (overdueCompare != 0) return overdueCompare;
+            return right.receivable.compareTo(left.receivable);
+          case _CrmSortMode.receivableDesc:
+            final receivableCompare =
+                right.receivable.compareTo(left.receivable);
+            if (receivableCompare != 0) return receivableCompare;
+            return right.overdueAmount.compareTo(left.overdueAmount);
+          case _CrmSortMode.defaultOrder:
+            return 0;
+        }
+      });
 
     final vipCount =
-        widget.clients.where((client) => client.segment == 'VIP').length;
+        widget.clients.where((c) => c.segment == 'VIP').length;
     final debtorCount =
-        widget.clients.where((client) => client.debt > 0).length;
+        widget.clients.where((c) => c.debt > 0).length;
+    final selectedClient = _selectedClient;
 
-    if (_selectedClient != null) {
-      final client = _selectedClient!;
-      return SafeArea(
-        bottom: false,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-          children: [
-            TextButton.icon(
-              onPressed: () => setState(() => _selectedClient = null),
-              icon: const Icon(Icons.arrow_back_rounded),
-              label: const Text('Назад'),
-            ),
-            const SizedBox(height: 8),
-            _BusinessCard(
-              background: const LinearGradient(
-                colors: [Color(0xFF00A86B), Color(0xFF008F5B)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              client.name,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              client.binOrIinLabel,
-                              style: const TextStyle(color: Color(0xCCFFFFFF)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      _StatusBadge(
-                        label: client.segment,
-                        kind: client.segment == 'VIP'
-                            ? StatusKind.warning
-                            : StatusKind.neutral,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      _HeroStat(
-                        label: 'Общие продажи',
-                        value: formatMoney(client.totalSales),
-                      ),
-                      const SizedBox(width: 16),
-                      _HeroStat(
-                        label: 'Дебиторка',
-                        value: formatMoney(client.receivable),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _BusinessCard(
-                    child: _LabelValue(
-                      label: 'Дебиторская задолженность',
-                      value: formatMoney(client.receivable),
-                      valueColor: const Color(0xFFD97706),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _BusinessCard(
-                    child: _LabelValue(
-                      label: 'Кредиторская задолженность',
-                      value: formatMoney(client.payable),
-                      valueColor: const Color(0xFF2563EB),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _BusinessCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Контактная информация',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 14),
-                  _InfoTile(
-                    icon: Icons.person_rounded,
-                    label: 'Контактное лицо',
-                    value: client.contact,
-                  ),
-                  _InfoTile(
-                    icon: Icons.phone_rounded,
-                    label: 'Телефон',
-                    value: client.phone,
-                  ),
-                  _InfoTile(
-                    icon: Icons.mail_rounded,
-                    label: 'Email',
-                    value: client.email,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            _BusinessCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Открытые документы',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 14),
-                  if (client.openDocuments.isEmpty)
-                    const Text(
-                      'Открытых документов нет',
-                      style: TextStyle(color: Color(0xFF7B8794)),
-                    )
-                  else
-                    ...client.openDocuments.map(
-                      (document) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(18),
-                            onTap: _isSubmitting
-                                ? null
-                                : () => _openDebtDocument(document),
-                            child: Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8FAFC),
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          document.documentNo,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ),
-                                      _StatusBadge(
-                                        label: document.status,
-                                        kind: document.status == 'posted'
-                                            ? StatusKind.success
-                                            : StatusKind.warning,
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    '${document.documentType} • ${document.operationDate}',
-                                    style: const TextStyle(
-                                      color: Color(0xFF7B8794),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: _LabelValue(
-                                          label: 'Сумма',
-                                          value: formatMoney(document.amount),
-                                        ),
-                                      ),
-                                      Expanded(
-                                        child: _LabelValue(
-                                          label: 'Оплачено',
-                                          value: formatMoney(
-                                            document.paidAmount,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ),
-                                      _LabelValue(
-                                        label: 'Остаток',
-                                        value: formatMoney(
-                                          document.remainingAmount,
-                                        ),
-                                        valueColor: const Color(0xFFD97706),
-                                        textAlign: TextAlign.right,
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            _BusinessCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'История взаимодействий',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 14),
-                  ...client.interactions.map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 14),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 10,
-                            height: 10,
-                            margin: const EdgeInsets.only(top: 6),
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF00A86B),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        item.title,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      item.date,
-                                      style: const TextStyle(
-                                        color: Color(0xFF7B8794),
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  item.note,
-                                  style: const TextStyle(
-                                    color: Color(0xFF7B8794),
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () => _showClientSheet(initialClient: client),
-                    child: const Text('Редактировать'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed:
-                        _isSubmitting ? null : () => _deleteClient(client),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFDC2626),
-                    ),
-                    child: const Text('Удалить'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () => _showInventoryDocumentSheet(
-                              client: client,
-                              documentType: 'sale_issue',
-                            ),
-                    icon: const Icon(Icons.point_of_sale_rounded),
-                    label: const Text('Продажа'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () => _showInventoryDocumentSheet(
-                              client: client,
-                              documentType: 'purchase_receipt',
-                            ),
-                    icon: const Icon(Icons.shopping_cart_checkout_rounded),
-                    label: const Text('Закуп'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () => _openReceivableDocument(client),
-                    icon: const Icon(Icons.receipt_long_rounded),
-                    label: const Text('Счет на оплату'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () => _settleReceivableDocument(client),
-                    icon: const Icon(Icons.payments_rounded),
-                    label: const Text('Принять оплату'),
-                  ),
-                ),
-              ],
-            ),
-          ],
+    return Stack(
+      children: [
+        SafeArea(
+          bottom: false,
+          child: selectedClient != null
+              ? _buildClientDetail(selectedClient)
+              : _buildClientList(clients, vipCount, debtorCount),
         ),
-      );
-    }
+        Positioned(
+          right: 16,
+          bottom: 90,
+          child: selectedClient != null
+              ? _FabMenu(
+                  expanded: _isCrmFabExpanded,
+                  actions: _clientFabActions,
+                  onToggle: () => setState(
+                    () => _isCrmFabExpanded = !_isCrmFabExpanded,
+                  ),
+                  onActionSelected: _handleClientFabAction,
+                )
+              : FloatingActionButton(
+                  heroTag: 'crm_add_client',
+                  backgroundColor: const Color(0xFF00A86B),
+                  onPressed: _isSubmitting ? null : () => _showClientSheet(),
+                  child: const Icon(Icons.person_add_alt_1_rounded,
+                      color: Colors.white),
+                ),
+        ),
+      ],
+    );
+  }
 
-    return SafeArea(
-      bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'CRM',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-                ),
-              ),
-              FilledButton.icon(
-                onPressed: _isSubmitting ? null : () => _showClientSheet(),
-                icon: _isSubmitting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.person_add_alt_1_rounded),
-                label: const Text('Клиент'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _SearchField(
-                  hintText: 'Поиск клиентов...',
-                  icon: Icons.search_rounded,
-                  onChanged: (value) => setState(() => _query = value),
-                ),
-              ),
-              const SizedBox(width: 10),
-              _SquareIconButton(icon: Icons.tune_rounded, onPressed: () {}),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
+  // ── List view ────────────────────────────────────────────────────────────────
+
+  Widget _buildClientList(
+      List<_Client> clients, int vipCount, int debtorCount) {
+    return Column(
+      children: [
+        _GradientHeader(
+          title: 'CRM',
+          subtitle: _clientCountLabel(widget.clients.length),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          child: Row(
             children: [
               Expanded(
                 child: _MetricCard(
-                  title: 'Всего клиентов',
+                  title: 'Клиентов',
                   value: '${widget.clients.length}',
                   tone: const Color(0x1400A86B),
                   accent: const Color(0xFF00A86B),
@@ -482,7 +136,7 @@ class _CrmScreenState extends State<_CrmScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: _MetricCard(
-                  title: 'VIP клиенты',
+                  title: 'VIP',
                   value: '$vipCount',
                   tone: const Color(0x1422C55E),
                   accent: const Color(0xFF22C55E),
@@ -499,102 +153,687 @@ class _CrmScreenState extends State<_CrmScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          ...clients.map(
-            (client) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _BusinessCard(
-                onTap: () => setState(() => _selectedClient = client),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 0, 0),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _FilterChipButton(
+                  label: 'Все',
+                  active: !_showOnlyOverdue,
+                  activeColor: const Color(0xFF00A86B),
+                  onPressed: () =>
+                      setState(() => _showOnlyOverdue = false),
+                ),
+                const SizedBox(width: 8),
+                _FilterChipButton(
+                  label: 'Просрочка',
+                  active: _showOnlyOverdue,
+                  activeColor: const Color(0xFFDC2626),
+                  onPressed: () =>
+                      setState(() => _showOnlyOverdue = true),
+                ),
+                const SizedBox(width: 8),
+                _FilterChipButton(
+                  label: 'По просрочке ↓',
+                  active: _sortMode == _CrmSortMode.overdueDesc,
+                  activeColor: const Color(0xFFB91C1C),
+                  onPressed: () =>
+                      setState(() => _sortMode = _CrmSortMode.overdueDesc),
+                ),
+                const SizedBox(width: 8),
+                _FilterChipButton(
+                  label: 'По дебиторке ↓',
+                  active: _sortMode == _CrmSortMode.receivableDesc,
+                  activeColor: const Color(0xFFD97706),
+                  onPressed: () => setState(
+                      () => _sortMode = _CrmSortMode.receivableDesc),
+                ),
+                const SizedBox(width: 8),
+                _FilterChipButton(
+                  label: 'По умолчанию',
+                  active: _sortMode == _CrmSortMode.defaultOrder,
+                  activeColor: const Color(0xFF64748B),
+                  onPressed: () =>
+                      setState(() => _sortMode = _CrmSortMode.defaultOrder),
+                ),
+                const SizedBox(width: 16),
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: _SearchField(
+            hintText: 'Поиск клиентов...',
+            icon: Icons.search_rounded,
+            onChanged: (value) => setState(() => _query = value),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: clients.isEmpty
+              ? const Center(
+                  child: Text(
+                    'Клиентов пока нет',
+                    style: TextStyle(color: Color(0xFF94A3B8)),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+                  itemCount: clients.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) => _buildClientTile(clients[i]),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildClientTile(_Client client) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        border: client.overdueAmount > 0
+            ? Border.all(color: const Color(0x33DC2626), width: 1.2)
+            : null,
+      ),
+      child: _BusinessCard(
+        onTap: () => setState(() {
+          _selectedClient = client;
+          _isCrmFabExpanded = false;
+        }),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        client.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        client.contact,
+                        style: const TextStyle(
+                          color: Color(0xFF7B8794),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _StatusBadge(
+                  label: client.overdueAmount > 0 ? 'Просрочка' : client.segment,
+                  kind: client.overdueAmount > 0
+                      ? StatusKind.error
+                      : client.debt > 0
+                          ? StatusKind.warning
+                          : StatusKind.success,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.phone_rounded,
+                    size: 14, color: Color(0xFF7B8794)),
+                const SizedBox(width: 6),
+                Text(
+                  client.phone,
+                  style:
+                      const TextStyle(color: Color(0xFF7B8794), fontSize: 12),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _LabelValue(
+                    label: 'Продажи',
+                    value: formatMoney(client.totalSales),
+                  ),
+                ),
+                if (client.receivable > 0 || client.payable > 0)
+                  _LabelValue(
+                    label:
+                        client.receivable > 0 ? 'Дебиторка' : 'Кредиторка',
+                    value: formatMoney(
+                      client.receivable > 0
+                          ? client.receivable
+                          : client.payable,
+                    ),
+                    valueColor: client.receivable > 0
+                        ? const Color(0xFFD97706)
+                        : const Color(0xFF2563EB),
+                    textAlign: TextAlign.right,
+                  ),
+              ],
+            ),
+            if (client.overdueAmount > 0) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        color: Color(0xFFDC2626), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Просрочено: ${formatMoney(client.overdueAmount)}',
+                        style: const TextStyle(
+                          color: Color(0xFF991B1B),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Detail view ──────────────────────────────────────────────────────────────
+
+  Widget _buildClientDetail(_Client client) {
+    return Column(
+      children: [
+        _GradientHeader(
+          title: client.name,
+          subtitle: client.binOrIinLabel.isEmpty ? null : client.binOrIinLabel,
+          trailing: IconButton(
+            onPressed: () => setState(() {
+              _selectedClient = null;
+              _isCrmFabExpanded = false;
+            }),
+            icon: const Icon(Icons.close_rounded, color: Colors.white),
+            tooltip: 'Назад',
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _HeroStat(
+                  label: 'Общие продажи',
+                  value: formatMoney(client.totalSales),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _HeroStat(
+                  label: 'Дебиторка',
+                  value: formatMoney(client.receivable),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _StatusBadge(
+                label: client.segment,
+                kind: client.segment == 'VIP'
+                    ? StatusKind.warning
+                    : StatusKind.neutral,
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _BusinessCard(
+                      child: _LabelValue(
+                        label: 'Дебиторская задолженность',
+                        value: formatMoney(client.receivable),
+                        valueColor: const Color(0xFFD97706),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _BusinessCard(
+                      child: _LabelValue(
+                        label: 'Кредиторская задолженность',
+                        value: formatMoney(client.payable),
+                        valueColor: const Color(0xFF2563EB),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _BusinessCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const Text(
+                      'Взаиморасчеты',
+                      style: TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 14),
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                client.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                client.contact,
-                                style: const TextStyle(
-                                  color: Color(0xFF7B8794),
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
+                          child: _LabelValue(
+                            label: 'Поступило',
+                            value: formatMoney(client.paymentsIn),
+                            valueColor: const Color(0xFF16A34A),
                           ),
                         ),
-                        _StatusBadge(
-                          label: client.segment,
-                          kind: client.debt > 0
-                              ? StatusKind.warning
-                              : StatusKind.success,
+                        Expanded(
+                          child: _LabelValue(
+                            label: 'Оплачено',
+                            value: formatMoney(client.paymentsOut),
+                            valueColor: const Color(0xFF2563EB),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        _LabelValue(
+                          label: 'Средний чек',
+                          value: formatMoney(client.averageSale),
+                          textAlign: TextAlign.right,
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.phone_rounded,
-                          size: 14,
-                          color: Color(0xFF7B8794),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          client.phone,
-                          style: const TextStyle(
-                            color: Color(0xFF7B8794),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    const Divider(height: 1),
                     const SizedBox(height: 12),
                     Row(
                       children: [
                         Expanded(
                           child: _LabelValue(
-                            label: 'Продажи',
-                            value: formatMoney(client.totalSales),
+                            label: 'Продаж',
+                            value: '${client.salesCount}',
                           ),
                         ),
-                        if (client.receivable > 0 || client.payable > 0)
-                          _LabelValue(
-                            label: client.receivable > 0
-                                ? 'Дебиторка'
-                                : 'Кредиторка',
-                            value: formatMoney(
-                              client.receivable > 0
-                                  ? client.receivable
-                                  : client.payable,
-                            ),
-                            valueColor: client.receivable > 0
-                                ? const Color(0xFFD97706)
-                                : const Color(0xFF2563EB),
-                            textAlign: TextAlign.right,
-                          ),
+                        _LabelValue(
+                          label: 'Просрочка',
+                          value: formatMoney(client.overdueAmount),
+                          valueColor: client.overdueAmount > 0
+                              ? const Color(0xFFDC2626)
+                              : const Color(0xFF16A34A),
+                          textAlign: TextAlign.right,
+                        ),
                       ],
                     ),
                   ],
                 ),
               ),
-            ),
+              const SizedBox(height: 16),
+              _BusinessCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Контактная информация',
+                      style: TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 14),
+                    _InfoTile(
+                      icon: Icons.person_rounded,
+                      label: 'Контактное лицо',
+                      value: client.contact,
+                    ),
+                    _InfoTile(
+                      icon: Icons.phone_rounded,
+                      label: 'Телефон',
+                      value: client.phone,
+                    ),
+                    _InfoTile(
+                      icon: Icons.mail_rounded,
+                      label: 'Email',
+                      value: client.email,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _BusinessCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Открытые документы',
+                      style: TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 14),
+                    if (client.openDocuments.isEmpty)
+                      const Text(
+                        'Открытых документов нет',
+                        style: TextStyle(color: Color(0xFF7B8794)),
+                      )
+                    else
+                      ...client.openDocuments.map(
+                        (document) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(18),
+                              onTap: _isSubmitting
+                                  ? null
+                                  : () => _openDebtDocument(document),
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            document.documentNo,
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                        _StatusBadge(
+                                          label: document.status,
+                                          kind: document.status == 'posted'
+                                              ? StatusKind.success
+                                              : StatusKind.warning,
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      '${document.documentType} · ${document.operationDate}',
+                                      style: const TextStyle(
+                                          color: Color(0xFF7B8794),
+                                          fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: _LabelValue(
+                                            label: 'Сумма',
+                                            value:
+                                                formatMoney(document.amount),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: _LabelValue(
+                                            label: 'Оплачено',
+                                            value: formatMoney(
+                                                document.paidAmount),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                        _LabelValue(
+                                          label: 'Остаток',
+                                          value: formatMoney(
+                                              document.remainingAmount),
+                                          valueColor:
+                                              const Color(0xFFD97706),
+                                          textAlign: TextAlign.right,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _BusinessCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Продажи и оплаты',
+                      style: TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 14),
+                    if (client.timeline.isEmpty)
+                      const Text(
+                        'Событий по клиенту пока нет',
+                        style: TextStyle(color: Color(0xFF7B8794)),
+                      )
+                    else
+                      ...client.timeline.map(
+                        (item) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _BusinessCard(
+                            onTap: _isSubmitting
+                                ? null
+                                : () => _openTimelineEvent(item),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 42,
+                                  height: 42,
+                                  decoration: BoxDecoration(
+                                    color: toneColor(item.tone)
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Icon(
+                                    _iconForTimeline(item.eventType),
+                                    color: toneColor(item.tone),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item.title,
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w700),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${item.subtitle} · ${item.eventDate}',
+                                        style: const TextStyle(
+                                            color: Color(0xFF7B8794),
+                                            fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  formatMoney(item.amount),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    color: toneColor(item.tone),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _BusinessCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'История взаимодействий',
+                      style: TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 14),
+                    ...client.interactions.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 14),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              margin: const EdgeInsets.only(top: 6),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF00A86B),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          item.title,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w700),
+                                        ),
+                                      ),
+                                      Text(
+                                        item.date,
+                                        style: const TextStyle(
+                                            color: Color(0xFF7B8794),
+                                            fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    item.note,
+                                    style: const TextStyle(
+                                        color: Color(0xFF7B8794),
+                                        fontSize: 13),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
+  }
+
+  // ── FAB helpers ──────────────────────────────────────────────────────────────
+
+  static const _clientFabActions = [
+    _FabMenuAction(
+      id: 'client_edit',
+      label: 'Редактировать',
+      icon: Icons.edit_outlined,
+      color: Color(0xFF3B82F6),
+    ),
+    _FabMenuAction(
+      id: 'client_sale',
+      label: 'Продажа',
+      icon: Icons.point_of_sale_rounded,
+      color: Color(0xFF00A86B),
+    ),
+    _FabMenuAction(
+      id: 'client_purchase',
+      label: 'Закуп',
+      icon: Icons.shopping_cart_checkout_rounded,
+      color: Color(0xFF0F766E),
+    ),
+    _FabMenuAction(
+      id: 'client_invoice',
+      label: 'Счет на оплату',
+      icon: Icons.receipt_long_rounded,
+      color: Color(0xFFF59E0B),
+    ),
+    _FabMenuAction(
+      id: 'client_settle',
+      label: 'Принять оплату',
+      icon: Icons.payments_rounded,
+      color: Color(0xFF16A34A),
+    ),
+    _FabMenuAction(
+      id: 'client_delete',
+      label: 'Удалить',
+      icon: Icons.delete_outline_rounded,
+      color: Color(0xFFEF4444),
+    ),
+  ];
+
+  Future<void> _handleClientFabAction(_FabMenuAction action) async {
+    setState(() => _isCrmFabExpanded = false);
+    final client = _selectedClient;
+    if (client == null) return;
+    switch (action.id) {
+      case 'client_edit':
+        await _showClientSheet(initialClient: client);
+      case 'client_sale':
+        await _showInventoryDocumentSheet(
+            client: client, documentType: 'sale_issue');
+      case 'client_purchase':
+        await _showInventoryDocumentSheet(
+            client: client, documentType: 'purchase_receipt');
+      case 'client_invoice':
+        await _openReceivableDocument(client);
+      case 'client_settle':
+        await _settleReceivableDocument(client);
+      case 'client_delete':
+        await _deleteClient(client);
+    }
+  }
+
+  String _clientCountLabel(int count) {
+    if (count % 100 >= 11 && count % 100 <= 19) return '$count клиентов';
+    switch (count % 10) {
+      case 1:
+        return '$count клиент';
+      case 2:
+      case 3:
+      case 4:
+        return '$count клиента';
+      default:
+        return '$count клиентов';
+    }
   }
 
   Future<void> _showClientSheet({_Client? initialClient}) async {
@@ -830,20 +1069,13 @@ class _CrmScreenState extends State<_CrmScreen> {
     required _Client client,
     required String documentType,
   }) async {
-    if (widget.products.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Сначала добавьте хотя бы один товар на склад'),
-        ),
-      );
-      return;
-    }
-
     final result = await showModalBottomSheet<_CreateInventoryDocumentFormData>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _CreateInventoryDocumentSheet(
+        accessToken: widget.accessToken,
+        businessGateway: widget.businessGateway,
         products: widget.products,
         clients: widget.clients,
         initialDocumentType: documentType,
@@ -872,6 +1104,7 @@ class _CrmScreenState extends State<_CrmScreen> {
               .map(
                 (line) => {
                   'product_id': line.productId,
+                  'service_id': line.serviceId,
                   'quantity': line.quantity,
                   'unit_price': line.unitPrice,
                   'unit_cost': line.unitCost,
@@ -909,6 +1142,85 @@ class _CrmScreenState extends State<_CrmScreen> {
       }
     }
   }
+
+  Future<void> _openTimelineEvent(_ClientTimelineItem item) async {
+    try {
+      if (item.documentType == 'sale_issue' ||
+          item.documentType == 'purchase_receipt') {
+        final payload =
+            await widget.businessGateway.fetchInventoryDocumentDetail(
+          accessToken: widget.accessToken,
+          documentId: item.documentId,
+        );
+        if (!mounted) {
+          return;
+        }
+        final detail = _inventoryDocumentDetailFromJson(payload);
+        await showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) => _InventoryDocumentDetailSheet(detail: detail),
+        );
+        return;
+      }
+
+      if (item.documentType == 'sale_receivable' ||
+          item.documentType == 'purchase_payable') {
+        final payload = await widget.businessGateway.fetchMoneyDocumentDetail(
+          accessToken: widget.accessToken,
+          documentId: item.documentId,
+        );
+        if (!mounted) {
+          return;
+        }
+        final detail = _moneyDocumentDetailFromJson(payload);
+        final wasSettled = await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) => _MoneyDocumentDetailSheet(
+            accessToken: widget.accessToken,
+            businessGateway: widget.businessGateway,
+            accounts: widget.accounts,
+            detail: detail,
+            onSettled: widget.onClientsChanged,
+          ),
+        );
+        if (wasSettled == true) {
+          await widget.onClientsChanged();
+        }
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+
+  IconData _iconForTimeline(String eventType) {
+    switch (eventType) {
+      case 'sale_issue':
+        return Icons.point_of_sale_rounded;
+      case 'purchase_receipt':
+        return Icons.shopping_cart_checkout_rounded;
+      case 'payment_in':
+        return Icons.arrow_downward_rounded;
+      case 'payment_out':
+        return Icons.arrow_upward_rounded;
+      default:
+        return Icons.receipt_long_rounded;
+    }
+  }
+}
+
+enum _CrmSortMode {
+  defaultOrder,
+  overdueDesc,
+  receivableDesc,
 }
 
 class _CreateClientFormData {

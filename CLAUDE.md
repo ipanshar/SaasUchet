@@ -1,4 +1,6 @@
-# SaasUchet — CLAUDE.md
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 Контекст для AI-агентов (Claude Code, OpenAI Codex и др.) о структуре, архитектуре и соглашениях проекта.
 
@@ -63,15 +65,21 @@ lib/
     │   ├── data/business_api_client.dart
     │   ├── domain/business_gateway.dart  # Все контракты бизнес-API
     │   └── presentation/
-    │       ├── business_shell.dart       # Главный файл (1300+ строк, использует part)
-    │       ├── business_models.dart      # part of business_shell
-    │       ├── business_widgets.dart     # part of business_shell
-    │       ├── dashboard_screen.dart     # part of business_shell
-    │       ├── crm_screen.dart           # part of business_shell
-    │       ├── warehouse_screen.dart     # part of business_shell
-    │       ├── finance_screen.dart       # part of business_shell
-    │       ├── more_screen.dart          # part of business_shell
-    │       ├── onboarding_flow.dart      # part of business_shell
+    │       ├── business_shell.dart       # Корневой StatefulWidget; объявляет все part-файлы
+    │       ├── business_models.dart      # part of — все _Product, _Client, _Service и т.д.
+    │       ├── business_widgets.dart     # part of — BusinessTab enum, _BottomNavBar, _FabMenu
+    │       ├── dashboard_screen.dart     # part of
+    │       ├── crm_screen.dart           # part of
+    │       ├── warehouse_screen.dart     # part of
+    │       ├── finance_screen.dart       # part of
+    │       ├── more_screen.dart          # part of
+    │       ├── catalog_screen.dart       # part of — Справочник (Товары + Услуги)
+    │       ├── production_screen.dart    # part of — заглушка
+    │       ├── sales_screen.dart         # part of — заглушка
+    │       ├── purchases_screen.dart     # part of — заглушка
+    │       ├── services_screen.dart      # part of — заглушка
+    │       ├── onboarding_flow.dart      # part of
+    │       ├── nav_settings_screen.dart  # Настройка вкладок навигации (standalone)
     │       └── profile_editor_screen.dart
     ├── health/                      # Заглушка, не реализован
     └── profile/                     # Заглушка, не реализован
@@ -102,12 +110,21 @@ lib/
   - iOS simulator / Web → `http://localhost:8080`
   - Override через env-переменную `API_BASE_URL`
 
+### `part` / `part of` в бизнес-модуле
+
+Все файлы `*_screen.dart` в папке `presentation/` являются частями `business_shell.dart` через директиву `part of`. Это даёт доступ к приватным классам (`_Product`, `_Service`, `_BottomNavBar` и т.д.) без `import`. `nav_settings_screen.dart` и `profile_editor_screen.dart` — исключения: они standalone и открываются через `Navigator.push`.
+
+### Навигация с настройкой
+
+`_activeTabs` в `_BusinessShellState` — это `List<BusinessTab>` (всегда начинается с `dashboard`, заканчивается `more`). Средние вкладки настраиваются пользователем и сохраняются в `SharedPreferences` (`nav_tabs`). `IndexedStack.index = _activeTabs.indexOf(_activeTab)` — не хардкоженый `.index`.
+
 ### Flutter — соглашения
 
 - Одинарные кавычки (`'`)
 - Material Design 3 (`useMaterial3: true`)
 - Сериализация вручную — без кодогенерации
-- Приватные вспомогательные классы внутри `business_shell` именуются с `_` (напр. `_Client`, `_Product`)
+- Приватные вспомогательные классы внутри `business_shell` именуются с `_` (напр. `_Client`, `_Product`, `_Service`)
+- Цвет с прозрачностью: `.withValues(alpha: x)`, не `.withOpacity(x)` (deprecated)
 
 ---
 
@@ -166,7 +183,8 @@ backend/
     │   ├── postgres.go                  # Подключение + автоприменение схем
     │   └── schema/
     │       ├── 001_auth.sql
-    │       └── 002_business_core.sql
+    │       ├── 002_business_core.sql
+    │       └── 003_catalog.sql          # products: product_type/allowed_to_sell; services + service_materials
     ├── http/
     │   ├── router.go                    # Регистрация всех маршрутов
     │   └── middleware.go                # CORS, логирование, recovery
@@ -207,6 +225,7 @@ backend/
 
 - `001_auth.sql` — таблицы `users`, `auth_sessions`
 - `002_business_core.sql` — `companies`, `clients`, `products`, `inventory_documents`, `money_documents`, `accounts`
+- `003_catalog.sql` — расширение `products` (`product_type`, `allowed_to_sell`); новые таблицы `services`, `service_materials` (BOM)
 
 ### Подключение (локально)
 
@@ -243,8 +262,10 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | POST | `/business/money-operations` | Денежная операция |
 | GET | `/business/money-documents` | Денежные документы |
 | GET | `/business/money-documents/{id}` | Детали документа |
+| GET/POST | `/catalog/services` | Услуги — список / создание |
+| PUT/DELETE | `/catalog/services/{id}` | Услуга — обновление / удаление |
 
-Авторизация: `Authorization: Bearer <token>` для всех `/business/*` и `/profile`.
+Авторизация: `Authorization: Bearer <token>` для всех `/business/*`, `/catalog/*` и `/profile`.
 
 ---
 
@@ -259,22 +280,40 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | Склад (товары, документы, штрихкоды) | Готово |
 | Финансы (счета, операции, отчёты) | Готово |
 | Профиль компании | Готово |
+| Справочник — Товары (type/unit/allowed_to_sell) | Готово |
+| Справочник — Услуги (BOM: товары / подуслуги / внешние) | Готово |
+| Настройка вкладок навигации (SharedPreferences) | Готово |
+| Производство / Продажи / Закупки / Услуги | Заглушка |
 | Health-модуль | Заглушка |
 | Profile-фича (отдельная) | Заглушка |
 
 ---
 
-## Локальная разработка
+## Команды
 
+### Инфраструктура
 ```bash
-# 1. Поднять БД
-docker compose up -d
+docker compose up -d          # Поднять PostgreSQL
+docker compose down           # Остановить
+```
 
-# 2. Запустить бэкенд (из папки backend/)
-go run ./cmd/api
+### Бэкенд (из папки `backend/`)
+```bash
+go run ./cmd/api              # Запустить сервер
+go build ./cmd/api            # Собрать бинарник
+go test ./...                 # Все тесты
+go test ./internal/auth/      # Тесты одного пакета
+go test ./internal/business/ -run TestCreateProduct  # Один тест
+go vet ./...                  # Статический анализ
+```
 
-# 3. Запустить мобильное приложение (из папки mobile/)
-flutter run
+### Flutter (из папки `mobile/`)
+```bash
+flutter run                   # Запустить на подключённом устройстве
+flutter test                  # Все тесты
+flutter test test/widget_test.dart  # Один файл
+flutter analyze               # Линтер (должно быть 0 warnings)
+flutter pub get               # После изменений pubspec.yaml
 ```
 
 Конфигурация бэкенда: `backend/.env` (пример: `backend/.env.example`).

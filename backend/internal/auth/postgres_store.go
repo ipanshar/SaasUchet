@@ -150,6 +150,92 @@ func (s *PostgresStore) UpdateUser(user userRecord) error {
 	return nil
 }
 
+func (s *PostgresStore) GetUserDeletionBlocker(userID string) (UserDeletionBlocker, bool, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	var hasOwnedCompanies bool
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM companies
+			WHERE owner_user_id = $1
+			  AND archived_at IS NULL
+		)`,
+		userID,
+	).Scan(&hasOwnedCompanies)
+	if err != nil {
+		return UserDeletionBlocker{}, false, err
+	}
+	if hasOwnedCompanies {
+		return UserDeletionBlocker{
+			HasOwnedCompanies: true,
+			Message:           "Нельзя удалить аккаунт, пока у вас есть собственные компании. Сначала передайте владение или архивируйте компанию.",
+		}, true, nil
+	}
+
+	queries := []string{
+		`SELECT EXISTS (
+			SELECT 1
+			FROM clients c
+			JOIN companies company ON company.id = c.company_id
+			WHERE company.archived_at IS NULL
+			  AND (c.created_by_user_id = $1 OR c.updated_by_user_id = $1)
+		)`,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM client_interactions ci
+			JOIN companies company ON company.id = ci.company_id
+			WHERE company.archived_at IS NULL
+			  AND ci.author_user_id = $1
+		)`,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM warehouses w
+			JOIN companies company ON company.id = w.company_id
+			WHERE company.archived_at IS NULL
+			  AND w.manager_user_id = $1
+		)`,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM products p
+			JOIN companies company ON company.id = p.company_id
+			WHERE company.archived_at IS NULL
+			  AND (p.created_by_user_id = $1 OR p.updated_by_user_id = $1)
+		)`,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM inventory_documents doc
+			JOIN companies company ON company.id = doc.company_id
+			WHERE company.archived_at IS NULL
+			  AND (doc.created_by_user_id = $1 OR doc.posted_by_user_id = $1)
+		)`,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM money_documents doc
+			JOIN companies company ON company.id = doc.company_id
+			WHERE company.archived_at IS NULL
+			  AND (doc.created_by_user_id = $1 OR doc.posted_by_user_id = $1)
+		)`,
+	}
+
+	for _, query := range queries {
+		var hasBusinessHistory bool
+		if err := s.db.QueryRowContext(ctx, query, userID).Scan(&hasBusinessHistory); err != nil {
+			return UserDeletionBlocker{}, false, err
+		}
+		if hasBusinessHistory {
+			return UserDeletionBlocker{
+				HasBusinessHistory: true,
+				Message:            "Нельзя удалить аккаунт, потому что в компаниях есть записи, связанные с вашим пользователем.",
+			}, true, nil
+		}
+	}
+
+	return UserDeletionBlocker{}, false, nil
+}
+
 func (s *PostgresStore) DeleteUser(userID string) error {
 	ctx, cancel := s.withTimeout()
 	defer cancel()

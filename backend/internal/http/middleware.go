@@ -21,7 +21,7 @@ func withCORS(next stdhttp.Handler, allowedOrigins []string) stdhttp.Handler {
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Company-Id")
 
 		if r.Method == stdhttp.MethodOptions {
 			w.WriteHeader(stdhttp.StatusNoContent)

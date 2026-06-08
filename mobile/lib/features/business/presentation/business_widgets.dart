@@ -241,20 +241,22 @@ class _FabMenu extends StatelessWidget {
 class _GradientHeader extends StatelessWidget {
   const _GradientHeader({
     required this.title,
-    required this.child,
+    this.child,
     this.subtitle,
     this.trailing,
+    this.onTitleTap,
   });
 
   final String title;
   final String? subtitle;
-  final Widget child;
+  final Widget? child;
   final Widget? trailing;
+  final VoidCallback? onTitleTap;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 34),
+      padding: EdgeInsets.fromLTRB(16, 20, 16, child != null ? 34 : 20),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           colors: [Color(0xFF00A86B), Color(0xFF008F5B)],
@@ -268,7 +270,7 @@ class _GradientHeader extends StatelessWidget {
         children: [
           if (subtitle != null || trailing != null)
             Padding(
-              padding: const EdgeInsets.only(bottom: 18),
+              padding: EdgeInsets.only(bottom: child != null ? 18 : 0),
               child: Row(
                 children: [
                   Expanded(
@@ -283,14 +285,41 @@ class _GradientHeader extends StatelessWidget {
                               fontSize: 13,
                             ),
                           ),
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.w800,
+                        if (onTitleTap != null)
+                          GestureDetector(
+                            onTap: onTitleTap,
+                            behavior: HitTestBehavior.opaque,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    title,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(
+                                  Icons.expand_more_rounded,
+                                  color: Colors.white,
+                                  size: 26,
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -300,7 +329,7 @@ class _GradientHeader extends StatelessWidget {
             )
           else
             Padding(
-              padding: const EdgeInsets.only(bottom: 18),
+              padding: EdgeInsets.only(bottom: child != null ? 18 : 0),
               child: Text(
                 title,
                 style: const TextStyle(
@@ -310,16 +339,17 @@ class _GradientHeader extends StatelessWidget {
                 ),
               ),
             ),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: const Color(0x1AFFFFFF),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: const Color(0x33FFFFFF)),
+          if (child != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0x1AFFFFFF),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: const Color(0x33FFFFFF)),
+              ),
+              child: child,
             ),
-            child: child,
-          ),
         ],
       ),
     );
@@ -839,34 +869,6 @@ class _SearchField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: hintText,
         prefixIcon: Icon(icon),
-      ),
-    );
-  }
-}
-
-class _SquareIconButton extends StatelessWidget {
-  const _SquareIconButton({
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onPressed,
-      child: Container(
-        width: 52,
-        height: 52,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: Icon(icon),
       ),
     );
   }

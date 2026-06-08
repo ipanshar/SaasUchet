@@ -14,6 +14,16 @@ type User struct {
 	Phone     string    `json:"phone"`
 	Companies []Company `json:"companies"`
 	CreatedAt time.Time `json:"created_at"`
+
+	// ActiveCompanyID is resolved per-request from the X-Company-Id header.
+	// It is never persisted nor serialized.
+	ActiveCompanyID string `json:"-"`
+}
+
+type UserDeletionBlocker struct {
+	HasOwnedCompanies  bool
+	HasBusinessHistory bool
+	Message            string
 }
 
 type AuthResult struct {

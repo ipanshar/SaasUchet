@@ -5,8 +5,13 @@ import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/company_profile.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/user_profile.dart';
 import 'package:saas_uchet_mobile/features/business/domain/business_gateway.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
   testWidgets('shows onboarding screen by default', (tester) async {
     await tester.pumpWidget(
       SaasUchetApp(
@@ -98,6 +103,121 @@ class _FakeAuthGateway extends AuthGateway {
 }
 
 class _FakeBusinessGateway extends BusinessGateway {
+  @override
+  set activeCompanyId(String? value) {}
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchCompanies({
+    required String accessToken,
+  }) async {
+    return [
+      {
+        'id': 'cmp_1',
+        'name': 'ТОО Мой Бизнес',
+        'country': 'KZ',
+        'iin': '123456789012',
+        'role': 'owner',
+        'is_default': true,
+      },
+    ];
+  }
+
+  @override
+  Future<Map<String, dynamic>> createCompany({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {'id': 'cmp_new', ...payload};
+  }
+
+  @override
+  Future<Map<String, dynamic>> addCompanyMember({
+    required String accessToken,
+    required String companyId,
+    required Map<String, dynamic> payload,
+  }) async =>
+      {
+        'user_id': 'usr_2',
+        'full_name': 'Новый участник',
+        'phone': payload['phone'] ?? '+77001234567',
+        'role': payload['role'] ?? 'manager',
+        'role_label': 'Менеджер',
+        'is_owner': false,
+        'is_current_user': false,
+        'joined_at': '2026-06-03T00:00:00Z',
+      };
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchCompanyMembers({
+    required String accessToken,
+    required String companyId,
+  }) async =>
+      [
+        {
+          'user_id': 'usr_1',
+          'full_name': 'Иван Петров',
+          'phone': '+77011234567',
+          'role': 'owner',
+          'role_label': 'Владелец',
+          'is_owner': true,
+          'is_current_user': true,
+          'joined_at': '2026-06-01T00:00:00Z',
+        },
+      ];
+
+  @override
+  Future<Map<String, dynamic>> updateCompanyMemberRole({
+    required String accessToken,
+    required String companyId,
+    required String userId,
+    required Map<String, dynamic> payload,
+  }) async =>
+      {
+        'user_id': userId,
+        'full_name': 'Иван Петров',
+        'phone': '+77011234567',
+        'role': payload['role'] ?? 'manager',
+        'role_label': 'Менеджер',
+        'is_owner': false,
+        'is_current_user': false,
+        'joined_at': '2026-06-01T00:00:00Z',
+      };
+
+  @override
+  Future<void> removeCompanyMember({
+    required String accessToken,
+    required String companyId,
+    required String userId,
+  }) async {}
+
+  @override
+  Future<void> setDefaultCompany({
+    required String accessToken,
+    required String companyId,
+  }) async {}
+
+  @override
+  Future<Map<String, dynamic>> fetchCompany({
+    required String accessToken,
+    required String companyId,
+  }) async =>
+      {
+        'id': companyId,
+        'name': 'ТОО Мой Бизнес',
+        'country': 'KZ',
+        'iin': '',
+        'role': 'owner',
+        'is_default': true
+      };
+
+  @override
+  Future<Map<String, dynamic>> updateCompany({
+    required String accessToken,
+    required String companyId,
+    required Map<String, dynamic> payload,
+  }) async =>
+      {'id': companyId, ...payload};
+
   @override
   Future<Map<String, dynamic>> fetchOverview({
     required String accessToken,
@@ -268,6 +388,78 @@ class _FakeBusinessGateway extends BusinessGateway {
       'id': 'prd_new',
       ...payload,
     };
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchWarehouses({
+    required String accessToken,
+  }) async {
+    return [
+      {
+        'id': 'wh_1',
+        'name': 'Основной склад',
+        'code': 'MAIN',
+        'is_default': true,
+      },
+    ];
+  }
+
+  @override
+  Future<Map<String, dynamic>> createWarehouse({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {
+      'id': 'wh_new',
+      'name': payload['name'] ?? 'Новый склад',
+      'code': '',
+      'is_default': false,
+    };
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchWarehouseStock({
+    required String accessToken,
+    required String warehouseId,
+    String? search,
+  }) async {
+    return [
+      {
+        'product_id': 'prd_1',
+        'product_name': 'Ноутбук Lenovo ThinkPad',
+        'sku': 'TECH-001',
+        'category': 'Техника',
+        'unit_name': 'шт',
+        'available': 15,
+        'min_quantity': 10,
+        'status': 'in_stock',
+      },
+    ];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchWarehouseMovements({
+    required String accessToken,
+    required String warehouseId,
+    String? search,
+  }) async {
+    return [
+      {
+        'id': 'mov_1',
+        'document_id': 'inv_1',
+        'document_no': 'OPEN-TECH-001',
+        'document_type': 'opening',
+        'movement_type': 'in',
+        'product_id': 'prd_1',
+        'product_name': 'Ноутбук Lenovo ThinkPad',
+        'sku': 'TECH-001',
+        'quantity': 15,
+        'balance_after': 15,
+        'document_date': '2026-06-03',
+        'warehouse_name': 'Основной склад',
+        'related_warehouse_name': '',
+      },
+    ];
   }
 
   @override
@@ -458,6 +650,54 @@ class _FakeBusinessGateway extends BusinessGateway {
     required String accessToken,
     required String serviceId,
   }) async {}
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchRecipes({
+    required String accessToken,
+  }) async =>
+      [];
+
+  @override
+  Future<Map<String, dynamic>> createRecipe({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async =>
+      {'id': 'r1', ...payload};
+
+  @override
+  Future<Map<String, dynamic>> updateRecipe({
+    required String accessToken,
+    required String recipeId,
+    required Map<String, dynamic> payload,
+  }) async =>
+      {'id': recipeId, ...payload};
+
+  @override
+  Future<void> deleteRecipe({
+    required String accessToken,
+    required String recipeId,
+  }) async {}
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchProductionOrders({
+    required String accessToken,
+  }) async =>
+      [];
+
+  @override
+  Future<Map<String, dynamic>> createProductionOrder({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async =>
+      {'id': 'o1', ...payload};
+
+  @override
+  Future<Map<String, dynamic>> updateProductionOrderStatus({
+    required String accessToken,
+    required String orderId,
+    required String status,
+  }) async =>
+      {'id': orderId, 'status': status};
 }
 
 final _fakeSession = AuthSession(

@@ -4,11 +4,13 @@ import 'package:saas_uchet_mobile/features/auth/domain/auth_gateway.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/company_profile.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/user_profile.dart';
+import 'package:saas_uchet_mobile/features/business/domain/business_gateway.dart';
 
 class ProfileEditorScreen extends StatefulWidget {
   const ProfileEditorScreen({
     super.key,
     required this.authGateway,
+    required this.businessGateway,
     required this.session,
     required this.onLogout,
     required this.onSessionChanged,
@@ -16,6 +18,7 @@ class ProfileEditorScreen extends StatefulWidget {
   });
 
   final AuthGateway authGateway;
+  final BusinessGateway businessGateway;
   final AuthSession session;
   final VoidCallback onLogout;
   final ValueChanged<AuthSession> onSessionChanged;
@@ -63,10 +66,19 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
     });
 
     try {
-      final user = await widget.authGateway.fetchProfile(
-        accessToken: _session.accessToken,
+      final results = await Future.wait([
+        widget.authGateway.fetchProfile(
+          accessToken: _session.accessToken,
+        ),
+        widget.businessGateway.fetchCompanies(
+          accessToken: _session.accessToken,
+        ),
+      ]);
+      final user = results[0] as UserProfile;
+      final companies = _ownerCompaniesFromJson(
+        results[1] as List<Map<String, dynamic>>,
       );
-      _applyUser(user);
+      _applyUser(user, companies: companies);
     } on ApiException catch (error) {
       if (!mounted) {
         return;
@@ -115,7 +127,10 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
             : _passwordController.text,
       );
       _passwordController.clear();
-      _applyUser(updatedUser);
+      _applyUser(
+        updatedUser,
+        companies: _companies.map((item) => item.toProfile()).toList(),
+      );
     } on ApiException catch (error) {
       if (!mounted) {
         return;
@@ -149,7 +164,7 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Удалить аккаунт?'),
         content: const Text(
-          'Это действие удалит профиль и активные сессии. Отменить его нельзя.',
+          'Это действие удалит профиль и активные сессии. Если вы владеете компанией или ваш аккаунт связан с бизнес-записями, удаление будет недоступно.',
         ),
         actions: [
           TextButton(
@@ -203,11 +218,13 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
     }
   }
 
-  void _applyUser(UserProfile user) {
-    final session = _session.copyWith(user: user);
+  void _applyUser(UserProfile user, {List<CompanyProfile>? companies}) {
+    final mergedUser =
+        companies != null ? user.copyWith(companies: companies) : user;
+    final session = _session.copyWith(user: mergedUser);
     setState(() {
       _session = session;
-      _syncFromUser(user);
+      _syncFromUser(mergedUser);
     });
     widget.onSessionChanged(session);
   }
@@ -221,19 +238,6 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
     _companies
       ..clear()
       ..addAll(user.companies.map(_EditableCompany.fromProfile));
-  }
-
-  void _addCompany() {
-    setState(() {
-      _companies.add(_EditableCompany.empty());
-    });
-  }
-
-  void _removeCompany(int index) {
-    setState(() {
-      final company = _companies.removeAt(index);
-      company.dispose();
-    });
   }
 
   @override
@@ -319,19 +323,14 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          const Row(
                             children: [
-                              const Expanded(child: _SectionTitle('Компании')),
-                              OutlinedButton.icon(
-                                onPressed: _isSaving ? null : _addCompany,
-                                icon: const Icon(Icons.add_business_rounded),
-                                label: const Text('Добавить'),
-                              ),
+                              Expanded(child: _SectionTitle('Компании')),
                             ],
                           ),
                           const SizedBox(height: 8),
                           const Text(
-                            'У пользователя может быть несколько компаний. Для компаний Казахстана ИИН обязателен.',
+                            'Здесь показываются компании владельца из основного бизнес-списка. Реквизиты компании редактируются на отдельном экране "Компания".',
                             style: TextStyle(
                               color: Color(0xFF64748B),
                               height: 1.45,
@@ -354,8 +353,7 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
                             _CompanyEditorCard(
                               index: index,
                               company: _companies[index],
-                              enabled: !_isSaving,
-                              onRemove: () => _removeCompany(index),
+                              enabled: false,
                             ),
                             const SizedBox(height: 12),
                           ],
@@ -401,7 +399,7 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
                           const _SectionTitle('Опасная зона'),
                           const SizedBox(height: 8),
                           const Text(
-                            'Полностью удалить аккаунт и активные сессии.',
+                            'Полностью удалить аккаунт и активные сессии. Удаление может быть недоступно, если вы владеете компанией или ваш аккаунт уже связан с бизнес-историей.',
                             style: TextStyle(color: Color(0xFF64748B)),
                           ),
                           const SizedBox(height: 14),
@@ -452,6 +450,21 @@ class _ProfileEditorScreenState extends State<ProfileEditorScreen> {
     }
     return null;
   }
+
+  List<CompanyProfile> _ownerCompaniesFromJson(
+    List<Map<String, dynamic>> companies,
+  ) {
+    return companies
+        .where((company) => (company['role'] as String? ?? '') == 'owner')
+        .map(
+          (company) => CompanyProfile(
+            name: company['name'] as String? ?? '',
+            country: company['country'] as String? ?? '',
+            iin: company['iin'] as String? ?? '',
+          ),
+        )
+        .toList(growable: false);
+  }
 }
 
 class _EditableCompany {
@@ -466,14 +479,6 @@ class _EditableCompany {
       nameController: TextEditingController(text: profile.name),
       countryController: TextEditingController(text: profile.country),
       iinController: TextEditingController(text: profile.iin),
-    );
-  }
-
-  factory _EditableCompany.empty() {
-    return _EditableCompany(
-      nameController: TextEditingController(),
-      countryController: TextEditingController(text: 'KZ'),
-      iinController: TextEditingController(),
     );
   }
 
@@ -603,13 +608,11 @@ class _CompanyEditorCard extends StatelessWidget {
     required this.index,
     required this.company,
     required this.enabled,
-    required this.onRemove,
   });
 
   final int index;
   final _EditableCompany company;
   final bool enabled;
-  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -633,10 +636,6 @@ class _CompanyEditorCard extends StatelessWidget {
                     fontSize: 16,
                   ),
                 ),
-              ),
-              IconButton(
-                onPressed: enabled ? onRemove : null,
-                icon: const Icon(Icons.delete_outline_rounded),
               ),
             ],
           ),

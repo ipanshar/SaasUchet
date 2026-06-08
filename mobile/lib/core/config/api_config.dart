@@ -36,6 +36,8 @@ class ApiConfig {
       Uri.parse('$baseUrl/api/v1/business/clients');
   static Uri get businessProductsUri =>
       Uri.parse('$baseUrl/api/v1/business/products');
+  static Uri get businessWarehousesUri =>
+      Uri.parse('$baseUrl/api/v1/business/warehouses');
   static Uri get businessInventoryDocumentsUri =>
       Uri.parse('$baseUrl/api/v1/business/inventory-documents');
   static Uri get businessAccountsUri =>
@@ -47,6 +49,12 @@ class ApiConfig {
 
   static Uri businessInventoryDocumentUri(String documentId) =>
       Uri.parse('$baseUrl/api/v1/business/inventory-documents/$documentId');
+
+  static Uri businessWarehouseStockUri(String warehouseId) =>
+      Uri.parse('$baseUrl/api/v1/business/warehouses/$warehouseId/stock');
+
+  static Uri businessWarehouseMovementsUri(String warehouseId) =>
+      Uri.parse('$baseUrl/api/v1/business/warehouses/$warehouseId/movements');
 
   static Uri businessMoneyDocumentUri(String documentId) =>
       Uri.parse('$baseUrl/api/v1/business/money-documents/$documentId');
@@ -60,4 +68,30 @@ class ApiConfig {
 
   static Uri catalogServiceUri(String serviceId) =>
       Uri.parse('$baseUrl/api/v1/catalog/services/$serviceId');
+
+  static Uri get productionRecipesUri =>
+      Uri.parse('$baseUrl/api/v1/production/recipes');
+
+  static Uri productionRecipeUri(String recipeId) =>
+      Uri.parse('$baseUrl/api/v1/production/recipes/$recipeId');
+
+  static Uri get productionOrdersUri =>
+      Uri.parse('$baseUrl/api/v1/production/orders');
+
+  static Uri productionOrderUri(String orderId) =>
+      Uri.parse('$baseUrl/api/v1/production/orders/$orderId');
+
+  static Uri get companiesUri => Uri.parse('$baseUrl/api/v1/companies');
+
+  static Uri companyMembersUri(String companyId) =>
+      Uri.parse('$baseUrl/api/v1/companies/$companyId/members');
+
+  static Uri companyMemberByIdUri(String companyId, String userId) =>
+      Uri.parse('$baseUrl/api/v1/companies/$companyId/members/$userId');
+
+  static Uri companyDefaultUri(String companyId) =>
+      Uri.parse('$baseUrl/api/v1/companies/$companyId/default');
+
+  static Uri companyByIdUri(String companyId) =>
+      Uri.parse('$baseUrl/api/v1/companies/$companyId');
 }

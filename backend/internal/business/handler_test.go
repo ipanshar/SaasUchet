@@ -19,6 +19,18 @@ func (s stubAuthenticator) Authenticate(accessToken string) (auth.User, error) {
 	return s.user, s.err
 }
 
+type membershipOverrideStore struct {
+	*MemoryStore
+	companies []CompanyMembership
+}
+
+func (s membershipOverrideStore) ListUserCompanies(user auth.User) ([]CompanyMembership, error) {
+	if len(s.companies) > 0 {
+		return append([]CompanyMembership(nil), s.companies...), nil
+	}
+	return s.MemoryStore.ListUserCompanies(user)
+}
+
 func TestHandlerCreatesAndListsClients(t *testing.T) {
 	store := NewMemoryStore()
 	handler := NewHandler(
@@ -186,6 +198,86 @@ func TestHandlerUpdatesAndDeletesClient(t *testing.T) {
 	}
 	if len(listResponse.Clients) != 0 {
 		t.Fatalf("expected 0 clients after delete, got %d", len(listResponse.Clients))
+	}
+}
+
+func TestHandlerCreatesWarehouseAndReturnsStockAndMovements(t *testing.T) {
+	store := NewMemoryStore()
+	handler := NewHandler(
+		stubAuthenticator{
+			user: auth.User{
+				ID:       "usr_warehouse",
+				FullName: "Иван Петров",
+				Phone:    "+77011234567",
+			},
+		},
+		store,
+	)
+
+	warehousePayload, _ := json.Marshal(CreateWarehouseInput{Name: "Склад 2"})
+	createWarehouseRequest := httptest.NewRequest(http.MethodPost, "/api/v1/business/warehouses", bytes.NewReader(warehousePayload))
+	createWarehouseRequest.Header.Set("Authorization", "Bearer token")
+	createWarehouseRecorder := httptest.NewRecorder()
+
+	handler.Warehouses(createWarehouseRecorder, createWarehouseRequest)
+
+	if createWarehouseRecorder.Code != http.StatusCreated {
+		t.Fatalf("unexpected warehouse create status: %d body=%s", createWarehouseRecorder.Code, createWarehouseRecorder.Body.String())
+	}
+
+	var warehouse Warehouse
+	if err := json.Unmarshal(createWarehouseRecorder.Body.Bytes(), &warehouse); err != nil {
+		t.Fatalf("decode warehouse: %v", err)
+	}
+
+	product, err := store.CreateProduct(
+		auth.User{ID: "usr_warehouse"},
+		CreateProductInput{
+			Name:            "Товар А",
+			SKU:             "SKU-A",
+			Category:        "Тест",
+			ProductType:     "consumer_goods",
+			UnitName:        "шт",
+			AllowedToSell:   true,
+			InitialQuantity: 5,
+			MinQuantity:     1,
+			Price:           1000,
+			Cost:            700,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+
+	if _, err := store.CreateInventoryDocument(
+		auth.User{ID: "usr_warehouse"},
+		CreateInventoryDocumentInput{
+			DocumentType:  "adjustment",
+			WarehouseName: warehouse.Name,
+			Lines: []CreateInventoryDocumentLineInput{
+				{ProductID: product.ID, Quantity: 3, UnitPrice: 1000, UnitCost: 700},
+			},
+		},
+	); err != nil {
+		t.Fatalf("create inventory document: %v", err)
+	}
+
+	stockRequest := httptest.NewRequest(http.MethodGet, "/api/v1/business/warehouses/"+warehouse.ID+"/stock", nil)
+	stockRequest.Header.Set("Authorization", "Bearer token")
+	stockRecorder := httptest.NewRecorder()
+	handler.WarehouseByID(stockRecorder, stockRequest)
+
+	if stockRecorder.Code != http.StatusOK {
+		t.Fatalf("unexpected stock status: %d body=%s", stockRecorder.Code, stockRecorder.Body.String())
+	}
+
+	movementsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/business/warehouses/"+warehouse.ID+"/movements", nil)
+	movementsRequest.Header.Set("Authorization", "Bearer token")
+	movementsRecorder := httptest.NewRecorder()
+	handler.WarehouseByID(movementsRecorder, movementsRequest)
+
+	if movementsRecorder.Code != http.StatusOK {
+		t.Fatalf("unexpected movements status: %d body=%s", movementsRecorder.Code, movementsRecorder.Body.String())
 	}
 }
 
@@ -724,5 +816,158 @@ func TestHandlerCreatesInventoryDocument(t *testing.T) {
 	}
 	if len(detail.Lines) != 1 {
 		t.Fatalf("expected 1 line, got %d", len(detail.Lines))
+	}
+}
+
+func TestHandlerCompanyMembersCRUD(t *testing.T) {
+	store := NewMemoryStore()
+	handler := NewHandler(
+		stubAuthenticator{
+			user: auth.User{
+				ID:       "usr_owner",
+				FullName: "Владелец",
+				Phone:    "+77010000001",
+			},
+		},
+		store,
+	)
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/companies/cmp_default/members", nil)
+	listRequest.Header.Set("Authorization", "Bearer token")
+	listRecorder := httptest.NewRecorder()
+	handler.CompanyByID(listRecorder, listRequest)
+
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("unexpected list members status: %d body=%s", listRecorder.Code, listRecorder.Body.String())
+	}
+
+	var initial struct {
+		Members []CompanyMember `json:"members"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &initial); err != nil {
+		t.Fatalf("decode initial members: %v", err)
+	}
+	if len(initial.Members) != 1 || !initial.Members[0].IsOwner {
+		t.Fatalf("expected seeded owner member, got %+v", initial.Members)
+	}
+
+	addPayload, err := json.Marshal(AddCompanyMemberInput{
+		Phone: "+7 777 123 45 67",
+		Role:  "manager",
+	})
+	if err != nil {
+		t.Fatalf("marshal add member payload: %v", err)
+	}
+
+	addRequest := httptest.NewRequest(http.MethodPost, "/api/v1/companies/cmp_default/members", bytes.NewReader(addPayload))
+	addRequest.Header.Set("Authorization", "Bearer token")
+	addRecorder := httptest.NewRecorder()
+	handler.CompanyByID(addRecorder, addRequest)
+
+	if addRecorder.Code != http.StatusCreated {
+		t.Fatalf("unexpected add member status: %d body=%s", addRecorder.Code, addRecorder.Body.String())
+	}
+
+	var created CompanyMember
+	if err := json.Unmarshal(addRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created member: %v", err)
+	}
+	if created.Role != "manager" {
+		t.Fatalf("unexpected created member role: %s", created.Role)
+	}
+
+	updatePayload, err := json.Marshal(UpdateCompanyMemberRoleInput{Role: "sales"})
+	if err != nil {
+		t.Fatalf("marshal update member payload: %v", err)
+	}
+
+	updateRequest := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/companies/cmp_default/members/"+created.UserID,
+		bytes.NewReader(updatePayload),
+	)
+	updateRequest.Header.Set("Authorization", "Bearer token")
+	updateRecorder := httptest.NewRecorder()
+	handler.CompanyByID(updateRecorder, updateRequest)
+
+	if updateRecorder.Code != http.StatusOK {
+		t.Fatalf("unexpected update member status: %d body=%s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+
+	var updated CompanyMember
+	if err := json.Unmarshal(updateRecorder.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated member: %v", err)
+	}
+	if updated.Role != "sales" {
+		t.Fatalf("unexpected updated member role: %s", updated.Role)
+	}
+
+	deleteRequest := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/companies/cmp_default/members/"+created.UserID,
+		nil,
+	)
+	deleteRequest.Header.Set("Authorization", "Bearer token")
+	deleteRecorder := httptest.NewRecorder()
+	handler.CompanyByID(deleteRecorder, deleteRequest)
+
+	if deleteRecorder.Code != http.StatusNoContent {
+		t.Fatalf("unexpected delete member status: %d body=%s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+}
+
+func TestHandlerCompanyMembersForbiddenForManager(t *testing.T) {
+	store := membershipOverrideStore{
+		MemoryStore: NewMemoryStore(),
+		companies: []CompanyMembership{{
+			ID:        "cmp_default",
+			Name:      "Тестовая компания",
+			Country:   "KZ",
+			Role:      "manager",
+			IsDefault: true,
+		}},
+	}
+	store.membersByCompany["cmp_default"] = []CompanyMember{
+		{
+			UserID:        "usr_owner",
+			FullName:      "Owner",
+			Phone:         "+77010000001",
+			Role:          "owner",
+			RoleLabel:     companyRoleLabel("owner"),
+			IsOwner:       true,
+			IsCurrentUser: false,
+			JoinedAt:      "2026-06-08T00:00:00Z",
+		},
+		{
+			UserID:        "usr_manager",
+			FullName:      "Manager",
+			Phone:         "+77010000002",
+			Role:          "manager",
+			RoleLabel:     companyRoleLabel("manager"),
+			IsOwner:       false,
+			IsCurrentUser: true,
+			JoinedAt:      "2026-06-08T00:00:00Z",
+		},
+	}
+
+	handler := NewHandler(
+		stubAuthenticator{
+			user: auth.User{
+				ID:              "usr_manager",
+				FullName:        "Менеджер",
+				Phone:           "+77010000002",
+				ActiveCompanyID: "cmp_default",
+			},
+		},
+		store,
+	)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/companies/cmp_default/members", nil)
+	request.Header.Set("Authorization", "Bearer token")
+	recorder := httptest.NewRecorder()
+	handler.CompanyByID(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("unexpected manager members status: %d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

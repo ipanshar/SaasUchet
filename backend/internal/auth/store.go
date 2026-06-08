@@ -6,6 +6,7 @@ type Store interface {
 	CreateUser(user userRecord) error
 	FindUserByPhone(phone string) (userRecord, bool, error)
 	FindUserByID(id string) (userRecord, bool, error)
+	GetUserDeletionBlocker(userID string) (UserDeletionBlocker, bool, error)
 	UpdateUser(user userRecord) error
 	DeleteUser(userID string) error
 	SaveSession(session session) error
@@ -18,6 +19,7 @@ type MemoryStore struct {
 	usersByPhone    map[string]userRecord
 	usersByID       map[string]userRecord
 	sessionsByToken map[string]session
+	deletionBlocker *UserDeletionBlocker
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -89,6 +91,17 @@ func (s *MemoryStore) UpdateUser(user userRecord) error {
 	s.usersByPhone[user.Phone] = clonedUser
 
 	return nil
+}
+
+func (s *MemoryStore) GetUserDeletionBlocker(_ string) (UserDeletionBlocker, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.deletionBlocker == nil {
+		return UserDeletionBlocker{}, false, nil
+	}
+
+	return *s.deletionBlocker, true, nil
 }
 
 func (s *MemoryStore) DeleteUser(userID string) error {

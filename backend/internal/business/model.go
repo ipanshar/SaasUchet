@@ -69,10 +69,16 @@ type Client struct {
 	Debt          int                  `json:"debt"`
 	Receivable    int                  `json:"receivable"`
 	Payable       int                  `json:"payable"`
+	SalesCount    int                  `json:"sales_count"`
+	AverageSale   int                  `json:"average_sale"`
+	PaymentsIn    int                  `json:"payments_in"`
+	PaymentsOut   int                  `json:"payments_out"`
+	OverdueAmount int                  `json:"overdue_amount"`
 	BIN           string               `json:"bin,omitempty"`
 	IIN           string               `json:"iin,omitempty"`
 	Interactions  []Interaction        `json:"interactions"`
 	OpenDocuments []ClientDebtDocument `json:"open_documents"`
+	Timeline      []ClientTimelineItem `json:"timeline"`
 }
 
 type ClientDebtDocument struct {
@@ -84,6 +90,17 @@ type ClientDebtDocument struct {
 	Amount          int    `json:"amount"`
 	PaidAmount      int    `json:"paid_amount"`
 	RemainingAmount int    `json:"remaining_amount"`
+}
+
+type ClientTimelineItem struct {
+	DocumentID   string `json:"document_id"`
+	DocumentType string `json:"document_type"`
+	EventType    string `json:"event_type"`
+	Title        string `json:"title"`
+	Subtitle     string `json:"subtitle"`
+	EventDate    string `json:"event_date"`
+	Amount       int    `json:"amount"`
+	Tone         string `json:"tone"`
 }
 
 type CreateClientInput struct {
@@ -173,10 +190,50 @@ type CreateServiceInput struct {
 
 type CreateInventoryDocumentLineInput struct {
 	ProductID string `json:"product_id"`
+	ServiceID string `json:"service_id"`
 	Quantity  int    `json:"quantity"`
 	UnitPrice int    `json:"unit_price"`
 	UnitCost  int    `json:"unit_cost"`
 	Note      string `json:"note"`
+}
+
+type Warehouse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Code      string `json:"code,omitempty"`
+	IsDefault bool   `json:"is_default"`
+}
+
+type CreateWarehouseInput struct {
+	Name string `json:"name"`
+	Code string `json:"code,omitempty"`
+}
+
+type WarehouseStockItem struct {
+	ProductID   string `json:"product_id"`
+	ProductName string `json:"product_name"`
+	SKU         string `json:"sku"`
+	Category    string `json:"category"`
+	UnitName    string `json:"unit_name"`
+	Available   int    `json:"available"`
+	MinQuantity int    `json:"min_quantity"`
+	Status      string `json:"status"`
+}
+
+type WarehouseMovement struct {
+	ID               string `json:"id"`
+	DocumentID       string `json:"document_id"`
+	DocumentNo       string `json:"document_no"`
+	DocumentType     string `json:"document_type"`
+	MovementType     string `json:"movement_type"`
+	ProductID        string `json:"product_id"`
+	ProductName      string `json:"product_name"`
+	SKU              string `json:"sku"`
+	Quantity         int    `json:"quantity"`
+	BalanceAfter     int    `json:"balance_after"`
+	DocumentDate     string `json:"document_date"`
+	WarehouseName    string `json:"warehouse_name"`
+	RelatedWarehouse string `json:"related_warehouse_name,omitempty"`
 }
 
 type CreateInventoryDocumentInput struct {
@@ -214,13 +271,14 @@ type InventoryDocumentSummary struct {
 }
 
 type InventoryDocumentLine struct {
-	ProductName string `json:"product_name"`
-	SKU         string `json:"sku"`
-	Quantity    int    `json:"quantity"`
-	UnitPrice   int    `json:"unit_price"`
-	UnitCost    int    `json:"unit_cost"`
-	LineTotal   int    `json:"line_total"`
-	Note        string `json:"note,omitempty"`
+	ItemName  string `json:"item_name"`
+	ItemType  string `json:"item_type"` // product | service
+	SKU       string `json:"sku,omitempty"`
+	Quantity  int    `json:"quantity"`
+	UnitPrice int    `json:"unit_price"`
+	UnitCost  int    `json:"unit_cost"`
+	LineTotal int    `json:"line_total"`
+	Note      string `json:"note,omitempty"`
 }
 
 type InventoryDocumentDetail struct {
@@ -328,10 +386,12 @@ type StaffMember struct {
 	Role string `json:"role"`
 }
 
-func buildOverview(user auth.User, clients []Client, products []Product, finance Finance) Overview {
-	companyName := `ТОО "Мой Бизнес"`
-	if len(user.Companies) > 0 {
-		companyName = user.Companies[0].Name
+func buildOverview(user auth.User, companyName string, clients []Client, products []Product, finance Finance) Overview {
+	if strings.TrimSpace(companyName) == "" {
+		companyName = `ТОО "Мой Бизнес"`
+		if len(user.Companies) > 0 {
+			companyName = user.Companies[0].Name
+		}
 	}
 
 	return Overview{
@@ -433,8 +493,14 @@ func NewClientFromInput(input CreateClientInput) Client {
 		Debt:          0,
 		Receivable:    0,
 		Payable:       0,
+		SalesCount:    0,
+		AverageSale:   0,
+		PaymentsIn:    0,
+		PaymentsOut:   0,
+		OverdueAmount: 0,
 		Interactions:  []Interaction{},
 		OpenDocuments: []ClientDebtDocument{},
+		Timeline:      []ClientTimelineItem{},
 	}
 }
 
@@ -499,6 +565,12 @@ func NormalizeInventoryDocumentInput(input CreateInventoryDocumentInput) CreateI
 		input.Lines[index].Note = strings.TrimSpace(input.Lines[index].Note)
 	}
 
+	return input
+}
+
+func NormalizeWarehouseInput(input CreateWarehouseInput) CreateWarehouseInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Code = strings.TrimSpace(strings.ToUpper(input.Code))
 	return input
 }
 
@@ -621,8 +693,8 @@ func ValidateInventoryDocumentInput(input CreateInventoryDocumentInput) error {
 		return fmt.Errorf("%w: client_id is required for sale and purchase documents", ErrValidation)
 	}
 	for index, line := range input.Lines {
-		if strings.TrimSpace(line.ProductID) == "" {
-			return fmt.Errorf("%w: lines[%d].product_id is required", ErrValidation, index)
+		if strings.TrimSpace(line.ProductID) == "" && strings.TrimSpace(line.ServiceID) == "" {
+			return fmt.Errorf("%w: lines[%d].product_id or service_id is required", ErrValidation, index)
 		}
 		if line.Quantity <= 0 {
 			return fmt.Errorf("%w: lines[%d].quantity must be greater than zero", ErrValidation, index)
@@ -635,6 +707,217 @@ func ValidateInventoryDocumentInput(input CreateInventoryDocumentInput) error {
 		}
 	}
 	return nil
+}
+
+func ValidateWarehouseInput(input CreateWarehouseInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("%w: warehouse name is required", ErrValidation)
+	}
+	return nil
+}
+
+// CompanyMembership describes one company the user belongs to, with the user's
+// role inside it. It powers the multi-company switcher.
+type CompanyMembership struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Country   string `json:"country"`
+	IIN       string `json:"iin,omitempty"`
+	Role      string `json:"role"`
+	IsDefault bool   `json:"is_default"`
+}
+
+type CreateCompanyInput struct {
+	Name    string `json:"name"`
+	Country string `json:"country"`
+	IIN     string `json:"iin"`
+}
+
+type AddCompanyMemberInput struct {
+	Phone string `json:"phone"`
+	Role  string `json:"role"`
+}
+
+type UpdateCompanyMemberRoleInput struct {
+	Role string `json:"role"`
+}
+
+type CompanyMember struct {
+	UserID        string `json:"user_id"`
+	FullName      string `json:"full_name"`
+	Phone         string `json:"phone"`
+	Role          string `json:"role"`
+	RoleLabel     string `json:"role_label"`
+	IsOwner       bool   `json:"is_owner"`
+	IsCurrentUser bool   `json:"is_current_user"`
+	JoinedAt      string `json:"joined_at"`
+}
+
+func NormalizeCompanyInput(input CreateCompanyInput) CreateCompanyInput {
+	input.Name = strings.Join(strings.Fields(input.Name), " ")
+	input.Country = strings.ToUpper(strings.TrimSpace(input.Country))
+	input.IIN = strings.TrimSpace(input.IIN)
+	return input
+}
+
+func ValidateCompanyInput(input CreateCompanyInput) error {
+	if len([]rune(input.Name)) < 2 || len([]rune(input.Name)) > 160 {
+		return fmt.Errorf("%w: company name must be between 2 and 160 characters", ErrValidation)
+	}
+	if len(input.Country) != 2 {
+		return fmt.Errorf("%w: country must be a 2-letter code", ErrValidation)
+	}
+	if input.IIN != "" {
+		if len(input.IIN) != 12 {
+			return fmt.Errorf("%w: iin must contain exactly 12 digits", ErrValidation)
+		}
+		for _, symbol := range input.IIN {
+			if symbol < '0' || symbol > '9' {
+				return fmt.Errorf("%w: iin must contain only digits", ErrValidation)
+			}
+		}
+	}
+	if input.Country == "KZ" && input.IIN == "" {
+		return fmt.Errorf("%w: iin is required for Kazakhstan companies", ErrValidation)
+	}
+	return nil
+}
+
+// CompanyDetail is the full company record returned for the editor screen.
+type CompanyDetail struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	LegalForm      string `json:"legal_form,omitempty"`
+	Country        string `json:"country"`
+	IIN            string `json:"iin,omitempty"`
+	RegistrationNo string `json:"registration_no,omitempty"`
+	Email          string `json:"email,omitempty"`
+	Phone          string `json:"phone,omitempty"`
+	AddressLine    string `json:"address_line,omitempty"`
+	City           string `json:"city,omitempty"`
+	Region         string `json:"region,omitempty"`
+	PostalCode     string `json:"postal_code,omitempty"`
+	BankName       string `json:"bank_name,omitempty"`
+	BankAccount    string `json:"bank_account,omitempty"`
+	BankBik        string `json:"bank_bik,omitempty"`
+	IsVatPayer     bool   `json:"is_vat_payer"`
+	Role           string `json:"role"`
+	IsDefault      bool   `json:"is_default"`
+}
+
+type UpdateCompanyInput struct {
+	Name        string `json:"name"`
+	LegalForm   string `json:"legal_form"`
+	Country     string `json:"country"`
+	IIN         string `json:"iin"`
+	Email       string `json:"email"`
+	Phone       string `json:"phone"`
+	AddressLine string `json:"address_line"`
+	City        string `json:"city"`
+	Region      string `json:"region"`
+	PostalCode  string `json:"postal_code"`
+	BankName    string `json:"bank_name"`
+	BankAccount string `json:"bank_account"`
+	BankBik     string `json:"bank_bik"`
+	IsVatPayer  bool   `json:"is_vat_payer"`
+}
+
+func NormalizeUpdateCompanyInput(input UpdateCompanyInput) UpdateCompanyInput {
+	input.Name = strings.Join(strings.Fields(input.Name), " ")
+	input.LegalForm = strings.TrimSpace(input.LegalForm)
+	input.Country = strings.ToUpper(strings.TrimSpace(input.Country))
+	input.IIN = strings.TrimSpace(input.IIN)
+	input.Email = strings.TrimSpace(input.Email)
+	input.Phone = strings.TrimSpace(input.Phone)
+	input.AddressLine = strings.TrimSpace(input.AddressLine)
+	input.City = strings.TrimSpace(input.City)
+	input.Region = strings.TrimSpace(input.Region)
+	input.PostalCode = strings.TrimSpace(input.PostalCode)
+	input.BankName = strings.TrimSpace(input.BankName)
+	input.BankAccount = strings.TrimSpace(input.BankAccount)
+	input.BankBik = strings.TrimSpace(input.BankBik)
+	return input
+}
+
+func ValidateUpdateCompanyInput(input UpdateCompanyInput) error {
+	if len([]rune(input.Name)) < 2 || len([]rune(input.Name)) > 160 {
+		return fmt.Errorf("%w: company name must be between 2 and 160 characters", ErrValidation)
+	}
+	if len(input.Country) != 2 {
+		return fmt.Errorf("%w: country must be a 2-letter code", ErrValidation)
+	}
+	if input.IIN != "" {
+		if len(input.IIN) != 12 {
+			return fmt.Errorf("%w: iin must contain exactly 12 digits", ErrValidation)
+		}
+		for _, symbol := range input.IIN {
+			if symbol < '0' || symbol > '9' {
+				return fmt.Errorf("%w: iin must contain only digits", ErrValidation)
+			}
+		}
+	}
+	if input.Country == "KZ" && input.IIN == "" {
+		return fmt.Errorf("%w: iin is required for Kazakhstan companies", ErrValidation)
+	}
+	return nil
+}
+
+var companyMemberRoles = map[string]bool{
+	"admin": true, "manager": true, "accountant": true,
+	"warehouse": true, "sales": true, "staff": true,
+}
+
+func NormalizeAddCompanyMemberInput(input AddCompanyMemberInput) AddCompanyMemberInput {
+	input.Phone = normalizePhone(input.Phone)
+	input.Role = strings.TrimSpace(strings.ToLower(input.Role))
+	if input.Role == "" {
+		input.Role = "staff"
+	}
+	return input
+}
+
+func ValidateAddCompanyMemberInput(input AddCompanyMemberInput) error {
+	if strings.TrimSpace(input.Phone) == "" {
+		return fmt.Errorf("%w: phone is required", ErrValidation)
+	}
+	if !companyMemberRoles[input.Role] {
+		return fmt.Errorf("%w: role is invalid", ErrValidation)
+	}
+	return nil
+}
+
+func NormalizeUpdateCompanyMemberRoleInput(input UpdateCompanyMemberRoleInput) UpdateCompanyMemberRoleInput {
+	input.Role = strings.TrimSpace(strings.ToLower(input.Role))
+	return input
+}
+
+func ValidateUpdateCompanyMemberRoleInput(input UpdateCompanyMemberRoleInput) error {
+	if input.Role == "owner" {
+		return fmt.Errorf("%w: role is invalid", ErrValidation)
+	}
+	if !companyMemberRoles[input.Role] {
+		return fmt.Errorf("%w: role is invalid", ErrValidation)
+	}
+	return nil
+}
+
+func companyRoleLabel(role string) string {
+	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "owner":
+		return "Владелец"
+	case "admin":
+		return "Администратор"
+	case "manager":
+		return "Менеджер"
+	case "accountant":
+		return "Бухгалтер"
+	case "warehouse":
+		return "Кладовщик"
+	case "sales":
+		return "Продажи"
+	default:
+		return "Сотрудник"
+	}
 }
 
 func ValidateProductInput(input CreateProductInput) error {
@@ -851,4 +1134,199 @@ func productStatus(quantity int, minQuantity int) string {
 	default:
 		return "in_stock"
 	}
+}
+
+// ── Production / Recipes ──────────────────────────────────────────────────────
+
+type RecipeIngredient struct {
+	ID          string  `json:"id"`
+	ProductID   string  `json:"product_id"`
+	ProductName string  `json:"product_name"`
+	UnitName    string  `json:"unit_name"`
+	Quantity    float64 `json:"quantity"`
+}
+
+type RecipeService struct {
+	ID          string  `json:"id"`
+	ServiceID   string  `json:"service_id"`
+	ServiceName string  `json:"service_name"`
+	Quantity    float64 `json:"quantity"`
+}
+
+type RecipeOutput struct {
+	ID          string  `json:"id"`
+	ProductID   string  `json:"product_id"`
+	ProductName string  `json:"product_name"`
+	UnitName    string  `json:"unit_name"`
+	Quantity    float64 `json:"quantity"`
+}
+
+type Recipe struct {
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Ingredients []RecipeIngredient `json:"ingredients"`
+	Services    []RecipeService    `json:"services"`
+	Outputs     []RecipeOutput     `json:"outputs"`
+}
+
+type CreateRecipeIngredientInput struct {
+	ProductID string  `json:"product_id"`
+	Quantity  float64 `json:"quantity"`
+	UnitName  string  `json:"unit_name"`
+}
+
+type CreateRecipeServiceInput struct {
+	ServiceID string  `json:"service_id"`
+	Quantity  float64 `json:"quantity"`
+}
+
+type CreateRecipeOutputInput struct {
+	ProductID string  `json:"product_id"`
+	Quantity  float64 `json:"quantity"`
+	UnitName  string  `json:"unit_name"`
+}
+
+type CreateRecipeInput struct {
+	Name        string                        `json:"name"`
+	Description string                        `json:"description"`
+	Ingredients []CreateRecipeIngredientInput `json:"ingredients"`
+	Services    []CreateRecipeServiceInput    `json:"services"`
+	Outputs     []CreateRecipeOutputInput     `json:"outputs"`
+}
+
+type ProductionOrder struct {
+	ID                  string  `json:"id"`
+	DocumentNo          string  `json:"document_no"`
+	RecipeID            string  `json:"recipe_id"`
+	RecipeName          string  `json:"recipe_name"`
+	SourceWarehouseID   string  `json:"source_warehouse_id"`
+	SourceWarehouseName string  `json:"source_warehouse_name"`
+	OutputWarehouseID   string  `json:"output_warehouse_id"`
+	OutputWarehouseName string  `json:"output_warehouse_name"`
+	BatchNumber         string  `json:"batch_number"`
+	ResponsibleEmployee string  `json:"responsible_employee"`
+	PlannedQuantity     float64 `json:"planned_quantity"`
+	Status              string  `json:"status"`
+	PlannedDate         string  `json:"planned_date"`
+	Notes               string  `json:"notes"`
+	CreatedAt           string  `json:"created_at"`
+}
+
+type CreateProductionOrderInput struct {
+	DocumentNo          string  `json:"document_no"`
+	RecipeID            string  `json:"recipe_id"`
+	SourceWarehouseID   string  `json:"source_warehouse_id"`
+	OutputWarehouseID   string  `json:"output_warehouse_id"`
+	BatchNumber         string  `json:"batch_number"`
+	ResponsibleEmployee string  `json:"responsible_employee"`
+	PlannedQuantity     float64 `json:"planned_quantity"`
+	PlannedDate         string  `json:"planned_date"`
+	Notes               string  `json:"notes"`
+}
+
+type UpdateProductionOrderStatusInput struct {
+	Status string `json:"status"`
+}
+
+func NormalizeRecipeInput(input CreateRecipeInput) CreateRecipeInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Description = strings.TrimSpace(input.Description)
+	for i := range input.Ingredients {
+		input.Ingredients[i].ProductID = strings.TrimSpace(input.Ingredients[i].ProductID)
+		input.Ingredients[i].UnitName = strings.TrimSpace(input.Ingredients[i].UnitName)
+		if input.Ingredients[i].UnitName == "" {
+			input.Ingredients[i].UnitName = "шт"
+		}
+		if input.Ingredients[i].Quantity <= 0 {
+			input.Ingredients[i].Quantity = 1
+		}
+	}
+	for i := range input.Services {
+		input.Services[i].ServiceID = strings.TrimSpace(input.Services[i].ServiceID)
+		if input.Services[i].Quantity <= 0 {
+			input.Services[i].Quantity = 1
+		}
+	}
+	for i := range input.Outputs {
+		input.Outputs[i].ProductID = strings.TrimSpace(input.Outputs[i].ProductID)
+		input.Outputs[i].UnitName = strings.TrimSpace(input.Outputs[i].UnitName)
+		if input.Outputs[i].UnitName == "" {
+			input.Outputs[i].UnitName = "шт"
+		}
+		if input.Outputs[i].Quantity <= 0 {
+			input.Outputs[i].Quantity = 1
+		}
+	}
+	return input
+}
+
+func ValidateRecipeInput(input CreateRecipeInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("%w: recipe name is required", ErrValidation)
+	}
+	if len(input.Outputs) == 0 {
+		return fmt.Errorf("%w: at least one output product is required", ErrValidation)
+	}
+	for i, ing := range input.Ingredients {
+		if strings.TrimSpace(ing.ProductID) == "" {
+			return fmt.Errorf("%w: ingredients[%d].product_id is required", ErrValidation, i)
+		}
+		if ing.Quantity <= 0 {
+			return fmt.Errorf("%w: ingredients[%d].quantity must be greater than zero", ErrValidation, i)
+		}
+	}
+	for i, svc := range input.Services {
+		if strings.TrimSpace(svc.ServiceID) == "" {
+			return fmt.Errorf("%w: services[%d].service_id is required", ErrValidation, i)
+		}
+		if svc.Quantity <= 0 {
+			return fmt.Errorf("%w: services[%d].quantity must be greater than zero", ErrValidation, i)
+		}
+	}
+	for i, out := range input.Outputs {
+		if strings.TrimSpace(out.ProductID) == "" {
+			return fmt.Errorf("%w: outputs[%d].product_id is required", ErrValidation, i)
+		}
+		if out.Quantity <= 0 {
+			return fmt.Errorf("%w: outputs[%d].quantity must be greater than zero", ErrValidation, i)
+		}
+	}
+	return nil
+}
+
+func NormalizeProductionOrderInput(input CreateProductionOrderInput) CreateProductionOrderInput {
+	input.DocumentNo = strings.TrimSpace(strings.ToUpper(input.DocumentNo))
+	input.RecipeID = strings.TrimSpace(input.RecipeID)
+	input.SourceWarehouseID = strings.TrimSpace(input.SourceWarehouseID)
+	input.OutputWarehouseID = strings.TrimSpace(input.OutputWarehouseID)
+	input.BatchNumber = strings.TrimSpace(input.BatchNumber)
+	input.ResponsibleEmployee = strings.TrimSpace(input.ResponsibleEmployee)
+	input.PlannedDate = strings.TrimSpace(input.PlannedDate)
+	input.Notes = strings.TrimSpace(input.Notes)
+	if input.PlannedQuantity <= 0 {
+		input.PlannedQuantity = 1
+	}
+	return input
+}
+
+func ValidateProductionOrderInput(input CreateProductionOrderInput) error {
+	if strings.TrimSpace(input.RecipeID) == "" {
+		return fmt.Errorf("%w: recipe_id is required", ErrValidation)
+	}
+	if strings.TrimSpace(input.SourceWarehouseID) == "" {
+		return fmt.Errorf("%w: source_warehouse_id is required", ErrValidation)
+	}
+	if strings.TrimSpace(input.OutputWarehouseID) == "" {
+		return fmt.Errorf("%w: output_warehouse_id is required", ErrValidation)
+	}
+	if input.PlannedQuantity <= 0 {
+		return fmt.Errorf("%w: planned_quantity must be greater than zero", ErrValidation)
+	}
+	if input.PlannedDate != "" {
+		if _, err := time.Parse("2006-01-02", input.PlannedDate); err != nil {
+			return fmt.Errorf("%w: planned_date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+	return nil
 }

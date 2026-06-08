@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS warehouses (
   company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   code TEXT,
   name TEXT NOT NULL,
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
   warehouse_type TEXT NOT NULL DEFAULT 'storage',
   address_line TEXT,
   manager_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -408,12 +409,14 @@ CREATE TABLE IF NOT EXISTS money_documents (
       'transfer',
       'adjustment',
       'sale_payment',
+      'sale_receivable',
       'purchase_payment',
+      'purchase_payable',
       'salary',
       'tax'
     )
   ),
-  CONSTRAINT money_documents_status_chk CHECK (status IN ('draft', 'posted', 'cancelled'))
+  CONSTRAINT money_documents_status_chk CHECK (status IN ('draft', 'partial', 'posted', 'cancelled'))
 );
 
 CREATE INDEX IF NOT EXISTS money_documents_company_id_idx

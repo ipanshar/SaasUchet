@@ -12,6 +12,10 @@ import (
 type Store interface {
 	ListClients(user auth.User) ([]Client, error)
 	SaveClients(user auth.User, clients []Client) error
+	ListWarehouses(user auth.User) ([]Warehouse, error)
+	CreateWarehouse(user auth.User, input CreateWarehouseInput) (Warehouse, error)
+	ListWarehouseStock(user auth.User, warehouseID string, search string) ([]WarehouseStockItem, error)
+	ListWarehouseMovements(user auth.User, warehouseID string, search string) ([]WarehouseMovement, error)
 	ListProducts(user auth.User) ([]Product, error)
 	CreateProduct(user auth.User, input CreateProductInput) (Product, error)
 	UpdateProduct(user auth.User, productID string, input CreateProductInput) (Product, error)
@@ -29,22 +33,42 @@ type Store interface {
 	CreateService(user auth.User, input CreateServiceInput) (Service, error)
 	UpdateService(user auth.User, serviceID string, input CreateServiceInput) (Service, error)
 	DeleteService(user auth.User, serviceID string) error
+	ListRecipes(user auth.User) ([]Recipe, error)
+	CreateRecipe(user auth.User, input CreateRecipeInput) (Recipe, error)
+	UpdateRecipe(user auth.User, recipeID string, input CreateRecipeInput) (Recipe, error)
+	DeleteRecipe(user auth.User, recipeID string) error
+	ListProductionOrders(user auth.User) ([]ProductionOrder, error)
+	CreateProductionOrder(user auth.User, input CreateProductionOrderInput) (ProductionOrder, error)
+	UpdateProductionOrderStatus(user auth.User, orderID string, input UpdateProductionOrderStatusInput) (ProductionOrder, error)
+	ListUserCompanies(user auth.User) ([]CompanyMembership, error)
+	CreateCompany(user auth.User, input CreateCompanyInput) (CompanyMembership, error)
+	ListCompanyMembers(user auth.User, companyID string) ([]CompanyMember, error)
+	AddCompanyMember(user auth.User, companyID string, input AddCompanyMemberInput) (CompanyMember, error)
+	UpdateCompanyMemberRole(user auth.User, companyID string, memberUserID string, input UpdateCompanyMemberRoleInput) (CompanyMember, error)
+	RemoveCompanyMember(user auth.User, companyID string, memberUserID string) error
+	SetDefaultCompany(user auth.User, companyID string) error
+	GetCompany(user auth.User, companyID string) (CompanyDetail, error)
+	UpdateCompany(user auth.User, companyID string, input UpdateCompanyInput) (CompanyDetail, error)
 }
 
 type MemoryStore struct {
 	mu                  sync.RWMutex
 	clientsByUser       map[string][]Client
+	warehousesByUser    map[string][]Warehouse
 	productsByUser      map[string][]Product
 	inventoryDocsByUser map[string][]InventoryDocumentDetail
 	financeByUser       map[string]Finance
+	membersByCompany    map[string][]CompanyMember
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		clientsByUser:       make(map[string][]Client),
+		warehousesByUser:    make(map[string][]Warehouse),
 		productsByUser:      make(map[string][]Product),
 		inventoryDocsByUser: make(map[string][]InventoryDocumentDetail),
 		financeByUser:       make(map[string]Finance),
+		membersByCompany:    make(map[string][]CompanyMember),
 	}
 }
 
@@ -64,6 +88,118 @@ func (s *MemoryStore) SaveClients(user auth.User, clients []Client) error {
 	return nil
 }
 
+func (s *MemoryStore) ListWarehouses(user auth.User) ([]Warehouse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	warehouses := s.ensureMemoryWarehouses(user.ID)
+	return append([]Warehouse(nil), warehouses...), nil
+}
+
+func (s *MemoryStore) CreateWarehouse(user auth.User, input CreateWarehouseInput) (Warehouse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalized := NormalizeWarehouseInput(input)
+	if err := ValidateWarehouseInput(normalized); err != nil {
+		return Warehouse{}, err
+	}
+
+	warehouses := s.ensureMemoryWarehouses(user.ID)
+	for _, warehouse := range warehouses {
+		if strings.EqualFold(warehouse.Name, normalized.Name) {
+			return Warehouse{}, fmt.Errorf("%w: warehouse already exists", ErrValidation)
+		}
+	}
+
+	warehouse := Warehouse{
+		ID:        mustGenerateProductID(),
+		Name:      normalized.Name,
+		Code:      normalized.Code,
+		IsDefault: false,
+	}
+	s.warehousesByUser[user.ID] = append([]Warehouse{warehouse}, warehouses...)
+	return warehouse, nil
+}
+
+func (s *MemoryStore) ListWarehouseStock(user auth.User, warehouseID string, search string) ([]WarehouseStockItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	warehouse, ok := s.findMemoryWarehouse(user.ID, warehouseID)
+	if !ok {
+		return nil, fmt.Errorf("%w: warehouse not found", ErrValidation)
+	}
+
+	loweredSearch := strings.ToLower(strings.TrimSpace(search))
+	items := make([]WarehouseStockItem, 0, len(s.productsByUser[user.ID]))
+	for _, product := range s.productsByUser[user.ID] {
+		if loweredSearch != "" &&
+			!strings.Contains(strings.ToLower(product.Name), loweredSearch) &&
+			!strings.Contains(strings.ToLower(product.SKU), loweredSearch) {
+			continue
+		}
+		items = append(items, WarehouseStockItem{
+			ProductID:   product.ID,
+			ProductName: product.Name,
+			SKU:         product.SKU,
+			Category:    product.Category,
+			UnitName:    product.UnitName,
+			Available:   memoryWarehouseBalance(warehouse.Name, product),
+			MinQuantity: product.MinQuantity,
+			Status:      productStatus(memoryWarehouseBalance(warehouse.Name, product), product.MinQuantity),
+		})
+	}
+
+	return items, nil
+}
+
+func (s *MemoryStore) ListWarehouseMovements(user auth.User, warehouseID string, search string) ([]WarehouseMovement, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	warehouse, ok := s.findMemoryWarehouse(user.ID, warehouseID)
+	if !ok {
+		return nil, fmt.Errorf("%w: warehouse not found", ErrValidation)
+	}
+
+	loweredSearch := strings.ToLower(strings.TrimSpace(search))
+	movements := make([]WarehouseMovement, 0)
+	for _, document := range s.inventoryDocsByUser[user.ID] {
+		if document.Summary.WarehouseName != warehouse.Name && document.Summary.RelatedWarehouse != warehouse.Name {
+			continue
+		}
+		for _, line := range document.Lines {
+			movementType, quantity := memoryMovementForWarehouse(warehouse.Name, document.Summary)
+			if quantity == 0 {
+				continue
+			}
+			if loweredSearch != "" &&
+				!strings.Contains(strings.ToLower(document.Summary.DocumentNo), loweredSearch) &&
+				!strings.Contains(strings.ToLower(line.ItemName), loweredSearch) &&
+				!strings.Contains(strings.ToLower(line.SKU), loweredSearch) {
+				continue
+			}
+			movements = append(movements, WarehouseMovement{
+				ID:               fmt.Sprintf("%s-%s", document.Summary.ID, line.SKU),
+				DocumentID:       document.Summary.ID,
+				DocumentNo:       document.Summary.DocumentNo,
+				DocumentType:     document.Summary.DocumentType,
+				MovementType:     movementType,
+				ProductName:      line.ItemName,
+				SKU:              line.SKU,
+				Quantity:         quantityForLine(quantity, line.Quantity),
+				BalanceAfter:     balanceAfterForLine(warehouse.Name, line.SKU, document.Summary.DocumentNo, s.productsByUser[user.ID]),
+				DocumentDate:     document.Summary.DocumentDate,
+				WarehouseName:    document.Summary.WarehouseName,
+				RelatedWarehouse: document.Summary.RelatedWarehouse,
+			})
+		}
+	}
+
+	return movements, nil
+}
+
 func (s *MemoryStore) ListProducts(user auth.User) ([]Product, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -76,6 +212,8 @@ func (s *MemoryStore) CreateProduct(user auth.User, input CreateProductInput) (P
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	warehouses := s.ensureMemoryWarehouses(user.ID)
+	defaultWarehouseName := warehouses[0].Name
 	product := NewProductFromInput(input)
 	if product.Quantity > 0 {
 		documentNo := fmt.Sprintf("OPEN-%s", product.SKU)
@@ -93,17 +231,18 @@ func (s *MemoryStore) CreateProduct(user auth.User, input CreateProductInput) (P
 					DocumentType:  "opening",
 					Status:        "posted",
 					DocumentDate:  time.Now().Format("2006-01-02"),
-					WarehouseName: "Основной склад",
+					WarehouseName: defaultWarehouseName,
 					ProductLines:  1,
 					TotalQuantity: product.Quantity,
 				},
 				Lines: []InventoryDocumentLine{{
-					ProductName: product.Name,
-					SKU:         product.SKU,
-					Quantity:    product.Quantity,
-					UnitPrice:   product.Price,
-					UnitCost:    product.Cost,
-					LineTotal:   product.Quantity * product.Price,
+					ItemName:  product.Name,
+					ItemType:  "product",
+					SKU:       product.SKU,
+					Quantity:  product.Quantity,
+					UnitPrice: product.Price,
+					UnitCost:  product.Cost,
+					LineTotal: product.Quantity * product.Price,
 				}},
 			}},
 			s.inventoryDocsByUser[user.ID]...,
@@ -158,6 +297,7 @@ func (s *MemoryStore) CreateInventoryDocument(user auth.User, input CreateInvent
 	}
 
 	normalized := NormalizeInventoryDocumentInput(input)
+	s.ensureMemoryWarehouses(user.ID)
 	documentID := mustGenerateProductID()
 	documentDate := time.Now().Format("2006-01-02")
 	if normalized.DocumentDate != "" {
@@ -168,6 +308,18 @@ func (s *MemoryStore) CreateInventoryDocument(user auth.User, input CreateInvent
 		documentNo = fmt.Sprintf("%s-%d", strings.ToUpper(normalized.DocumentType), time.Now().UnixNano())
 	}
 	warehouseName := defaultIfEmpty(normalized.WarehouseName, "Основной склад")
+	if !s.hasMemoryWarehouseName(user.ID, warehouseName) {
+		s.warehousesByUser[user.ID] = append(
+			s.warehousesByUser[user.ID],
+			Warehouse{ID: mustGenerateProductID(), Name: warehouseName},
+		)
+	}
+	if normalized.RelatedWarehouseName != "" && !s.hasMemoryWarehouseName(user.ID, normalized.RelatedWarehouseName) {
+		s.warehousesByUser[user.ID] = append(
+			s.warehousesByUser[user.ID],
+			Warehouse{ID: mustGenerateProductID(), Name: normalized.RelatedWarehouseName},
+		)
+	}
 	clientName := ""
 	if normalized.ClientID != "" {
 		for _, client := range s.clientsByUser[user.ID] {
@@ -251,13 +403,14 @@ func (s *MemoryStore) CreateInventoryDocument(user auth.User, input CreateInvent
 		totalQuantity += line.Quantity
 		totalAmount += line.Quantity * unitPrice
 		lines = append(lines, InventoryDocumentLine{
-			ProductName: product.Name,
-			SKU:         product.SKU,
-			Quantity:    line.Quantity,
-			UnitPrice:   unitPrice,
-			UnitCost:    unitCost,
-			LineTotal:   line.Quantity * unitPrice,
-			Note:        line.Note,
+			ItemName:  product.Name,
+			ItemType:  "product",
+			SKU:       product.SKU,
+			Quantity:  line.Quantity,
+			UnitPrice: unitPrice,
+			UnitCost:  unitCost,
+			LineTotal: line.Quantity * unitPrice,
+			Note:      line.Note,
 		})
 	}
 
@@ -540,6 +693,7 @@ func cloneClients(clients []Client) []Client {
 	for _, client := range clients {
 		client.Interactions = append([]Interaction(nil), client.Interactions...)
 		client.OpenDocuments = append([]ClientDebtDocument(nil), client.OpenDocuments...)
+		client.Timeline = append([]ClientTimelineItem(nil), client.Timeline...)
 		cloned = append(cloned, client)
 	}
 	return cloned
@@ -560,6 +714,91 @@ func cloneFinance(finance Finance) Finance {
 	finance.Transactions = append([]Transaction(nil), finance.Transactions...)
 	finance.CashFlows = append([]CashFlow(nil), finance.CashFlows...)
 	return finance
+}
+
+func (s *MemoryStore) ensureMemoryWarehouses(userID string) []Warehouse {
+	warehouses := s.warehousesByUser[userID]
+	if len(warehouses) == 0 {
+		warehouses = []Warehouse{{
+			ID:        mustGenerateProductID(),
+			Name:      "Основной склад",
+			Code:      "MAIN",
+			IsDefault: true,
+		}}
+		s.warehousesByUser[userID] = warehouses
+	}
+	return warehouses
+}
+
+func (s *MemoryStore) findMemoryWarehouse(userID string, warehouseID string) (Warehouse, bool) {
+	for _, warehouse := range s.ensureMemoryWarehouses(userID) {
+		if warehouse.ID == warehouseID {
+			return warehouse, true
+		}
+	}
+	return Warehouse{}, false
+}
+
+func (s *MemoryStore) hasMemoryWarehouseName(userID string, warehouseName string) bool {
+	for _, warehouse := range s.ensureMemoryWarehouses(userID) {
+		if strings.EqualFold(warehouse.Name, warehouseName) {
+			return true
+		}
+	}
+	return false
+}
+
+func memoryWarehouseBalance(warehouseName string, product Product) int {
+	balance := 0
+	for _, movement := range product.Movements {
+		if movement.Document == "" {
+			continue
+		}
+		balance = movement.Balance
+	}
+	return balance
+}
+
+func memoryMovementForWarehouse(warehouseName string, summary InventoryDocumentSummary) (string, int) {
+	switch summary.DocumentType {
+	case "purchase_receipt", "adjustment", "opening":
+		if summary.WarehouseName == warehouseName {
+			return "in", 1
+		}
+	case "write_off", "sale_issue":
+		if summary.WarehouseName == warehouseName {
+			return "out", -1
+		}
+	case "transfer":
+		if summary.WarehouseName == warehouseName {
+			return "transfer_out", -1
+		}
+		if summary.RelatedWarehouse == warehouseName {
+			return "transfer_in", 1
+		}
+	}
+	return "", 0
+}
+
+func quantityForLine(direction int, quantity int) int {
+	if direction < 0 {
+		return -quantity
+	}
+	return quantity
+}
+
+func balanceAfterForLine(warehouseName string, sku string, documentNo string, products []Product) int {
+	for _, product := range products {
+		if product.SKU != sku {
+			continue
+		}
+		for _, movement := range product.Movements {
+			if movement.Document == documentNo {
+				return movement.Balance
+			}
+		}
+	}
+	return 0
 }
 
 func accountColorForType(accountType string) string {
@@ -638,6 +877,250 @@ func (s *MemoryStore) DeleteService(_ auth.User, _ string) error {
 	return nil
 }
 
+func (s *MemoryStore) ListRecipes(_ auth.User) ([]Recipe, error) {
+	return []Recipe{}, nil
+}
+
+func (s *MemoryStore) CreateRecipe(_ auth.User, input CreateRecipeInput) (Recipe, error) {
+	normalized := NormalizeRecipeInput(input)
+	if err := ValidateRecipeInput(normalized); err != nil {
+		return Recipe{}, err
+	}
+	return Recipe{
+		ID:          mustGenerateProductID(),
+		Name:        normalized.Name,
+		Description: normalized.Description,
+		Ingredients: []RecipeIngredient{},
+		Services:    []RecipeService{},
+		Outputs:     []RecipeOutput{},
+	}, nil
+}
+
+func (s *MemoryStore) UpdateRecipe(_ auth.User, recipeID string, input CreateRecipeInput) (Recipe, error) {
+	normalized := NormalizeRecipeInput(input)
+	if err := ValidateRecipeInput(normalized); err != nil {
+		return Recipe{}, err
+	}
+	return Recipe{
+		ID: recipeID, Name: normalized.Name, Description: normalized.Description,
+		Ingredients: []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
+	}, nil
+}
+
+func (s *MemoryStore) DeleteRecipe(_ auth.User, _ string) error { return nil }
+
+func (s *MemoryStore) ListProductionOrders(_ auth.User) ([]ProductionOrder, error) {
+	return []ProductionOrder{}, nil
+}
+
+func (s *MemoryStore) CreateProductionOrder(_ auth.User, input CreateProductionOrderInput) (ProductionOrder, error) {
+	normalized := NormalizeProductionOrderInput(input)
+	if err := ValidateProductionOrderInput(normalized); err != nil {
+		return ProductionOrder{}, err
+	}
+	return ProductionOrder{
+		ID:              mustGenerateProductID(),
+		DocumentNo:      defaultIfEmpty(normalized.DocumentNo, fmt.Sprintf("PRD-%d", time.Now().UnixNano())),
+		RecipeID:        normalized.RecipeID,
+		PlannedQuantity: normalized.PlannedQuantity,
+		Status:          "draft",
+		CreatedAt:       time.Now().Format("2006-01-02"),
+	}, nil
+}
+
+func (s *MemoryStore) UpdateProductionOrderStatus(_ auth.User, orderID string, input UpdateProductionOrderStatusInput) (ProductionOrder, error) {
+	return ProductionOrder{ID: orderID, Status: input.Status}, nil
+}
+
+func (s *MemoryStore) ListUserCompanies(user auth.User) ([]CompanyMembership, error) {
+	if len(user.Companies) == 0 {
+		return []CompanyMembership{{
+			ID:        "cmp_default",
+			Name:      `ТОО "Мой Бизнес"`,
+			Country:   "KZ",
+			Role:      "owner",
+			IsDefault: true,
+		}}, nil
+	}
+	companies := make([]CompanyMembership, 0, len(user.Companies))
+	for index, company := range user.Companies {
+		companies = append(companies, CompanyMembership{
+			ID:        fmt.Sprintf("cmp_%d", index),
+			Name:      company.Name,
+			Country:   company.Country,
+			IIN:       company.IIN,
+			Role:      "owner",
+			IsDefault: index == 0,
+		})
+	}
+	return companies, nil
+}
+
+func (s *MemoryStore) CreateCompany(_ auth.User, input CreateCompanyInput) (CompanyMembership, error) {
+	normalized := NormalizeCompanyInput(input)
+	if err := ValidateCompanyInput(normalized); err != nil {
+		return CompanyMembership{}, err
+	}
+	return CompanyMembership{
+		ID:      "cmp_new",
+		Name:    normalized.Name,
+		Country: normalized.Country,
+		IIN:     normalized.IIN,
+		Role:    "owner",
+	}, nil
+}
+
+func (s *MemoryStore) ListCompanyMembers(user auth.User, companyID string) ([]CompanyMember, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	members := s.ensureMemoryCompanyMembers(user, companyID)
+	actorRole, ok := memoryActorRole(members, user.ID)
+	if !ok || (actorRole != "owner" && actorRole != "admin") {
+		return nil, fmt.Errorf("%w: forbidden", ErrValidation)
+	}
+	return append([]CompanyMember(nil), members...), nil
+}
+
+func (s *MemoryStore) AddCompanyMember(user auth.User, companyID string, input AddCompanyMemberInput) (CompanyMember, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalized := NormalizeAddCompanyMemberInput(input)
+	if err := ValidateAddCompanyMemberInput(normalized); err != nil {
+		return CompanyMember{}, err
+	}
+
+	members := s.ensureMemoryCompanyMembers(user, companyID)
+	actorRole, ok := memoryActorRole(members, user.ID)
+	if !ok || (actorRole != "owner" && actorRole != "admin") {
+		return CompanyMember{}, fmt.Errorf("%w: forbidden", ErrValidation)
+	}
+	if normalized.Role == "owner" {
+		return CompanyMember{}, fmt.Errorf("%w: owner role cannot be assigned", ErrValidation)
+	}
+	for index := range members {
+		if members[index].Phone == normalized.Phone {
+			if members[index].IsOwner {
+				return CompanyMember{}, fmt.Errorf("%w: owner role cannot be changed", ErrValidation)
+			}
+			members[index].Role = normalized.Role
+			members[index].RoleLabel = companyRoleLabel(normalized.Role)
+			s.membersByCompany[companyID] = members
+			return members[index], nil
+		}
+	}
+
+	member := CompanyMember{
+		UserID:        fmt.Sprintf("usr_%d", len(members)+1),
+		FullName:      normalized.Phone,
+		Phone:         normalized.Phone,
+		Role:          normalized.Role,
+		RoleLabel:     companyRoleLabel(normalized.Role),
+		IsOwner:       false,
+		IsCurrentUser: false,
+		JoinedAt:      time.Now().Format(time.RFC3339),
+	}
+	s.membersByCompany[companyID] = append(members, member)
+	return member, nil
+}
+
+func (s *MemoryStore) UpdateCompanyMemberRole(user auth.User, companyID string, memberUserID string, input UpdateCompanyMemberRoleInput) (CompanyMember, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalized := NormalizeUpdateCompanyMemberRoleInput(input)
+	if err := ValidateUpdateCompanyMemberRoleInput(normalized); err != nil {
+		return CompanyMember{}, err
+	}
+
+	members := s.ensureMemoryCompanyMembers(user, companyID)
+	actorRole, ok := memoryActorRole(members, user.ID)
+	if !ok || (actorRole != "owner" && actorRole != "admin") {
+		return CompanyMember{}, fmt.Errorf("%w: forbidden", ErrValidation)
+	}
+	if normalized.Role == "owner" {
+		return CompanyMember{}, fmt.Errorf("%w: owner role cannot be assigned", ErrValidation)
+	}
+	for index := range members {
+		if members[index].UserID != memberUserID {
+			continue
+		}
+		if members[index].IsOwner {
+			return CompanyMember{}, fmt.Errorf("%w: owner role cannot be changed", ErrValidation)
+		}
+		if actorRole == "admin" && members[index].UserID == user.ID {
+			return CompanyMember{}, fmt.Errorf("%w: admin cannot change own role", ErrValidation)
+		}
+		members[index].Role = normalized.Role
+		members[index].RoleLabel = companyRoleLabel(normalized.Role)
+		s.membersByCompany[companyID] = members
+		return members[index], nil
+	}
+	return CompanyMember{}, fmt.Errorf("%w: member not found", ErrValidation)
+}
+
+func (s *MemoryStore) RemoveCompanyMember(user auth.User, companyID string, memberUserID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	members := s.ensureMemoryCompanyMembers(user, companyID)
+	actorRole, ok := memoryActorRole(members, user.ID)
+	if !ok || (actorRole != "owner" && actorRole != "admin") {
+		return fmt.Errorf("%w: forbidden", ErrValidation)
+	}
+	for index := range members {
+		if members[index].UserID != memberUserID {
+			continue
+		}
+		if members[index].IsOwner {
+			return fmt.Errorf("%w: owner cannot be removed", ErrValidation)
+		}
+		if actorRole == "admin" && members[index].UserID == user.ID {
+			return fmt.Errorf("%w: admin cannot remove self", ErrValidation)
+		}
+		s.membersByCompany[companyID] = append(members[:index], members[index+1:]...)
+		return nil
+	}
+	return fmt.Errorf("%w: member not found", ErrValidation)
+}
+
+func (s *MemoryStore) SetDefaultCompany(_ auth.User, _ string) error {
+	return nil
+}
+
+func (s *MemoryStore) GetCompany(user auth.User, companyID string) (CompanyDetail, error) {
+	role := "owner"
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	members := s.ensureMemoryCompanyMembers(user, companyID)
+	if actorRole, ok := memoryActorRole(members, user.ID); ok {
+		role = actorRole
+	}
+	return CompanyDetail{ID: companyID, Name: "Тестовая компания", Country: "KZ", Role: role}, nil
+}
+
+func (s *MemoryStore) UpdateCompany(_ auth.User, companyID string, input UpdateCompanyInput) (CompanyDetail, error) {
+	normalized := NormalizeUpdateCompanyInput(input)
+	if err := ValidateUpdateCompanyInput(normalized); err != nil {
+		return CompanyDetail{}, err
+	}
+	return CompanyDetail{
+		ID:          companyID,
+		Name:        normalized.Name,
+		Country:     normalized.Country,
+		IIN:         normalized.IIN,
+		Email:       normalized.Email,
+		Phone:       normalized.Phone,
+		AddressLine: normalized.AddressLine,
+		City:        normalized.City,
+		BankName:    normalized.BankName,
+		BankAccount: normalized.BankAccount,
+		BankBik:     normalized.BankBik,
+		Role:        "owner",
+	}, nil
+}
+
 func buildMemoryCashFlows(income int, expense int) []CashFlow {
 	flows := make([]CashFlow, 0, 3)
 	if income > 0 {
@@ -670,4 +1153,31 @@ func buildMemoryCashFlows(income int, expense int) []CashFlow {
 		Highlighted: true,
 	})
 	return flows
+}
+
+func (s *MemoryStore) ensureMemoryCompanyMembers(user auth.User, companyID string) []CompanyMember {
+	members := s.membersByCompany[companyID]
+	if len(members) == 0 {
+		members = []CompanyMember{{
+			UserID:        user.ID,
+			FullName:      user.FullName,
+			Phone:         user.Phone,
+			Role:          "owner",
+			RoleLabel:     companyRoleLabel("owner"),
+			IsOwner:       true,
+			IsCurrentUser: true,
+			JoinedAt:      time.Now().Format(time.RFC3339),
+		}}
+		s.membersByCompany[companyID] = members
+	}
+	return members
+}
+
+func memoryActorRole(members []CompanyMember, userID string) (string, bool) {
+	for _, member := range members {
+		if member.UserID == userID {
+			return member.Role, true
+		}
+	}
+	return "", false
 }
