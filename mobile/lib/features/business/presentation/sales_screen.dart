@@ -1,14 +1,23 @@
 part of 'business_shell.dart';
 
 class _SalesScreen extends StatelessWidget {
-  const _SalesScreen();
+  const _SalesScreen({
+    required this.accessToken,
+    required this.businessGateway,
+  });
+
+  final String accessToken;
+  final BusinessGateway businessGateway;
 
   @override
   Widget build(BuildContext context) {
-    return const _PlaceholderScreen(
-      icon: Icons.shopping_bag_rounded,
+    return _DocumentsListScreen(
+      accessToken: accessToken,
+      businessGateway: businessGateway,
+      documentType: 'sale_issue',
       title: 'Продажи',
-      color: Color(0xFF16A34A),
+      accentColor: const Color(0xFF16A34A),
+      counterpartyLabel: 'Клиент',
     );
   }
 }

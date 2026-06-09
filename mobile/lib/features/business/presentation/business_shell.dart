@@ -20,6 +20,7 @@ part 'more_screen.dart';
 part 'production_screen.dart';
 part 'sales_screen.dart';
 part 'purchases_screen.dart';
+part 'documents_screen.dart';
 part 'services_screen.dart';
 part 'catalog_screen.dart';
 part 'business_widgets.dart';
@@ -557,9 +558,15 @@ class _BusinessShellState extends State<BusinessShell> {
           businessGateway: widget.businessGateway,
         );
       case BusinessTab.sales:
-        return const _SalesScreen();
+        return _SalesScreen(
+          accessToken: _session.accessToken,
+          businessGateway: widget.businessGateway,
+        );
       case BusinessTab.purchases:
-        return const _PurchasesScreen();
+        return _PurchasesScreen(
+          accessToken: _session.accessToken,
+          businessGateway: widget.businessGateway,
+        );
       case BusinessTab.services:
         return const _ServicesScreen();
       case BusinessTab.catalog:
@@ -577,7 +584,9 @@ class _BusinessShellState extends State<BusinessShell> {
     final showFab = _activeTab != BusinessTab.more &&
         _activeTab != BusinessTab.catalog &&
         _activeTab != BusinessTab.crm &&
-        _activeTab != BusinessTab.production;
+        _activeTab != BusinessTab.production &&
+        _activeTab != BusinessTab.sales &&
+        _activeTab != BusinessTab.purchases;
     final fabActions = _fabActionsForCurrentTab();
     final overview = _overview;
 

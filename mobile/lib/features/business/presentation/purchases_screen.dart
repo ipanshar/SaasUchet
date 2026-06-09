@@ -1,14 +1,23 @@
 part of 'business_shell.dart';
 
 class _PurchasesScreen extends StatelessWidget {
-  const _PurchasesScreen();
+  const _PurchasesScreen({
+    required this.accessToken,
+    required this.businessGateway,
+  });
+
+  final String accessToken;
+  final BusinessGateway businessGateway;
 
   @override
   Widget build(BuildContext context) {
-    return const _PlaceholderScreen(
-      icon: Icons.shopping_cart_rounded,
+    return _DocumentsListScreen(
+      accessToken: accessToken,
+      businessGateway: businessGateway,
+      documentType: 'purchase_receipt',
       title: 'Закупки',
-      color: Color(0xFF2563EB),
+      accentColor: const Color(0xFF2563EB),
+      counterpartyLabel: 'Поставщик',
     );
   }
 }
