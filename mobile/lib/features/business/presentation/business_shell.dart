@@ -129,7 +129,6 @@ class _BusinessShellState extends State<BusinessShell> {
     super.initState();
     _session = widget.session;
     _bootstrap();
-    _loadTabPrefs();
   }
 
   Future<void> _bootstrap() async {
@@ -142,10 +141,12 @@ class _BusinessShellState extends State<BusinessShell> {
     } catch (_) {
       // Preferences unavailable (e.g. in tests) — fall back to default company.
     }
-    // Load the overview first so the loading spinner clears even if the
-    // companies request is slow, then refresh the switcher list.
-    await _loadOverview();
+    // Companies must load first so tab filtering by role is correct before the
+    // UI is shown. Tab prefs are applied next (while companies are available),
+    // then overview data loads and the spinner clears.
     await _loadCompanies();
+    await _loadTabPrefs();
+    await _loadOverview();
   }
 
   Future<void> _loadCompanies() async {
@@ -189,6 +190,7 @@ class _BusinessShellState extends State<BusinessShell> {
     widget.businessGateway.activeCompanyId = companyId;
     setState(() {
       _activeCompanyId = companyId;
+      _activeTabs = _normalizeTabsForRole(_activeTabs);
       _activeTab = BusinessTab.dashboard;
       _isFabExpanded = false;
     });
@@ -290,6 +292,7 @@ class _BusinessShellState extends State<BusinessShell> {
       MaterialPageRoute<void>(
         builder: (context) => NavSettingsScreen(
           currentMiddleTabs: middleTabs,
+          allowedTabs: _allowedMiddleTabsForRole(_currentCompanyRole()),
           onSaved: _saveAndApplyTabs,
         ),
       ),
@@ -397,8 +400,9 @@ class _BusinessShellState extends State<BusinessShell> {
   String _currentCompanyRole() {
     final active = _activeCompanyId;
     if (active == null || active.isEmpty) {
-      final defaultCompany = _companies.where((c) => c.isDefault).firstOrNull;
-      return defaultCompany?.role ?? 'owner';
+      final company = _companies.where((c) => c.isDefault).firstOrNull ??
+          _companies.firstOrNull;
+      return company?.role ?? 'owner';
     }
     return _companies.where((c) => c.id == active).firstOrNull?.role ?? 'owner';
   }

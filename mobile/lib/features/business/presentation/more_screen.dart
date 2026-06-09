@@ -246,7 +246,7 @@ class _MoreScreenState extends State<_MoreScreen> {
                                       ),
                                     ),
                                     Text(
-                                      member.role,
+                                      member.roleLabel,
                                       style: const TextStyle(
                                         color: Color(0xFF7B8794),
                                         fontSize: 12,

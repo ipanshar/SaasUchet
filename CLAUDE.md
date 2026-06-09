@@ -66,7 +66,7 @@ lib/
     │   ├── domain/business_gateway.dart  # Все контракты бизнес-API
     │   └── presentation/
     │       ├── business_shell.dart       # Корневой StatefulWidget; объявляет все part-файлы
-    │       ├── business_models.dart      # part of — все _Product, _Client, _Service и т.д.
+    │       ├── business_models.dart      # part of — все _Product, _Client, _Service, _Company и т.д.
     │       ├── business_widgets.dart     # part of — BusinessTab enum, _BottomNavBar, _FabMenu
     │       ├── dashboard_screen.dart     # part of
     │       ├── crm_screen.dart           # part of
@@ -80,6 +80,7 @@ lib/
     │       ├── services_screen.dart      # part of — заглушка
     │       ├── onboarding_flow.dart      # part of
     │       ├── nav_settings_screen.dart  # Настройка вкладок навигации (standalone)
+    │       ├── company_editor_screen.dart # Редактор компании (standalone) — открывается из _MoreScreen
     │       └── profile_editor_screen.dart
     ├── health/                      # Заглушка, не реализован
     └── profile/                     # Заглушка, не реализован
@@ -112,7 +113,7 @@ lib/
 
 ### `part` / `part of` в бизнес-модуле
 
-Все файлы `*_screen.dart` в папке `presentation/` являются частями `business_shell.dart` через директиву `part of`. Это даёт доступ к приватным классам (`_Product`, `_Service`, `_BottomNavBar` и т.д.) без `import`. `nav_settings_screen.dart` и `profile_editor_screen.dart` — исключения: они standalone и открываются через `Navigator.push`.
+Все файлы `*_screen.dart` в папке `presentation/` являются частями `business_shell.dart` через директиву `part of`. Это даёт доступ к приватным классам (`_Product`, `_Service`, `_BottomNavBar` и т.д.) без `import`. `nav_settings_screen.dart`, `company_editor_screen.dart` и `profile_editor_screen.dart` — исключения: они standalone и открываются через `Navigator.push`.
 
 ### Навигация с настройкой
 
@@ -177,6 +178,7 @@ backend/
     │   ├── store.go
     │   ├── postgres_store.go            # ~2390 строк, все бизнес-запросы
     │   ├── model.go
+    │   ├── permissions.go               # RBAC: hasPermission(role, perm) — 6 ролей
     │   └── handler_test.go
     ├── config/config.go                 # Конфигурация через env
     ├── database/
@@ -198,6 +200,21 @@ backend/
 
 - `Store` — интерфейс с двумя реализациями: `MemoryStore` (тесты) и `PostgresStore` (прод)
 - Зависимости инжектируются через конструкторы
+
+### RBAC-роли (permissions.go)
+
+`hasPermission(role, perm)` применяется в хэндлерах для проверки прав.
+
+| Роль | Права |
+|---|---|
+| `owner`, `admin` | всё |
+| `manager` | CRM R/W, Catalog R/W, Warehouse R, Finance R, Production R |
+| `accountant` | Finance R/W, CRM R |
+| `warehouse` | Warehouse R/W, Catalog R |
+| `sales` | CRM R/W, Catalog R, Warehouse R |
+| `staff` | ничего |
+
+Доступные разрешения: `company.settings.*`, `company.members.*`, `crm.*`, `warehouse.*`, `finance.*`, `catalog.*`, `production.*`.
 
 ### Go — соглашения
 
@@ -226,6 +243,11 @@ backend/
 - `001_auth.sql` — таблицы `users`, `auth_sessions`
 - `002_business_core.sql` — `companies`, `clients`, `products`, `inventory_documents`, `money_documents`, `accounts`
 - `003_catalog.sql` — расширение `products` (`product_type`, `allowed_to_sell`); новые таблицы `services`, `service_materials` (BOM)
+- `003_money_document_drafts.sql` — расширение constraint `money_documents`: новые типы и статусы (`draft`, `partial`, `posted`, `cancelled`)
+- `004_production.sql` — таблицы `recipes`, `recipe_ingredients`, `recipe_outputs`, `production_orders`, `production_order_lines`
+- `004_warehouse_defaults.sql` — добавляет `is_default` в `warehouses`
+- `005_inventory_services.sql` — `inventory_document_lines.service_id` (услуги в документах склада)
+- `006_company_bank_details.sql` — добавляет `bank_name`, `bank_account`, `bank_bik` в `companies`
 
 ### Подключение (локально)
 
@@ -256,6 +278,8 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | PUT/DELETE | `/business/clients/{id}` | Обновление / удаление |
 | GET/POST | `/business/products` | Список / создание товара |
 | PUT/DELETE | `/business/products/{id}` | Обновление / удаление |
+| GET/POST | `/business/warehouses` | Склады — список / создание |
+| GET/PUT/DELETE | `/business/warehouses/{id}` | Склад — детали / обновление / удаление |
 | GET/POST | `/business/inventory-documents` | Документы склада |
 | GET | `/business/inventory-documents/{id}` | Детали документа |
 | GET/POST | `/business/accounts` | Счета / кассы |
@@ -264,6 +288,12 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | GET | `/business/money-documents/{id}` | Детали документа |
 | GET/POST | `/catalog/services` | Услуги — список / создание |
 | PUT/DELETE | `/catalog/services/{id}` | Услуга — обновление / удаление |
+| GET/POST | `/production/recipes` | Техкарты — список / создание |
+| GET/PUT/DELETE | `/production/recipes/{id}` | Техкарта — детали / обновление / удаление |
+| GET/POST | `/production/orders` | Производственные заказы |
+| GET/PUT/DELETE | `/production/orders/{id}` | Заказ — детали / обновление / удаление |
+| GET/POST | `/companies` | Компании пользователя — список / создание |
+| GET/PUT/DELETE | `/companies/{id}` | Компания — детали / обновление / удаление |
 
 Авторизация: `Authorization: Bearer <token>` для всех `/business/*`, `/catalog/*` и `/profile`.
 
@@ -279,7 +309,8 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | CRM (клиенты, сегменты, долги) | Готово |
 | Склад (товары, документы, штрихкоды) | Готово |
 | Финансы (счета, операции, отчёты) | Готово |
-| Профиль компании | Готово |
+| Профиль компании (просмотр) | Готово |
+| Редактор компании (реквизиты, банк, адрес) | Готово |
 | Справочник — Товары (type/unit/allowed_to_sell) | Готово |
 | Справочник — Услуги (BOM: товары / подуслуги / внешние) | Готово |
 | Настройка вкладок навигации (SharedPreferences) | Готово |
@@ -326,6 +357,6 @@ flutter pub get               # После изменений pubspec.yaml
 2. **Не добавлять state management** в Flutter (BLoC, Riverpod, Provider) — пока `setState`
 3. **Не менять формат токена** — клиент и сервер ожидают Bearer session token
 4. **Не ломать существующие API** — мобильное приложение жёстко завязано на контракты
-5. **Новые SQL-схемы** — только через новый файл `00N_*.sql`, не редактировать существующие
+5. **Новые SQL-схемы** — только через новый файл `007_*.sql` и далее, не редактировать существующие
 6. **Кодогенерацию не вводить** без договорённости (`json_serializable`, `freezed` и т.д.)
 7. **Параллельный агент Codex** — возможны изменения от него; перед крупными рефакторингами проверять git log

@@ -6,17 +6,19 @@ class NavSettingsScreen extends StatefulWidget {
     super.key,
     required this.currentMiddleTabs,
     required this.onSaved,
+    this.allowedTabs,
   });
 
   final List<BusinessTab> currentMiddleTabs;
   final Future<void> Function(List<BusinessTab> middleTabs) onSaved;
+  final List<BusinessTab>? allowedTabs;
 
   @override
   State<NavSettingsScreen> createState() => _NavSettingsScreenState();
 }
 
 class _NavSettingsScreenState extends State<NavSettingsScreen> {
-  static const _availableTabs = [
+  static const _allTabs = [
     BusinessTab.crm,
     BusinessTab.warehouse,
     BusinessTab.finance,
@@ -27,21 +29,22 @@ class _NavSettingsScreenState extends State<NavSettingsScreen> {
     BusinessTab.services,
   ];
 
+  late final List<BusinessTab> _availableTabs;
   late final Set<BusinessTab> _selectedTabs;
   bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
-    _selectedTabs = widget.currentMiddleTabs.toSet();
-    if (_selectedTabs.isEmpty) {
-      _selectedTabs.addAll(
-        const [
-          BusinessTab.crm,
-          BusinessTab.warehouse,
-          BusinessTab.finance,
-        ],
-      );
+    final allowed = widget.allowedTabs;
+    _availableTabs = allowed != null
+        ? _allTabs.where(allowed.contains).toList(growable: false)
+        : _allTabs;
+    _selectedTabs = widget.currentMiddleTabs
+        .where(_availableTabs.contains)
+        .toSet();
+    if (_selectedTabs.isEmpty && _availableTabs.isNotEmpty) {
+      _selectedTabs.add(_availableTabs.first);
     }
   }
 

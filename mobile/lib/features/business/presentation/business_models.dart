@@ -69,7 +69,24 @@ class _Company {
 
   bool get isOwner => role == 'owner';
 
-  String get roleLabel => isOwner ? 'Владелец' : 'Сотрудник';
+  String get roleLabel {
+    switch (role) {
+      case 'owner':
+        return 'Владелец';
+      case 'admin':
+        return 'Администратор';
+      case 'manager':
+        return 'Менеджер';
+      case 'accountant':
+        return 'Бухгалтер';
+      case 'warehouse':
+        return 'Кладовщик';
+      case 'sales':
+        return 'Продажи';
+      default:
+        return 'Сотрудник';
+    }
+  }
 }
 
 _Company _companyFromJson(Map<String, dynamic> json) {
@@ -524,6 +541,25 @@ class _StaffMember {
 
   final String name;
   final String role;
+
+  String get roleLabel {
+    switch (role) {
+      case 'owner':
+        return 'Владелец';
+      case 'admin':
+        return 'Администратор';
+      case 'manager':
+        return 'Менеджер';
+      case 'accountant':
+        return 'Бухгалтер';
+      case 'warehouse':
+        return 'Кладовщик';
+      case 'sales':
+        return 'Продажи';
+      default:
+        return 'Сотрудник';
+    }
+  }
 }
 
 class _OverviewData {
