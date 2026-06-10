@@ -561,11 +561,15 @@ class _BusinessShellState extends State<BusinessShell> {
         return _SalesScreen(
           accessToken: _session.accessToken,
           businessGateway: widget.businessGateway,
+          products: overview.products,
+          clients: overview.clients,
         );
       case BusinessTab.purchases:
         return _PurchasesScreen(
           accessToken: _session.accessToken,
           businessGateway: widget.businessGateway,
+          products: overview.products,
+          clients: overview.clients,
         );
       case BusinessTab.services:
         return const _ServicesScreen();

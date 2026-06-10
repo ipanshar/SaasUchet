@@ -1406,6 +1406,7 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 	var detail InventoryDocumentDetail
 	var documentDate time.Time
 	var totalQuantity float64
+	var totalAmount float64
 	err = s.db.QueryRowContext(
 		ctx,
 		`SELECT
@@ -1443,7 +1444,7 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		&detail.Summary.RelatedWarehouse,
 		&detail.Summary.ProductLines,
 		&totalQuantity,
-		&detail.Summary.TotalAmount,
+		&totalAmount,
 		&detail.Summary.Note,
 	)
 	if err != nil {
@@ -1451,6 +1452,7 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 	}
 	detail.Summary.DocumentDate = documentDate.Format("2006-01-02")
 	detail.Summary.TotalQuantity = int(totalQuantity)
+	detail.Summary.TotalAmount = int(totalAmount)
 
 	rows, err := s.db.QueryContext(
 		ctx,

@@ -86,6 +86,8 @@ class _DocumentsListScreen extends StatefulWidget {
     required this.title,
     required this.accentColor,
     required this.counterpartyLabel,
+    required this.products,
+    required this.clients,
   });
 
   final String accessToken;
@@ -94,6 +96,8 @@ class _DocumentsListScreen extends StatefulWidget {
   final String title;
   final Color accentColor;
   final String counterpartyLabel;
+  final List<_Product> products;
+  final List<_Client> clients;
 
   @override
   State<_DocumentsListScreen> createState() => _DocumentsListScreenState();
@@ -382,6 +386,65 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
     return '${fmt(range.start)} – ${fmt(range.end)}';
   }
 
+  Future<void> _showCreateDocument() async {
+    final result = await showModalBottomSheet<_CreateInventoryDocumentFormData>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CreateInventoryDocumentSheet(
+        accessToken: widget.accessToken,
+        businessGateway: widget.businessGateway,
+        products: widget.products,
+        clients: widget.clients,
+        initialDocumentType: widget.documentType,
+        lockDocumentType: true,
+      ),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    try {
+      await widget.businessGateway.createInventoryDocument(
+        accessToken: widget.accessToken,
+        payload: {
+          'document_type': result.documentType,
+          'client_id': result.clientId,
+          'warehouse_name': result.warehouseName,
+          'related_warehouse_name': result.relatedWarehouseName,
+          'note': result.note,
+          'lines': result.lines
+              .map(
+                (line) => {
+                  'product_id': line.productId,
+                  'service_id': line.serviceId,
+                  'quantity': line.quantity,
+                  'unit_price': line.unitPrice,
+                  'unit_cost': line.unitCost,
+                  'note': line.note,
+                },
+              )
+              .toList(growable: false),
+        },
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${widget.title}: документ создан')),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+
   Future<void> _openDocumentDetail(_InventoryDocument document) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
@@ -400,7 +463,19 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _GradientHeader(title: widget.title),
+        _GradientHeader(
+          title: widget.title,
+          subtitle: 'Документы',
+          trailing: Material(
+            color: const Color(0x1AFFFFFF),
+            shape: const CircleBorder(),
+            child: IconButton(
+              onPressed: _showCreateDocument,
+              icon: const Icon(Icons.add_rounded, color: Colors.white),
+              tooltip: 'Создать',
+            ),
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: _SearchField(

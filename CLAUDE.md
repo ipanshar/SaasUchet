@@ -351,6 +351,15 @@ flutter pub get               # После изменений pubspec.yaml
 
 ---
 
+## Session Completion
+
+After each completed development session:
+
+1. Create a `git commit`.
+2. Push the result to `main`.
+3. Use a Russian commit message.
+4. Keep the commit message concise and no longer than 200 characters.
+
 ## Важные правила (не нарушать без обсуждения)
 
 1. **Не добавлять ORM** (gorm, ent и т.д.) — используется сырой SQL

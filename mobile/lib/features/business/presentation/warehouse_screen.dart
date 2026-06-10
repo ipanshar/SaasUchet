@@ -1174,6 +1174,7 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
     this.initialDocumentType = 'purchase_receipt',
     this.initialClientId,
     this.initialWarehouseName = 'Основной склад',
+    this.lockDocumentType = false,
   });
 
   final String accessToken;
@@ -1183,6 +1184,7 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
   final String initialDocumentType;
   final String? initialClientId;
   final String initialWarehouseName;
+  final bool lockDocumentType;
 
   @override
   State<_CreateInventoryDocumentSheet> createState() =>
@@ -1271,45 +1273,53 @@ class _CreateInventoryDocumentSheetState
                       ),
                     ),
                     const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      initialValue: _documentType,
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'purchase_receipt',
-                          child: Text('Приход'),
+                    if (widget.lockDocumentType)
+                      InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'Тип документа',
                         ),
-                        DropdownMenuItem(
-                          value: 'write_off',
-                          child: Text('Списание'),
+                        child: Text(_documentTypeLabel(_documentType)),
+                      )
+                    else
+                      DropdownButtonFormField<String>(
+                        initialValue: _documentType,
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'purchase_receipt',
+                            child: Text('Приход'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'write_off',
+                            child: Text('Списание'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'transfer',
+                            child: Text('Перемещение'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'sale_issue',
+                            child: Text('Продажа'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'adjustment',
+                            child: Text('Корректировка'),
+                          ),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Тип документа',
                         ),
-                        DropdownMenuItem(
-                          value: 'transfer',
-                          child: Text('Перемещение'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'sale_issue',
-                          child: Text('Продажа'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'adjustment',
-                          child: Text('Корректировка'),
-                        ),
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: 'Тип документа',
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _documentType = value;
+                              if (_documentType != 'sale_issue' &&
+                                  _documentType != 'purchase_receipt') {
+                                _clientId = null;
+                              }
+                            });
+                          }
+                        },
                       ),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _documentType = value;
-                            if (_documentType != 'sale_issue' &&
-                                _documentType != 'purchase_receipt') {
-                              _clientId = null;
-                            }
-                          });
-                        }
-                      },
-                    ),
                     if (_documentType == 'sale_issue' ||
                         _documentType == 'purchase_receipt') ...[
                       const SizedBox(height: 12),
