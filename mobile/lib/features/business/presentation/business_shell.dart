@@ -24,6 +24,8 @@ part 'documents_screen.dart';
 part 'services_screen.dart';
 part 'catalog_screen.dart';
 part 'salary_screen.dart';
+part 'salary_payroll.dart';
+part 'salary_models.dart';
 part 'reports_screen.dart';
 part 'taxes_screen.dart';
 part 'business_widgets.dart';
@@ -591,7 +593,11 @@ class _BusinessShellState extends State<BusinessShell> {
           onProductsChanged: _loadOverview,
         );
       case BusinessTab.salary:
-        return const _SalaryScreen();
+        return _SalaryScreen(
+          accessToken: _session.accessToken,
+          businessGateway: widget.businessGateway,
+          accounts: overview.finance.accounts,
+        );
       case BusinessTab.reports:
         return const _ReportsScreen();
       case BusinessTab.taxes:

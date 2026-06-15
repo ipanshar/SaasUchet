@@ -81,6 +81,27 @@ class ApiConfig {
   static Uri productionOrderUri(String orderId) =>
       Uri.parse('$baseUrl/api/v1/production/orders/$orderId');
 
+  static Uri get payrollEmployeesUri =>
+      Uri.parse('$baseUrl/api/v1/payroll/employees');
+
+  static Uri payrollEmployeeUri(String employeeId) =>
+      Uri.parse('$baseUrl/api/v1/payroll/employees/$employeeId');
+
+  static Uri get payrollPeriodsUri =>
+      Uri.parse('$baseUrl/api/v1/payroll/periods');
+
+  static Uri payrollPeriodUri(String periodId) =>
+      Uri.parse('$baseUrl/api/v1/payroll/periods/$periodId');
+
+  static Uri payrollPeriodCalculateUri(String periodId) =>
+      Uri.parse('$baseUrl/api/v1/payroll/periods/$periodId/calculate');
+
+  static Uri payrollPeriodPayUri(String periodId) =>
+      Uri.parse('$baseUrl/api/v1/payroll/periods/$periodId/pay');
+
+  static Uri payrollEntryUri(String periodId, String entryId) =>
+      Uri.parse('$baseUrl/api/v1/payroll/periods/$periodId/entries/$entryId');
+
   static Uri get companiesUri => Uri.parse('$baseUrl/api/v1/companies');
 
   static Uri companyMembersUri(String companyId) =>

@@ -978,6 +978,178 @@ class BusinessApiClient extends BusinessGateway {
   }
 
   @override
+  Future<List<Map<String, dynamic>>> fetchEmployees({
+    required String accessToken,
+  }) async {
+    final response = await _client
+        .get(
+          ApiConfig.payrollEmployeesUri,
+          headers: _headers(accessToken, json: false),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+    final decoded = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(decoded['employees'] ?? []);
+  }
+
+  @override
+  Future<Map<String, dynamic>> createEmployee({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.payrollEmployeesUri,
+          headers: _headers(accessToken),
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 201) throw _buildApiException(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateEmployee({
+    required String accessToken,
+    required String employeeId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .put(
+          ApiConfig.payrollEmployeeUri(employeeId),
+          headers: _headers(accessToken),
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<void> deleteEmployee({
+    required String accessToken,
+    required String employeeId,
+  }) async {
+    final response = await _client
+        .delete(
+          ApiConfig.payrollEmployeeUri(employeeId),
+          headers: _headers(accessToken, json: false),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 204) throw _buildApiException(response);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchPayrollPeriods({
+    required String accessToken,
+  }) async {
+    final response = await _client
+        .get(
+          ApiConfig.payrollPeriodsUri,
+          headers: _headers(accessToken, json: false),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+    final decoded = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(decoded['periods'] ?? []);
+  }
+
+  @override
+  Future<Map<String, dynamic>> createPayrollPeriod({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.payrollPeriodsUri,
+          headers: _headers(accessToken),
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 201) throw _buildApiException(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchPayrollPeriodDetail({
+    required String accessToken,
+    required String periodId,
+  }) async {
+    final response = await _client
+        .get(
+          ApiConfig.payrollPeriodUri(periodId),
+          headers: _headers(accessToken, json: false),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<void> deletePayrollPeriod({
+    required String accessToken,
+    required String periodId,
+  }) async {
+    final response = await _client
+        .delete(
+          ApiConfig.payrollPeriodUri(periodId),
+          headers: _headers(accessToken, json: false),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 204) throw _buildApiException(response);
+  }
+
+  @override
+  Future<Map<String, dynamic>> calculatePayroll({
+    required String accessToken,
+    required String periodId,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.payrollPeriodCalculateUri(periodId),
+          headers: _headers(accessToken),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<Map<String, dynamic>> updatePayrollEntry({
+    required String accessToken,
+    required String periodId,
+    required String entryId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .put(
+          ApiConfig.payrollEntryUri(periodId, entryId),
+          headers: _headers(accessToken),
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<Map<String, dynamic>> payPayrollPeriod({
+    required String accessToken,
+    required String periodId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.payrollPeriodPayUri(periodId),
+          headers: _headers(accessToken),
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  @override
   void dispose() {
     _client.close();
   }

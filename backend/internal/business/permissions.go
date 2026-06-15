@@ -17,6 +17,8 @@ const (
 	permCatalogWrite         = "catalog.write"
 	permProductionRead       = "production.read"
 	permProductionWrite      = "production.write"
+	permPayrollRead          = "payroll.read"
+	permPayrollWrite         = "payroll.write"
 )
 
 func hasPermission(role string, permission string) bool {
@@ -31,7 +33,7 @@ func hasPermission(role string, permission string) bool {
 		}
 	case "accountant":
 		switch permission {
-		case permFinanceRead, permFinanceWrite, permCRMRead:
+		case permFinanceRead, permFinanceWrite, permCRMRead, permPayrollRead, permPayrollWrite:
 			return true
 		}
 	case "warehouse":

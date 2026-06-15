@@ -40,6 +40,17 @@ type Store interface {
 	ListProductionOrders(user auth.User) ([]ProductionOrder, error)
 	CreateProductionOrder(user auth.User, input CreateProductionOrderInput) (ProductionOrder, error)
 	UpdateProductionOrderStatus(user auth.User, orderID string, input UpdateProductionOrderStatusInput) (ProductionOrder, error)
+	ListEmployees(user auth.User) ([]Employee, error)
+	CreateEmployee(user auth.User, input CreateEmployeeInput) (Employee, error)
+	UpdateEmployee(user auth.User, employeeID string, input CreateEmployeeInput) (Employee, error)
+	DeleteEmployee(user auth.User, employeeID string) error
+	ListPayrollPeriods(user auth.User) ([]PayrollPeriod, error)
+	CreatePayrollPeriod(user auth.User, input CreatePayrollPeriodInput) (PayrollPeriod, error)
+	GetPayrollPeriod(user auth.User, periodID string) (PayrollPeriodDetail, error)
+	DeletePayrollPeriod(user auth.User, periodID string) error
+	CalculatePayroll(user auth.User, periodID string) (PayrollPeriodDetail, error)
+	UpdatePayrollEntry(user auth.User, periodID string, entryID string, input UpdatePayrollEntryInput) (PayrollPeriodDetail, error)
+	PayPayrollPeriod(user auth.User, periodID string, input PayPayrollPeriodInput) (PayrollPeriodDetail, error)
 	ListUserCompanies(user auth.User) ([]CompanyMembership, error)
 	CreateCompany(user auth.User, input CreateCompanyInput) (CompanyMembership, error)
 	ListCompanyMembers(user auth.User, companyID string) ([]CompanyMember, error)
@@ -930,6 +941,107 @@ func (s *MemoryStore) CreateProductionOrder(_ auth.User, input CreateProductionO
 
 func (s *MemoryStore) UpdateProductionOrderStatus(_ auth.User, orderID string, input UpdateProductionOrderStatusInput) (ProductionOrder, error) {
 	return ProductionOrder{ID: orderID, Status: input.Status}, nil
+}
+
+func (s *MemoryStore) ListEmployees(_ auth.User) ([]Employee, error) {
+	return []Employee{}, nil
+}
+
+func (s *MemoryStore) CreateEmployee(_ auth.User, input CreateEmployeeInput) (Employee, error) {
+	normalized := NormalizeEmployeeInput(input)
+	if err := ValidateEmployeeInput(normalized); err != nil {
+		return Employee{}, err
+	}
+	return Employee{
+		ID:              mustGenerateProductID(),
+		FullName:        normalized.FullName,
+		Position:        normalized.Position,
+		IIN:             normalized.IIN,
+		Phone:           normalized.Phone,
+		SalaryType:      normalized.SalaryType,
+		MonthlySalary:   normalized.MonthlySalary,
+		HourlyRate:      normalized.HourlyRate,
+		PieceRate:       normalized.PieceRate,
+		PieceRateSource: normalized.PieceRateSource,
+		StandardDays:    normalized.StandardDays,
+		HireDate:        normalized.HireDate,
+		Status:          normalized.Status,
+		Notes:           normalized.Notes,
+	}, nil
+}
+
+func (s *MemoryStore) UpdateEmployee(_ auth.User, employeeID string, input CreateEmployeeInput) (Employee, error) {
+	normalized := NormalizeEmployeeInput(input)
+	if err := ValidateEmployeeInput(normalized); err != nil {
+		return Employee{}, err
+	}
+	return Employee{
+		ID:              employeeID,
+		FullName:        normalized.FullName,
+		Position:        normalized.Position,
+		IIN:             normalized.IIN,
+		Phone:           normalized.Phone,
+		SalaryType:      normalized.SalaryType,
+		MonthlySalary:   normalized.MonthlySalary,
+		HourlyRate:      normalized.HourlyRate,
+		PieceRate:       normalized.PieceRate,
+		PieceRateSource: normalized.PieceRateSource,
+		StandardDays:    normalized.StandardDays,
+		HireDate:        normalized.HireDate,
+		Status:          normalized.Status,
+		Notes:           normalized.Notes,
+	}, nil
+}
+
+func (s *MemoryStore) DeleteEmployee(_ auth.User, _ string) error { return nil }
+
+func (s *MemoryStore) ListPayrollPeriods(_ auth.User) ([]PayrollPeriod, error) {
+	return []PayrollPeriod{}, nil
+}
+
+func (s *MemoryStore) CreatePayrollPeriod(_ auth.User, input CreatePayrollPeriodInput) (PayrollPeriod, error) {
+	normalized := NormalizePayrollPeriodInput(input)
+	if err := ValidatePayrollPeriodInput(normalized); err != nil {
+		return PayrollPeriod{}, err
+	}
+	return PayrollPeriod{
+		ID:          mustGenerateProductID(),
+		PeriodYear:  normalized.PeriodYear,
+		PeriodMonth: normalized.PeriodMonth,
+		Title:       normalized.Title,
+		Status:      "draft",
+		CreatedAt:   time.Now().Format("2006-01-02"),
+	}, nil
+}
+
+func (s *MemoryStore) GetPayrollPeriod(_ auth.User, periodID string) (PayrollPeriodDetail, error) {
+	return PayrollPeriodDetail{
+		Period:  PayrollPeriod{ID: periodID, Status: "draft"},
+		Entries: []PayrollEntry{},
+	}, nil
+}
+
+func (s *MemoryStore) DeletePayrollPeriod(_ auth.User, _ string) error { return nil }
+
+func (s *MemoryStore) CalculatePayroll(_ auth.User, periodID string) (PayrollPeriodDetail, error) {
+	return PayrollPeriodDetail{
+		Period:  PayrollPeriod{ID: periodID, Status: "calculated"},
+		Entries: []PayrollEntry{},
+	}, nil
+}
+
+func (s *MemoryStore) UpdatePayrollEntry(_ auth.User, periodID string, _ string, _ UpdatePayrollEntryInput) (PayrollPeriodDetail, error) {
+	return PayrollPeriodDetail{
+		Period:  PayrollPeriod{ID: periodID, Status: "calculated"},
+		Entries: []PayrollEntry{},
+	}, nil
+}
+
+func (s *MemoryStore) PayPayrollPeriod(_ auth.User, periodID string, _ PayPayrollPeriodInput) (PayrollPeriodDetail, error) {
+	return PayrollPeriodDetail{
+		Period:  PayrollPeriod{ID: periodID, Status: "paid"},
+		Entries: []PayrollEntry{},
+	}, nil
 }
 
 func (s *MemoryStore) ListUserCompanies(user auth.User) ([]CompanyMembership, error) {

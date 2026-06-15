@@ -207,5 +207,62 @@ abstract class BusinessGateway {
     required String status,
   });
 
+  Future<List<Map<String, dynamic>>> fetchEmployees({
+    required String accessToken,
+  });
+
+  Future<Map<String, dynamic>> createEmployee({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<Map<String, dynamic>> updateEmployee({
+    required String accessToken,
+    required String employeeId,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<void> deleteEmployee({
+    required String accessToken,
+    required String employeeId,
+  });
+
+  Future<List<Map<String, dynamic>>> fetchPayrollPeriods({
+    required String accessToken,
+  });
+
+  Future<Map<String, dynamic>> createPayrollPeriod({
+    required String accessToken,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<Map<String, dynamic>> fetchPayrollPeriodDetail({
+    required String accessToken,
+    required String periodId,
+  });
+
+  Future<void> deletePayrollPeriod({
+    required String accessToken,
+    required String periodId,
+  });
+
+  Future<Map<String, dynamic>> calculatePayroll({
+    required String accessToken,
+    required String periodId,
+  });
+
+  Future<Map<String, dynamic>> updatePayrollEntry({
+    required String accessToken,
+    required String periodId,
+    required String entryId,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<Map<String, dynamic>> payPayrollPeriod({
+    required String accessToken,
+    required String periodId,
+    required Map<String, dynamic> payload,
+  });
+
   void dispose() {}
 }
