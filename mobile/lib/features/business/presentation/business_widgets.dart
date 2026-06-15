@@ -11,6 +11,9 @@ enum BusinessTab {
   purchases,
   services,
   catalog,
+  salary,
+  reports,
+  taxes,
 }
 
 String tabLabel(BusinessTab tab) {
@@ -35,6 +38,12 @@ String tabLabel(BusinessTab tab) {
       return 'Услуги';
     case BusinessTab.catalog:
       return 'Справочник';
+    case BusinessTab.salary:
+      return 'Зарплата';
+    case BusinessTab.reports:
+      return 'Отчеты';
+    case BusinessTab.taxes:
+      return 'Налоги';
   }
 }
 
@@ -60,6 +69,12 @@ IconData tabIcon(BusinessTab tab) {
       return Icons.handyman_rounded;
     case BusinessTab.catalog:
       return Icons.menu_book_rounded;
+    case BusinessTab.salary:
+      return Icons.payments_rounded;
+    case BusinessTab.reports:
+      return Icons.bar_chart_rounded;
+    case BusinessTab.taxes:
+      return Icons.receipt_long_rounded;
   }
 }
 

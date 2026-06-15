@@ -23,6 +23,9 @@ part 'purchases_screen.dart';
 part 'documents_screen.dart';
 part 'services_screen.dart';
 part 'catalog_screen.dart';
+part 'salary_screen.dart';
+part 'reports_screen.dart';
+part 'taxes_screen.dart';
 part 'business_widgets.dart';
 part 'business_models.dart';
 
@@ -426,6 +429,9 @@ class _BusinessShellState extends State<BusinessShell> {
           BusinessTab.sales,
           BusinessTab.purchases,
           BusinessTab.services,
+          BusinessTab.salary,
+          BusinessTab.reports,
+          BusinessTab.taxes,
         ];
       case 'manager':
         return const [
@@ -434,11 +440,15 @@ class _BusinessShellState extends State<BusinessShell> {
           BusinessTab.finance,
           BusinessTab.catalog,
           BusinessTab.production,
+          BusinessTab.reports,
         ];
       case 'accountant':
         return const [
           BusinessTab.crm,
           BusinessTab.finance,
+          BusinessTab.salary,
+          BusinessTab.reports,
+          BusinessTab.taxes,
         ];
       case 'warehouse':
         return const [
@@ -580,6 +590,12 @@ class _BusinessShellState extends State<BusinessShell> {
           businessGateway: widget.businessGateway,
           onProductsChanged: _loadOverview,
         );
+      case BusinessTab.salary:
+        return const _SalaryScreen();
+      case BusinessTab.reports:
+        return const _ReportsScreen();
+      case BusinessTab.taxes:
+        return const _TaxesScreen();
     }
   }
 
@@ -590,7 +606,10 @@ class _BusinessShellState extends State<BusinessShell> {
         _activeTab != BusinessTab.crm &&
         _activeTab != BusinessTab.production &&
         _activeTab != BusinessTab.sales &&
-        _activeTab != BusinessTab.purchases;
+        _activeTab != BusinessTab.purchases &&
+        _activeTab != BusinessTab.salary &&
+        _activeTab != BusinessTab.reports &&
+        _activeTab != BusinessTab.taxes;
     final fabActions = _fabActionsForCurrentTab();
     final overview = _overview;
 
