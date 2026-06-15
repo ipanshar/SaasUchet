@@ -107,6 +107,7 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
   bool _isLoading = true;
   String? _loadError;
   List<_InventoryDocument> _documents = const [];
+  List<_Employee> _employees = const [];
 
   String _query = '';
   String? _statusFilter;
@@ -131,6 +132,17 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
         accessToken: widget.accessToken,
         type: widget.documentType,
       );
+      // Продавца для комиссии выбираем только в документах продажи.
+      List<_Employee> employees = const [];
+      if (widget.documentType == 'sale_issue') {
+        try {
+          final rows = await widget.businessGateway
+              .fetchEmployees(accessToken: widget.accessToken);
+          employees = rows.map(_employeeFromJson).toList(growable: false);
+        } catch (_) {
+          employees = const [];
+        }
+      }
       if (!mounted) {
         return;
       }
@@ -138,6 +150,7 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
         _documents = documents
             .map(_inventoryDocumentFromJson)
             .toList(growable: false);
+        _employees = employees;
         _isLoading = false;
       });
     } catch (error) {
@@ -396,6 +409,7 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
         businessGateway: widget.businessGateway,
         products: widget.products,
         clients: widget.clients,
+        employees: _employees,
         initialDocumentType: widget.documentType,
         lockDocumentType: true,
       ),
@@ -411,6 +425,7 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
         payload: {
           'document_type': result.documentType,
           'client_id': result.clientId,
+          'employee_id': result.employeeId,
           'warehouse_name': result.warehouseName,
           'related_warehouse_name': result.relatedWarehouseName,
           'note': result.note,

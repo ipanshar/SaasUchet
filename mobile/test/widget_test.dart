@@ -787,6 +787,13 @@ class _FakeBusinessGateway extends BusinessGateway {
         'period': {'id': periodId, 'status': 'paid'},
         'entries': [],
       };
+
+  @override
+  Future<void> setRecipePayrollAmount({
+    required String accessToken,
+    required String recipeId,
+    required int amount,
+  }) async {}
 }
 
 final _fakeSession = AuthSession(

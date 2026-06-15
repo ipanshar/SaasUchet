@@ -1137,6 +1137,7 @@ class _CreateInventoryDocumentFormData {
     required this.relatedWarehouseName,
     required this.note,
     required this.lines,
+    this.employeeId = '',
   });
 
   final String documentType;
@@ -1145,6 +1146,7 @@ class _CreateInventoryDocumentFormData {
   final String relatedWarehouseName;
   final String note;
   final List<_CreateInventoryDocumentLineFormData> lines;
+  final String employeeId;
 }
 
 class _CreateInventoryDocumentLineFormData {
@@ -1171,6 +1173,7 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
     required this.businessGateway,
     required this.products,
     required this.clients,
+    this.employees = const [],
     this.initialDocumentType = 'purchase_receipt',
     this.initialClientId,
     this.initialWarehouseName = 'Основной склад',
@@ -1181,6 +1184,7 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
   final BusinessGateway businessGateway;
   final List<_Product> products;
   final List<_Client> clients;
+  final List<_Employee> employees;
   final String initialDocumentType;
   final String? initialClientId;
   final String initialWarehouseName;
@@ -1200,6 +1204,7 @@ class _CreateInventoryDocumentSheetState
   late final List<_InventoryDocumentDraftLine> _lines;
   late String _documentType;
   String? _clientId;
+  String? _employeeId;
   List<_Service> _services = [];
 
   @override
@@ -1345,6 +1350,29 @@ class _CreateInventoryDocumentSheetState
                         onChanged: (value) {
                           setState(() {
                             _clientId = value;
+                          });
+                        },
+                      ),
+                    ],
+                    if (_documentType == 'sale_issue' &&
+                        widget.employees.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _employeeId,
+                        items: widget.employees
+                            .map(
+                              (e) => DropdownMenuItem<String>(
+                                value: e.id,
+                                child: Text(e.fullName),
+                              ),
+                            )
+                            .toList(growable: false),
+                        decoration: const InputDecoration(
+                          labelText: 'Продавец (для начисления комиссии)',
+                        ),
+                        onChanged: (value) {
+                          setState(() {
+                            _employeeId = value;
                           });
                         },
                       ),
@@ -1584,6 +1612,7 @@ class _CreateInventoryDocumentSheetState
       _CreateInventoryDocumentFormData(
         documentType: _documentType,
         clientId: _clientId ?? '',
+        employeeId: _employeeId ?? '',
         warehouseName: _warehouseController.text.trim(),
         relatedWarehouseName: _relatedWarehouseController.text.trim(),
         note: _noteController.text.trim(),

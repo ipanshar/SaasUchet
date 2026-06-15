@@ -1229,6 +1229,7 @@ class _Recipe {
     required this.id,
     required this.name,
     required this.description,
+    required this.payrollAmount,
     required this.ingredients,
     required this.services,
     required this.outputs,
@@ -1236,6 +1237,7 @@ class _Recipe {
   final String id;
   final String name;
   final String description;
+  final int payrollAmount;
   final List<_RecipeIngredient> ingredients;
   final List<_RecipeService> services;
   final List<_RecipeOutput> outputs;
@@ -1272,6 +1274,7 @@ _Recipe _recipeFromJson(Map<String, dynamic> j) => _Recipe(
       id: j['id'] as String? ?? '',
       name: j['name'] as String? ?? '',
       description: j['description'] as String? ?? '',
+      payrollAmount: j['payroll_amount'] as int? ?? 0,
       ingredients: (j['ingredients'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(_recipeIngredientFromJson)
@@ -1305,6 +1308,7 @@ class _ProductionOrder {
     required this.plannedDate,
     required this.notes,
     required this.createdAt,
+    required this.participants,
   });
   final String id;
   final String documentNo;
@@ -1321,6 +1325,7 @@ class _ProductionOrder {
   final String plannedDate;
   final String notes;
   final String createdAt;
+  final List<_ProductionParticipant> participants;
 
   String get statusLabel {
     switch (status) {
@@ -1349,6 +1354,24 @@ class _ProductionOrder {
   }
 }
 
+class _ProductionParticipant {
+  const _ProductionParticipant({
+    required this.employeeId,
+    required this.employeeName,
+    required this.sharePercent,
+  });
+  final String employeeId;
+  final String employeeName;
+  final double sharePercent;
+}
+
+_ProductionParticipant _productionParticipantFromJson(Map<String, dynamic> j) =>
+    _ProductionParticipant(
+      employeeId: j['employee_id'] as String? ?? '',
+      employeeName: j['employee_name'] as String? ?? '',
+      sharePercent: (j['share_percent'] as num?)?.toDouble() ?? 0,
+    );
+
 _ProductionOrder _productionOrderFromJson(Map<String, dynamic> j) =>
     _ProductionOrder(
       id: j['id'] as String? ?? '',
@@ -1366,4 +1389,8 @@ _ProductionOrder _productionOrderFromJson(Map<String, dynamic> j) =>
       plannedDate: j['planned_date'] as String? ?? '',
       notes: j['notes'] as String? ?? '',
       createdAt: j['created_at'] as String? ?? '',
+      participants: (j['participants'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_productionParticipantFromJson)
+          .toList(growable: false),
     );

@@ -37,6 +37,7 @@ type Store interface {
 	CreateRecipe(user auth.User, input CreateRecipeInput) (Recipe, error)
 	UpdateRecipe(user auth.User, recipeID string, input CreateRecipeInput) (Recipe, error)
 	DeleteRecipe(user auth.User, recipeID string) error
+	SetRecipePayrollAmount(user auth.User, recipeID string, amount int) error
 	ListProductionOrders(user auth.User) ([]ProductionOrder, error)
 	CreateProductionOrder(user auth.User, input CreateProductionOrderInput) (ProductionOrder, error)
 	UpdateProductionOrderStatus(user auth.User, orderID string, input UpdateProductionOrderStatusInput) (ProductionOrder, error)
@@ -898,12 +899,13 @@ func (s *MemoryStore) CreateRecipe(_ auth.User, input CreateRecipeInput) (Recipe
 		return Recipe{}, err
 	}
 	return Recipe{
-		ID:          mustGenerateProductID(),
-		Name:        normalized.Name,
-		Description: normalized.Description,
-		Ingredients: []RecipeIngredient{},
-		Services:    []RecipeService{},
-		Outputs:     []RecipeOutput{},
+		ID:            mustGenerateProductID(),
+		Name:          normalized.Name,
+		Description:   normalized.Description,
+		PayrollAmount: normalized.PayrollAmount,
+		Ingredients:   []RecipeIngredient{},
+		Services:      []RecipeService{},
+		Outputs:       []RecipeOutput{},
 	}, nil
 }
 
@@ -914,11 +916,16 @@ func (s *MemoryStore) UpdateRecipe(_ auth.User, recipeID string, input CreateRec
 	}
 	return Recipe{
 		ID: recipeID, Name: normalized.Name, Description: normalized.Description,
-		Ingredients: []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
+		PayrollAmount: normalized.PayrollAmount,
+		Ingredients:   []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
 	}, nil
 }
 
 func (s *MemoryStore) DeleteRecipe(_ auth.User, _ string) error { return nil }
+
+func (s *MemoryStore) SetRecipePayrollAmount(_ auth.User, _ string, _ int) error {
+	return nil
+}
 
 func (s *MemoryStore) ListProductionOrders(_ auth.User) ([]ProductionOrder, error) {
 	return []ProductionOrder{}, nil
@@ -963,6 +970,8 @@ func (s *MemoryStore) CreateEmployee(_ auth.User, input CreateEmployeeInput) (Em
 		HourlyRate:      normalized.HourlyRate,
 		PieceRate:       normalized.PieceRate,
 		PieceRateSource: normalized.PieceRateSource,
+		SalesPercent:    normalized.SalesPercent,
+		SalesBasis:      normalized.SalesBasis,
 		StandardDays:    normalized.StandardDays,
 		HireDate:        normalized.HireDate,
 		Status:          normalized.Status,
@@ -986,6 +995,8 @@ func (s *MemoryStore) UpdateEmployee(_ auth.User, employeeID string, input Creat
 		HourlyRate:      normalized.HourlyRate,
 		PieceRate:       normalized.PieceRate,
 		PieceRateSource: normalized.PieceRateSource,
+		SalesPercent:    normalized.SalesPercent,
+		SalesBasis:      normalized.SalesBasis,
 		StandardDays:    normalized.StandardDays,
 		HireDate:        normalized.HireDate,
 		Status:          normalized.Status,

@@ -115,6 +115,11 @@ class _SalaryScreenState extends State<_SalaryScreen>
                 subtitle: _tabController.index == 0
                     ? _pluralEmployees(_employees.length)
                     : _pluralPeriods(_periods.length),
+                trailing: IconButton(
+                  icon: const Icon(Icons.settings_rounded, color: Colors.white),
+                  tooltip: 'Настройки начислений',
+                  onPressed: _openSettings,
+                ),
                 child: TabBar(
                   controller: _tabController,
                   onTap: (_) => _dismissFab(),
@@ -207,6 +212,17 @@ class _SalaryScreenState extends State<_SalaryScreen>
         accessToken: widget.accessToken,
         gateway: widget.businessGateway,
         onSaved: _loadData,
+      ),
+    );
+  }
+
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _PayrollSettingsScreen(
+          accessToken: widget.accessToken,
+          gateway: widget.businessGateway,
+        ),
       ),
     );
   }
@@ -463,12 +479,12 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
   late final TextEditingController _phoneCtrl;
   late final TextEditingController _monthlyCtrl;
   late final TextEditingController _hourlyCtrl;
-  late final TextEditingController _pieceCtrl;
+  late final TextEditingController _salesPercentCtrl;
   late final TextEditingController _standardDaysCtrl;
   late final TextEditingController _notesCtrl;
 
   String _salaryType = 'monthly';
-  String _pieceRateSource = 'production';
+  String _salesBasis = 'revenue';
   bool _isActive = true;
   bool _isSubmitting = false;
 
@@ -484,14 +500,15 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
         TextEditingController(text: e == null ? '' : e.monthlySalary.toString());
     _hourlyCtrl =
         TextEditingController(text: e == null ? '' : e.hourlyRate.toString());
-    _pieceCtrl =
-        TextEditingController(text: e == null ? '' : e.pieceRate.toString());
+    _salesPercentCtrl = TextEditingController(
+        text: (e == null || e.salesPercent == 0)
+            ? ''
+            : _formatPercent(e.salesPercent));
     _standardDaysCtrl =
         TextEditingController(text: (e?.standardDays ?? 22).toString());
     _notesCtrl = TextEditingController(text: e?.notes ?? '');
     _salaryType = e?.salaryType ?? 'monthly';
-    _pieceRateSource =
-        (e == null || e.pieceRateSource == 'none') ? 'production' : e.pieceRateSource;
+    _salesBasis = e?.salesBasis ?? 'revenue';
     _isActive = e?.isActive ?? true;
   }
 
@@ -503,7 +520,7 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
     _phoneCtrl.dispose();
     _monthlyCtrl.dispose();
     _hourlyCtrl.dispose();
-    _pieceCtrl.dispose();
+    _salesPercentCtrl.dispose();
     _standardDaysCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
@@ -511,8 +528,6 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
 
   bool get _showMonthly => _salaryType == 'monthly' || _salaryType == 'combined';
   bool get _showHourly => _salaryType == 'hourly';
-  bool get _showPiece =>
-      _salaryType == 'piece_rate' || _salaryType == 'combined';
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty) {
@@ -530,8 +545,10 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
         'salary_type': _salaryType,
         'monthly_salary': _showMonthly ? _intOf(_monthlyCtrl.text) : 0,
         'hourly_rate': _showHourly ? _intOf(_hourlyCtrl.text) : 0,
-        'piece_rate': _showPiece ? _intOf(_pieceCtrl.text) : 0,
-        'piece_rate_source': _showPiece ? _pieceRateSource : 'none',
+        'piece_rate': 0,
+        'piece_rate_source': 'none',
+        'sales_percent': _doubleOf(_salesPercentCtrl.text),
+        'sales_basis': _salesBasis,
         'standard_days': _intOf(_standardDaysCtrl.text, fallback: 22),
         'status': _isActive ? 'active' : 'inactive',
         'notes': _notesCtrl.text.trim(),
@@ -563,6 +580,9 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
     if (cleaned.isEmpty) return fallback;
     return int.tryParse(cleaned) ?? fallback;
   }
+
+  static double _doubleOf(String value) =>
+      double.tryParse(value.replaceAll(',', '.')) ?? 0;
 
   @override
   Widget build(BuildContext context) {
@@ -672,34 +692,64 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
                       keyboardType: TextInputType.number,
                     ),
                   ],
-                  if (_showPiece) ...[
-                    const SizedBox(height: 12),
-                    const _SectionLabel(
-                        label: 'Сдельная ставка (за ед./документ), ₸'),
-                    TextFormField(
-                      controller: _pieceCtrl,
-                      decoration: _inputDecoration('Например: 500'),
-                      keyboardType: TextInputType.number,
+                  const SizedBox(height: 20),
+                  const Text('Комиссия с продаж',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Начисляется по проведённым продажам, где сотрудник указан продавцом. 0 — без комиссии.',
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionLabel(label: 'Процент, %'),
+                            TextFormField(
+                              controller: _salesPercentCtrl,
+                              decoration: _inputDecoration('0'),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                      decimal: true),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionLabel(label: 'База'),
+                            DropdownButtonFormField<String>(
+                              initialValue: _salesBasis,
+                              decoration: _inputDecoration('База'),
+                              items: const [
+                                DropdownMenuItem(
+                                    value: 'revenue', child: Text('Выручка')),
+                                DropdownMenuItem(
+                                    value: 'profit', child: Text('Прибыль')),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _salesBasis = v ?? 'revenue'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text(
+                      'Оплата за производство начисляется автоматически за участие в производственных заказах; сумму за рецепт задайте в Настройках (шестерёнка вверху).',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                     ),
-                    const SizedBox(height: 12),
-                    const _SectionLabel(label: 'Источник сдельной'),
-                    DropdownButtonFormField<String>(
-                      initialValue: _pieceRateSource,
-                      decoration: _inputDecoration('Источник'),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'production',
-                            child: Text('Производство (за ед.)')),
-                        DropdownMenuItem(
-                            value: 'sales', child: Text('Продажи (за документ)')),
-                        DropdownMenuItem(
-                            value: 'purchases',
-                            child: Text('Закупки (за документ)')),
-                      ],
-                      onChanged: (v) =>
-                          setState(() => _pieceRateSource = v ?? 'production'),
-                    ),
-                  ],
+                  ),
                   if (_salaryType == 'bonus')
                     const Padding(
                       padding: EdgeInsets.only(top: 12),

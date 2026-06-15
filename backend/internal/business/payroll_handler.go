@@ -263,6 +263,45 @@ func (h Handler) payrollPeriodPay(w http.ResponseWriter, r *http.Request, user a
 	response.JSON(w, http.StatusOK, detail)
 }
 
+// RecipeRates handles PUT /api/v1/payroll/recipe-rates/{recipeId} — sets the
+// payroll amount distributed per production batch of the recipe.
+func (h Handler) RecipeRates(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	recipeID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/payroll/recipe-rates/"))
+	if recipeID == "" || strings.Contains(recipeID, "/") {
+		response.Error(w, http.StatusNotFound, "recipe not found")
+		return
+	}
+	if r.Method != http.MethodPut {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permPayrollWrite) {
+		return
+	}
+
+	var input struct {
+		Amount int `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.store.SetRecipePayrollAmount(user, recipeID, input.Amount); err != nil {
+		if errors.Is(err, ErrValidation) {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"recipe_id": recipeID, "amount": input.Amount})
+}
+
 func (h Handler) payrollEntryUpdate(w http.ResponseWriter, r *http.Request, user auth.User, periodID string, entryID string) {
 	if r.Method != http.MethodPut {
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")

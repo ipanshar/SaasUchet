@@ -14,6 +14,8 @@ class _Employee {
     required this.hourlyRate,
     required this.pieceRate,
     required this.pieceRateSource,
+    required this.salesPercent,
+    required this.salesBasis,
     required this.standardDays,
     required this.hireDate,
     required this.status,
@@ -30,6 +32,8 @@ class _Employee {
   final int hourlyRate;
   final int pieceRate;
   final String pieceRateSource;
+  final double salesPercent;
+  final String salesBasis;
   final int standardDays;
   final String hireDate;
   final String status;
@@ -39,41 +43,33 @@ class _Employee {
 
   String get salaryTypeLabel => salaryTypeLabelFor(salaryType);
 
-  String get pieceRateSourceLabel {
-    switch (pieceRateSource) {
-      case 'production':
-        return 'Производство';
-      case 'sales':
-        return 'Продажи';
-      case 'purchases':
-        return 'Закупки';
-      default:
-        return '—';
-    }
-  }
+  String get salesBasisLabel =>
+      salesBasis == 'profit' ? 'с прибыли' : 'с выручки';
 
   /// Short human-readable description of how this employee is paid.
   String get payDescription {
+    final parts = <String>[];
     switch (salaryType) {
       case 'monthly':
-        return 'Оклад ${formatMoney(monthlySalary)}';
+        parts.add('Оклад ${formatMoney(monthlySalary)}');
       case 'hourly':
-        return '${formatMoney(hourlyRate)}/час';
+        parts.add('${formatMoney(hourlyRate)}/час');
       case 'piece_rate':
-        return 'Сдельно ${formatMoney(pieceRate)} ($pieceRateSourceLabel)';
+        parts.add('Сдельная');
       case 'bonus':
-        return 'Бонусная';
+        parts.add('Бонусная');
       case 'combined':
-        final parts = <String>['Оклад ${formatMoney(monthlySalary)}'];
-        if (pieceRate > 0 && pieceRateSource != 'none') {
-          parts.add('сдельно ${formatMoney(pieceRate)}');
-        }
-        return parts.join(' + ');
-      default:
-        return '';
+        parts.add('Оклад ${formatMoney(monthlySalary)}');
     }
+    if (salesPercent > 0) {
+      parts.add('${_formatPercent(salesPercent)}% $salesBasisLabel');
+    }
+    return parts.join(' + ');
   }
 }
+
+String _formatPercent(double v) =>
+    v == v.truncateToDouble() ? v.toInt().toString() : v.toString();
 
 String salaryTypeLabelFor(String salaryType) {
   switch (salaryType) {
@@ -103,6 +99,8 @@ _Employee _employeeFromJson(Map<String, dynamic> j) => _Employee(
       hourlyRate: j['hourly_rate'] as int? ?? 0,
       pieceRate: j['piece_rate'] as int? ?? 0,
       pieceRateSource: j['piece_rate_source'] as String? ?? 'none',
+      salesPercent: (j['sales_percent'] as num?)?.toDouble() ?? 0,
+      salesBasis: j['sales_basis'] as String? ?? 'revenue',
       standardDays: j['standard_days'] as int? ?? 22,
       hireDate: j['hire_date'] as String? ?? '',
       status: j['status'] as String? ?? 'active',

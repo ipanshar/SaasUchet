@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -243,6 +244,7 @@ type CreateInventoryDocumentInput struct {
 	WarehouseName        string                             `json:"warehouse_name,omitempty"`
 	RelatedWarehouseName string                             `json:"related_warehouse_name,omitempty"`
 	ClientID             string                             `json:"client_id,omitempty"`
+	EmployeeID           string                             `json:"employee_id,omitempty"`
 	Note                 string                             `json:"note,omitempty"`
 	Lines                []CreateInventoryDocumentLineInput `json:"lines"`
 }
@@ -558,6 +560,7 @@ func NormalizeInventoryDocumentInput(input CreateInventoryDocumentInput) CreateI
 	input.WarehouseName = strings.TrimSpace(input.WarehouseName)
 	input.RelatedWarehouseName = strings.TrimSpace(input.RelatedWarehouseName)
 	input.ClientID = strings.TrimSpace(input.ClientID)
+	input.EmployeeID = strings.TrimSpace(input.EmployeeID)
 	input.Note = strings.TrimSpace(input.Note)
 
 	for index := range input.Lines {
@@ -1162,12 +1165,13 @@ type RecipeOutput struct {
 }
 
 type Recipe struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Ingredients []RecipeIngredient `json:"ingredients"`
-	Services    []RecipeService    `json:"services"`
-	Outputs     []RecipeOutput     `json:"outputs"`
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	PayrollAmount int                `json:"payroll_amount"`
+	Ingredients   []RecipeIngredient `json:"ingredients"`
+	Services      []RecipeService    `json:"services"`
+	Outputs       []RecipeOutput     `json:"outputs"`
 }
 
 type CreateRecipeIngredientInput struct {
@@ -1188,41 +1192,55 @@ type CreateRecipeOutputInput struct {
 }
 
 type CreateRecipeInput struct {
-	Name        string                        `json:"name"`
-	Description string                        `json:"description"`
-	Ingredients []CreateRecipeIngredientInput `json:"ingredients"`
-	Services    []CreateRecipeServiceInput    `json:"services"`
-	Outputs     []CreateRecipeOutputInput     `json:"outputs"`
+	Name          string                        `json:"name"`
+	Description   string                        `json:"description"`
+	PayrollAmount int                           `json:"payroll_amount"`
+	Ingredients   []CreateRecipeIngredientInput `json:"ingredients"`
+	Services      []CreateRecipeServiceInput    `json:"services"`
+	Outputs       []CreateRecipeOutputInput     `json:"outputs"`
+}
+
+type ProductionParticipant struct {
+	EmployeeID   string  `json:"employee_id"`
+	EmployeeName string  `json:"employee_name"`
+	SharePercent float64 `json:"share_percent"`
+}
+
+type CreateProductionParticipantInput struct {
+	EmployeeID   string  `json:"employee_id"`
+	SharePercent float64 `json:"share_percent"`
 }
 
 type ProductionOrder struct {
-	ID                  string  `json:"id"`
-	DocumentNo          string  `json:"document_no"`
-	RecipeID            string  `json:"recipe_id"`
-	RecipeName          string  `json:"recipe_name"`
-	SourceWarehouseID   string  `json:"source_warehouse_id"`
-	SourceWarehouseName string  `json:"source_warehouse_name"`
-	OutputWarehouseID   string  `json:"output_warehouse_id"`
-	OutputWarehouseName string  `json:"output_warehouse_name"`
-	BatchNumber         string  `json:"batch_number"`
-	ResponsibleEmployee string  `json:"responsible_employee"`
-	PlannedQuantity     float64 `json:"planned_quantity"`
-	Status              string  `json:"status"`
-	PlannedDate         string  `json:"planned_date"`
-	Notes               string  `json:"notes"`
-	CreatedAt           string  `json:"created_at"`
+	ID                  string                  `json:"id"`
+	DocumentNo          string                  `json:"document_no"`
+	RecipeID            string                  `json:"recipe_id"`
+	RecipeName          string                  `json:"recipe_name"`
+	SourceWarehouseID   string                  `json:"source_warehouse_id"`
+	SourceWarehouseName string                  `json:"source_warehouse_name"`
+	OutputWarehouseID   string                  `json:"output_warehouse_id"`
+	OutputWarehouseName string                  `json:"output_warehouse_name"`
+	BatchNumber         string                  `json:"batch_number"`
+	ResponsibleEmployee string                  `json:"responsible_employee"`
+	PlannedQuantity     float64                 `json:"planned_quantity"`
+	Status              string                  `json:"status"`
+	PlannedDate         string                  `json:"planned_date"`
+	Notes               string                  `json:"notes"`
+	CreatedAt           string                  `json:"created_at"`
+	Participants        []ProductionParticipant `json:"participants"`
 }
 
 type CreateProductionOrderInput struct {
-	DocumentNo          string  `json:"document_no"`
-	RecipeID            string  `json:"recipe_id"`
-	SourceWarehouseID   string  `json:"source_warehouse_id"`
-	OutputWarehouseID   string  `json:"output_warehouse_id"`
-	BatchNumber         string  `json:"batch_number"`
-	ResponsibleEmployee string  `json:"responsible_employee"`
-	PlannedQuantity     float64 `json:"planned_quantity"`
-	PlannedDate         string  `json:"planned_date"`
-	Notes               string  `json:"notes"`
+	DocumentNo          string                             `json:"document_no"`
+	RecipeID            string                             `json:"recipe_id"`
+	SourceWarehouseID   string                             `json:"source_warehouse_id"`
+	OutputWarehouseID   string                             `json:"output_warehouse_id"`
+	BatchNumber         string                             `json:"batch_number"`
+	ResponsibleEmployee string                             `json:"responsible_employee"`
+	PlannedQuantity     float64                            `json:"planned_quantity"`
+	PlannedDate         string                             `json:"planned_date"`
+	Notes               string                             `json:"notes"`
+	Participants        []CreateProductionParticipantInput `json:"participants"`
 }
 
 type UpdateProductionOrderStatusInput struct {
@@ -1232,6 +1250,9 @@ type UpdateProductionOrderStatusInput struct {
 func NormalizeRecipeInput(input CreateRecipeInput) CreateRecipeInput {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Description = strings.TrimSpace(input.Description)
+	if input.PayrollAmount < 0 {
+		input.PayrollAmount = 0
+	}
 	for i := range input.Ingredients {
 		input.Ingredients[i].ProductID = strings.TrimSpace(input.Ingredients[i].ProductID)
 		input.Ingredients[i].UnitName = strings.TrimSpace(input.Ingredients[i].UnitName)
@@ -1307,6 +1328,9 @@ func NormalizeProductionOrderInput(input CreateProductionOrderInput) CreateProdu
 	if input.PlannedQuantity <= 0 {
 		input.PlannedQuantity = 1
 	}
+	for i := range input.Participants {
+		input.Participants[i].EmployeeID = strings.TrimSpace(input.Participants[i].EmployeeID)
+	}
 	return input
 }
 
@@ -1326,6 +1350,26 @@ func ValidateProductionOrderInput(input CreateProductionOrderInput) error {
 	if input.PlannedDate != "" {
 		if _, err := time.Parse("2006-01-02", input.PlannedDate); err != nil {
 			return fmt.Errorf("%w: planned_date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+	if len(input.Participants) > 0 {
+		seen := make(map[string]bool, len(input.Participants))
+		var totalShare float64
+		for i, p := range input.Participants {
+			if strings.TrimSpace(p.EmployeeID) == "" {
+				return fmt.Errorf("%w: participants[%d].employee_id is required", ErrValidation, i)
+			}
+			if seen[p.EmployeeID] {
+				return fmt.Errorf("%w: participants[%d] is duplicated", ErrValidation, i)
+			}
+			seen[p.EmployeeID] = true
+			if p.SharePercent <= 0 || p.SharePercent > 100 {
+				return fmt.Errorf("%w: participants[%d].share_percent must be between 0 and 100", ErrValidation, i)
+			}
+			totalShare += p.SharePercent
+		}
+		if math.Abs(totalShare-100) > 0.01 {
+			return fmt.Errorf("%w: participant shares must sum to 100%%", ErrValidation)
 		}
 	}
 	return nil

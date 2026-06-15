@@ -25,6 +25,7 @@ part 'services_screen.dart';
 part 'catalog_screen.dart';
 part 'salary_screen.dart';
 part 'salary_payroll.dart';
+part 'salary_settings.dart';
 part 'salary_models.dart';
 part 'reports_screen.dart';
 part 'taxes_screen.dart';

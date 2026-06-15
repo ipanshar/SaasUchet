@@ -1150,6 +1150,22 @@ class BusinessApiClient extends BusinessGateway {
   }
 
   @override
+  Future<void> setRecipePayrollAmount({
+    required String accessToken,
+    required String recipeId,
+    required int amount,
+  }) async {
+    final response = await _client
+        .put(
+          ApiConfig.payrollRecipeRateUri(recipeId),
+          headers: _headers(accessToken),
+          body: jsonEncode({'amount': amount}),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+  }
+
+  @override
   void dispose() {
     _client.close();
   }

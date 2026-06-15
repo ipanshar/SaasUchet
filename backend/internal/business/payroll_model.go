@@ -11,36 +11,40 @@ import (
 // Employee is one company employee in the payroll directory. Monetary fields are
 // whole tenge (int), matching the rest of the money models.
 type Employee struct {
-	ID              string `json:"id"`
-	FullName        string `json:"full_name"`
-	Position        string `json:"position"`
-	IIN             string `json:"iin,omitempty"`
-	Phone           string `json:"phone,omitempty"`
-	SalaryType      string `json:"salary_type"`
-	MonthlySalary   int    `json:"monthly_salary"`
-	HourlyRate      int    `json:"hourly_rate"`
-	PieceRate       int    `json:"piece_rate"`
-	PieceRateSource string `json:"piece_rate_source"`
-	StandardDays    int    `json:"standard_days"`
-	HireDate        string `json:"hire_date,omitempty"`
-	Status          string `json:"status"`
-	Notes           string `json:"notes,omitempty"`
+	ID              string  `json:"id"`
+	FullName        string  `json:"full_name"`
+	Position        string  `json:"position"`
+	IIN             string  `json:"iin,omitempty"`
+	Phone           string  `json:"phone,omitempty"`
+	SalaryType      string  `json:"salary_type"`
+	MonthlySalary   int     `json:"monthly_salary"`
+	HourlyRate      int     `json:"hourly_rate"`
+	PieceRate       int     `json:"piece_rate"`
+	PieceRateSource string  `json:"piece_rate_source"`
+	SalesPercent    float64 `json:"sales_percent"`
+	SalesBasis      string  `json:"sales_basis"`
+	StandardDays    int     `json:"standard_days"`
+	HireDate        string  `json:"hire_date,omitempty"`
+	Status          string  `json:"status"`
+	Notes           string  `json:"notes,omitempty"`
 }
 
 type CreateEmployeeInput struct {
-	FullName        string `json:"full_name"`
-	Position        string `json:"position"`
-	IIN             string `json:"iin"`
-	Phone           string `json:"phone"`
-	SalaryType      string `json:"salary_type"`
-	MonthlySalary   int    `json:"monthly_salary"`
-	HourlyRate      int    `json:"hourly_rate"`
-	PieceRate       int    `json:"piece_rate"`
-	PieceRateSource string `json:"piece_rate_source"`
-	StandardDays    int    `json:"standard_days"`
-	HireDate        string `json:"hire_date"`
-	Status          string `json:"status"`
-	Notes           string `json:"notes"`
+	FullName        string  `json:"full_name"`
+	Position        string  `json:"position"`
+	IIN             string  `json:"iin"`
+	Phone           string  `json:"phone"`
+	SalaryType      string  `json:"salary_type"`
+	MonthlySalary   int     `json:"monthly_salary"`
+	HourlyRate      int     `json:"hourly_rate"`
+	PieceRate       int     `json:"piece_rate"`
+	PieceRateSource string  `json:"piece_rate_source"`
+	SalesPercent    float64 `json:"sales_percent"`
+	SalesBasis      string  `json:"sales_basis"`
+	StandardDays    int     `json:"standard_days"`
+	HireDate        string  `json:"hire_date"`
+	Status          string  `json:"status"`
+	Notes           string  `json:"notes"`
 }
 
 func NormalizeEmployeeInput(input CreateEmployeeInput) CreateEmployeeInput {
@@ -50,6 +54,7 @@ func NormalizeEmployeeInput(input CreateEmployeeInput) CreateEmployeeInput {
 	input.Phone = normalizePhone(input.Phone)
 	input.SalaryType = strings.TrimSpace(strings.ToLower(input.SalaryType))
 	input.PieceRateSource = strings.TrimSpace(strings.ToLower(input.PieceRateSource))
+	input.SalesBasis = strings.TrimSpace(strings.ToLower(input.SalesBasis))
 	input.Status = strings.TrimSpace(strings.ToLower(input.Status))
 	input.HireDate = strings.TrimSpace(input.HireDate)
 	input.Notes = strings.TrimSpace(input.Notes)
@@ -59,6 +64,15 @@ func NormalizeEmployeeInput(input CreateEmployeeInput) CreateEmployeeInput {
 	}
 	if input.PieceRateSource == "" {
 		input.PieceRateSource = "none"
+	}
+	if input.SalesBasis == "" {
+		input.SalesBasis = "revenue"
+	}
+	if input.SalesPercent < 0 {
+		input.SalesPercent = 0
+	}
+	if input.SalesPercent > 100 {
+		input.SalesPercent = 100
 	}
 	if input.Status == "" {
 		input.Status = "active"
@@ -82,6 +96,14 @@ func ValidateEmployeeInput(input CreateEmployeeInput) error {
 	case "none", "production", "sales", "purchases":
 	default:
 		return fmt.Errorf("%w: piece rate source is invalid", ErrValidation)
+	}
+	switch input.SalesBasis {
+	case "revenue", "profit":
+	default:
+		return fmt.Errorf("%w: sales basis is invalid", ErrValidation)
+	}
+	if input.SalesPercent < 0 || input.SalesPercent > 100 {
+		return fmt.Errorf("%w: sales percent must be between 0 and 100", ErrValidation)
 	}
 	switch input.Status {
 	case "active", "inactive":

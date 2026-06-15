@@ -264,5 +264,11 @@ abstract class BusinessGateway {
     required Map<String, dynamic> payload,
   });
 
+  Future<void> setRecipePayrollAmount({
+    required String accessToken,
+    required String recipeId,
+    required int amount,
+  });
+
   void dispose() {}
 }

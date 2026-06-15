@@ -27,6 +27,7 @@ class _ProductionScreenState extends State<_ProductionScreen>
   List<_ProductionOrder> _orders = [];
   List<_Service> _services = [];
   List<_Warehouse> _warehouses = [];
+  List<_Employee> _employees = [];
 
   bool _isLoading = true;
   String? _loadError;
@@ -57,6 +58,7 @@ class _ProductionScreenState extends State<_ProductionScreen>
             .fetchProductionOrders(accessToken: widget.accessToken),
         widget.businessGateway.fetchServices(accessToken: widget.accessToken),
         widget.businessGateway.fetchWarehouses(accessToken: widget.accessToken),
+        widget.businessGateway.fetchEmployees(accessToken: widget.accessToken),
       ]);
       if (!mounted) return;
       setState(() {
@@ -64,6 +66,7 @@ class _ProductionScreenState extends State<_ProductionScreen>
         _orders = results[1].map(_productionOrderFromJson).toList();
         _services = results[2].map(_serviceFromJson).toList();
         _warehouses = results[3].map(_warehouseFromJson).toList();
+        _employees = results[4].map(_employeeFromJson).toList();
         _isLoading = false;
       });
     } catch (e) {
@@ -235,6 +238,7 @@ class _ProductionScreenState extends State<_ProductionScreen>
         initialOrder: initialOrder,
         recipes: _recipes,
         warehouses: _warehouses,
+        employees: _employees,
         accessToken: widget.accessToken,
         gateway: widget.businessGateway,
         onSaved: _loadData,
@@ -996,6 +1000,7 @@ class _OrderSheet extends StatefulWidget {
     this.initialOrder,
     required this.recipes,
     required this.warehouses,
+    required this.employees,
     required this.accessToken,
     required this.gateway,
     required this.onSaved,
@@ -1004,6 +1009,7 @@ class _OrderSheet extends StatefulWidget {
   final _ProductionOrder? initialOrder;
   final List<_Recipe> recipes;
   final List<_Warehouse> warehouses;
+  final List<_Employee> employees;
   final String accessToken;
   final BusinessGateway gateway;
   final VoidCallback onSaved;
@@ -1023,6 +1029,7 @@ class _OrderSheetState extends State<_OrderSheet> {
   String? _selectedRecipeId;
   String? _selectedSourceWarehouseId;
   String? _selectedOutputWarehouseId;
+  final List<_MutableParticipant> _participants = [];
 
   bool _isSubmitting = false;
 
@@ -1043,7 +1050,16 @@ class _OrderSheetState extends State<_OrderSheet> {
         o?.sourceWarehouseId.isEmpty == true ? null : o?.sourceWarehouseId;
     _selectedOutputWarehouseId =
         o?.outputWarehouseId.isEmpty == true ? null : o?.outputWarehouseId;
+    if (o != null) {
+      _participants.addAll(o.participants.map((p) => _MutableParticipant(
+            employeeId: p.employeeId,
+            share: p.sharePercent,
+          )));
+    }
   }
+
+  double get _totalShare =>
+      _participants.fold(0.0, (sum, p) => sum + p.share);
 
   @override
   void dispose() {
@@ -1072,6 +1088,14 @@ class _OrderSheetState extends State<_OrderSheet> {
           const SnackBar(content: Text('Выберите склад выхода продукции')));
       return;
     }
+    final filledParticipants =
+        _participants.where((p) => p.employeeId.isNotEmpty).toList();
+    if (filledParticipants.isNotEmpty &&
+        (_totalShare - 100).abs() > 0.01) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Доли участников должны давать 100%')));
+      return;
+    }
     setState(() => _isSubmitting = true);
     try {
       final qty = double.tryParse(_qtyCtrl.text.replaceAll(',', '.')) ?? 1.0;
@@ -1085,6 +1109,12 @@ class _OrderSheetState extends State<_OrderSheet> {
         'planned_quantity': qty,
         'planned_date': _dateCtrl.text.trim(),
         'notes': _notesCtrl.text.trim(),
+        'participants': filledParticipants
+            .map((p) => {
+                  'employee_id': p.employeeId,
+                  'share_percent': p.share,
+                })
+            .toList(),
       };
       await widget.gateway.createProductionOrder(
           accessToken: widget.accessToken, payload: payload);
@@ -1205,6 +1235,51 @@ class _OrderSheetState extends State<_OrderSheet> {
                     decoration: _inputDecoration('Необязательно'),
                     maxLines: 3,
                   ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text('Участники производства',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 15)),
+                      ),
+                      if (_participants.isNotEmpty)
+                        Text('Σ ${_formatQty(_totalShare)}%',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: (_totalShare - 100).abs() < 0.01
+                                    ? const Color(0xFF00A86B)
+                                    : const Color(0xFFEF4444))),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Сумма за рецепт делится между участниками по долям (в сумме 100%). Долю получает каждый из списка.',
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  if (widget.employees.isEmpty)
+                    const Text('Сначала добавьте сотрудников в разделе «Зарплата».',
+                        style:
+                            TextStyle(color: Color(0xFFEF4444), fontSize: 12))
+                  else ...[
+                    ..._participants.asMap().entries.map(
+                          (e) => _ParticipantRow(
+                            item: e.value,
+                            employees: widget.employees,
+                            onChanged: () => setState(() {}),
+                            onRemove: () =>
+                                setState(() => _participants.removeAt(e.key)),
+                          ),
+                        ),
+                    TextButton.icon(
+                      onPressed: () => setState(
+                          () => _participants.add(_MutableParticipant())),
+                      icon: const Icon(Icons.person_add_alt_1_rounded),
+                      label: const Text('Добавить участника'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1270,6 +1345,15 @@ class _MutableOutput {
   String productName;
   double qty;
   String unit;
+}
+
+class _MutableParticipant {
+  _MutableParticipant({
+    this.employeeId = '',
+    this.share = 0.0,
+  });
+  String employeeId;
+  double share;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1450,6 +1534,71 @@ class _OutputRow extends StatelessWidget {
                   const TextInputType.numberWithOptions(decimal: true),
               onChanged: (v) {
                 item.qty = double.tryParse(v.replaceAll(',', '.')) ?? 1.0;
+              },
+            ),
+          ),
+          IconButton(
+            onPressed: onRemove,
+            icon: const Icon(Icons.close_rounded,
+                color: Color(0xFFEF4444), size: 20),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ParticipantRow extends StatelessWidget {
+  const _ParticipantRow({
+    required this.item,
+    required this.employees,
+    required this.onChanged,
+    required this.onRemove,
+  });
+
+  final _MutableParticipant item;
+  final List<_Employee> employees;
+  final VoidCallback onChanged;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey(item.employeeId),
+              initialValue: item.employeeId.isEmpty ? null : item.employeeId,
+              decoration: _inputDecoration('Сотрудник'),
+              isExpanded: true,
+              items: employees
+                  .map((e) => DropdownMenuItem(
+                        value: e.id,
+                        child: Text(e.fullName,
+                            overflow: TextOverflow.ellipsis),
+                      ))
+                  .toList(),
+              onChanged: (v) {
+                if (v == null) return;
+                item.employeeId = v;
+                onChanged();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 72,
+            child: TextFormField(
+              initialValue: item.share == 0 ? '' : _formatQty(item.share),
+              decoration: _inputDecoration('%'),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (v) {
+                item.share = double.tryParse(v.replaceAll(',', '.')) ?? 0;
+                onChanged();
               },
             ),
           ),

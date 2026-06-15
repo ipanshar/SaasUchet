@@ -77,6 +77,76 @@ func TestValidateEmployeeInput(t *testing.T) {
 	}
 }
 
+func TestValidateProductionOrderParticipants(t *testing.T) {
+	t.Parallel()
+
+	base := CreateProductionOrderInput{
+		RecipeID:          "r1",
+		SourceWarehouseID: "w1",
+		OutputWarehouseID: "w2",
+		PlannedQuantity:   1,
+	}
+
+	tests := []struct {
+		name         string
+		participants []CreateProductionParticipantInput
+		wantErr      bool
+	}{
+		{name: "no participants ok", participants: nil},
+		{
+			name: "shares sum to 100 ok",
+			participants: []CreateProductionParticipantInput{
+				{EmployeeID: "e1", SharePercent: 60},
+				{EmployeeID: "e2", SharePercent: 40},
+			},
+		},
+		{
+			name: "shares not 100",
+			participants: []CreateProductionParticipantInput{
+				{EmployeeID: "e1", SharePercent: 60},
+				{EmployeeID: "e2", SharePercent: 30},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate employee",
+			participants: []CreateProductionParticipantInput{
+				{EmployeeID: "e1", SharePercent: 50},
+				{EmployeeID: "e1", SharePercent: 50},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty employee id",
+			participants: []CreateProductionParticipantInput{
+				{EmployeeID: "", SharePercent: 100},
+			},
+			wantErr: true,
+		},
+		{
+			name: "share out of range",
+			participants: []CreateProductionParticipantInput{
+				{EmployeeID: "e1", SharePercent: 150},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base
+			in.Participants = tc.participants
+			err := ValidateProductionOrderInput(NormalizeProductionOrderInput(in))
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestComputeBaseAmounts(t *testing.T) {
 	t.Parallel()
 

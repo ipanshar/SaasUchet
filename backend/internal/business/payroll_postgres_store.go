@@ -25,6 +25,7 @@ func (s *PostgresStore) ListEmployees(user auth.User) ([]Employee, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id::text, full_name, position, COALESCE(iin,''), COALESCE(phone,''),
 		        salary_type, monthly_salary, hourly_rate, piece_rate, piece_rate_source,
+		        sales_percent, sales_basis,
 		        standard_days, COALESCE(hire_date::text,''), status, notes
 		 FROM employees
 		 WHERE company_id = $1::uuid AND archived_at IS NULL
@@ -66,14 +67,17 @@ func (s *PostgresStore) CreateEmployee(user auth.User, input CreateEmployeeInput
 		`INSERT INTO employees
 		   (id, company_id, full_name, position, iin, phone, salary_type,
 		    monthly_salary, hourly_rate, piece_rate, piece_rate_source,
+		    sales_percent, sales_basis,
 		    standard_days, hire_date, status, notes, created_at, updated_at)
 		 VALUES
 		   ($1::uuid, $2::uuid, $3, $4, NULLIF($5,''), NULLIF($6,''), $7,
 		    $8, $9, $10, $11,
-		    $12, NULLIF($13,'')::date, $14, $15, NOW(), NOW())`,
+		    $12, $13,
+		    $14, NULLIF($15,'')::date, $16, $17, NOW(), NOW())`,
 		id, companyID, normalized.FullName, normalized.Position, normalized.IIN, normalized.Phone,
 		normalized.SalaryType, normalized.MonthlySalary, normalized.HourlyRate, normalized.PieceRate,
-		normalized.PieceRateSource, normalized.StandardDays, normalized.HireDate, normalized.Status, normalized.Notes,
+		normalized.PieceRateSource, normalized.SalesPercent, normalized.SalesBasis,
+		normalized.StandardDays, normalized.HireDate, normalized.Status, normalized.Notes,
 	)
 	if err != nil {
 		return Employee{}, err
@@ -100,11 +104,13 @@ func (s *PostgresStore) UpdateEmployee(user auth.User, employeeID string, input 
 		`UPDATE employees SET
 		   full_name=$3, position=$4, iin=NULLIF($5,''), phone=NULLIF($6,''), salary_type=$7,
 		   monthly_salary=$8, hourly_rate=$9, piece_rate=$10, piece_rate_source=$11,
-		   standard_days=$12, hire_date=NULLIF($13,'')::date, status=$14, notes=$15, updated_at=NOW()
+		   sales_percent=$12, sales_basis=$13,
+		   standard_days=$14, hire_date=NULLIF($15,'')::date, status=$16, notes=$17, updated_at=NOW()
 		 WHERE id=$1::uuid AND company_id=$2::uuid AND archived_at IS NULL`,
 		employeeID, companyID, normalized.FullName, normalized.Position, normalized.IIN, normalized.Phone,
 		normalized.SalaryType, normalized.MonthlySalary, normalized.HourlyRate, normalized.PieceRate,
-		normalized.PieceRateSource, normalized.StandardDays, normalized.HireDate, normalized.Status, normalized.Notes,
+		normalized.PieceRateSource, normalized.SalesPercent, normalized.SalesBasis,
+		normalized.StandardDays, normalized.HireDate, normalized.Status, normalized.Notes,
 	)
 	if err != nil {
 		return Employee{}, err
@@ -143,6 +149,7 @@ func (s *PostgresStore) getEmployee(ctx context.Context, companyID string, emplo
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id::text, full_name, position, COALESCE(iin,''), COALESCE(phone,''),
 		        salary_type, monthly_salary, hourly_rate, piece_rate, piece_rate_source,
+		        sales_percent, sales_basis,
 		        standard_days, COALESCE(hire_date::text,''), status, notes
 		 FROM employees
 		 WHERE id=$1::uuid AND company_id=$2::uuid`,
@@ -161,6 +168,7 @@ func scanEmployee(row rowScanner) (Employee, error) {
 	if err := row.Scan(
 		&emp.ID, &emp.FullName, &emp.Position, &emp.IIN, &emp.Phone,
 		&emp.SalaryType, &monthly, &hourly, &piece, &emp.PieceRateSource,
+		&emp.SalesPercent, &emp.SalesBasis,
 		&emp.StandardDays, &emp.HireDate, &emp.Status, &emp.Notes,
 	); err != nil {
 		return Employee{}, err
@@ -465,47 +473,73 @@ func (s *PostgresStore) CalculatePayroll(user auth.User, periodID string) (Payro
 	return s.loadPayrollPeriod(ctx, companyID, periodID)
 }
 
-// aggregatePieceAmount auto-sums piece-rate work from completed source documents
-// attributed to the employee within the period.
+// aggregatePieceAmount sums all rule-based piece earnings for the employee within
+// the period: production participation (always), sales commission (if configured),
+// and a legacy per-document purchases rate.
 func (s *PostgresStore) aggregatePieceAmount(ctx context.Context, companyID string, emp Employee, periodStart string, periodEnd string) (int, error) {
-	if emp.PieceRate <= 0 {
-		return 0, nil
+	total := 0.0
+
+	// Production: distribute each completed order's recipe payroll amount (× batches)
+	// among its participants by their share. Applies to any participant.
+	var productionShare float64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(r.payroll_amount * po.planned_quantity * pp.share_percent / 100), 0)
+		 FROM production_order_participants pp
+		 JOIN production_orders po ON po.id = pp.order_id
+		 JOIN recipes r ON r.id = po.recipe_id
+		 WHERE po.company_id=$1::uuid AND pp.employee_id=$2::uuid AND po.status='completed'
+		   AND COALESCE(po.planned_date, po.created_at::date) >= $3::date
+		   AND COALESCE(po.planned_date, po.created_at::date) < $4::date`,
+		companyID, emp.ID, periodStart, periodEnd,
+	).Scan(&productionShare); err != nil {
+		return 0, err
 	}
-	switch emp.PieceRateSource {
-	case "production":
-		var qty float64
-		err := s.db.QueryRowContext(ctx,
-			`SELECT COALESCE(SUM(planned_quantity), 0)
-			 FROM production_orders
-			 WHERE company_id=$1::uuid AND employee_id=$2::uuid AND status='completed'
-			   AND COALESCE(planned_date, created_at::date) >= $3::date
-			   AND COALESCE(planned_date, created_at::date) < $4::date`,
+	total += productionShare
+
+	// Sales commission: percent of revenue or profit on posted sale documents
+	// where the employee is the salesperson.
+	if emp.SalesPercent > 0 {
+		var revenue, profit float64
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT
+			    COALESCE(SUM(l.quantity * l.unit_price), 0),
+			    COALESCE(SUM(l.quantity * (l.unit_price - l.unit_cost)), 0)
+			 FROM inventory_document_lines l
+			 JOIN inventory_documents d ON d.id = l.document_id
+			 WHERE d.company_id=$1::uuid AND d.employee_id=$2::uuid AND d.status='posted'
+			   AND d.document_type='sale_issue'
+			   AND d.document_date >= $3::date AND d.document_date < $4::date`,
 			companyID, emp.ID, periodStart, periodEnd,
-		).Scan(&qty)
-		if err != nil {
+		).Scan(&revenue, &profit); err != nil {
 			return 0, err
 		}
-		return int(math.Round(qty * float64(emp.PieceRate))), nil
-	case "sales", "purchases":
-		documentType := "sale_issue"
-		if emp.PieceRateSource == "purchases" {
-			documentType = "purchase_receipt"
+		base := revenue
+		if emp.SalesBasis == "profit" {
+			base = profit
 		}
+		total += emp.SalesPercent / 100 * base
+	}
+
+	// Purchases (legacy, no UI): per-document rate when configured.
+	if emp.PieceRateSource == "purchases" && emp.PieceRate > 0 {
 		var count int
-		err := s.db.QueryRowContext(ctx,
+		if err := s.db.QueryRowContext(ctx,
 			`SELECT COUNT(*)
 			 FROM inventory_documents
 			 WHERE company_id=$1::uuid AND employee_id=$2::uuid AND status='posted'
-			   AND document_type=$5 AND document_date >= $3::date AND document_date < $4::date`,
-			companyID, emp.ID, periodStart, periodEnd, documentType,
-		).Scan(&count)
-		if err != nil {
+			   AND document_type='purchase_receipt'
+			   AND document_date >= $3::date AND document_date < $4::date`,
+			companyID, emp.ID, periodStart, periodEnd,
+		).Scan(&count); err != nil {
 			return 0, err
 		}
-		return count * emp.PieceRate, nil
-	default:
-		return 0, nil
+		total += float64(count * emp.PieceRate)
 	}
+
+	if total < 0 {
+		total = 0
+	}
+	return int(math.Round(total)), nil
 }
 
 // computeBaseAmounts derives base salary, overtime pay and vacation pay from the

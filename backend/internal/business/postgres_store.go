@@ -1136,9 +1136,9 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 	if err = tx.QueryRowContext(
 		ctx,
 		`INSERT INTO inventory_documents (
-		   company_id, document_no, document_type, status, document_date, warehouse_id, related_warehouse_id, client_id, note, created_by_user_id, posted_by_user_id, posted_at, created_at, updated_at
+		   company_id, document_no, document_type, status, document_date, warehouse_id, related_warehouse_id, client_id, employee_id, note, created_by_user_id, posted_by_user_id, posted_at, created_at, updated_at
 		 ) VALUES (
-		   $1::uuid, $2, $3, 'posted', $4, $5::uuid, $6::uuid, $7::uuid, NULLIF($8, ''), $9, $9, NOW(), NOW(), NOW()
+		   $1::uuid, $2, $3, 'posted', $4, $5::uuid, $6::uuid, $7::uuid, $8::uuid, NULLIF($9, ''), $10, $10, NOW(), NOW(), NOW()
 		 )
 		 RETURNING id::text`,
 		companyID,
@@ -1148,6 +1148,7 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 		sourceWarehouseID,
 		nullUUID(relatedWarehouseID),
 		nullUUID(normalized.ClientID),
+		nullUUID(normalized.EmployeeID),
 		normalized.Note,
 		user.ID,
 	).Scan(&documentID); err != nil {
@@ -4198,7 +4199,7 @@ func (s *PostgresStore) ListRecipes(user auth.User) ([]Recipe, error) {
 
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT id::text, name, description
+		`SELECT id::text, name, description, payroll_amount
 		 FROM recipes
 		 WHERE company_id = $1 AND archived_at IS NULL
 		 ORDER BY created_at DESC`,
@@ -4213,9 +4214,11 @@ func (s *PostgresStore) ListRecipes(user auth.User) ([]Recipe, error) {
 	indexByID := make(map[string]int)
 	for rows.Next() {
 		var r Recipe
-		if err := rows.Scan(&r.ID, &r.Name, &r.Description); err != nil {
+		var payrollAmount float64
+		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &payrollAmount); err != nil {
 			return nil, err
 		}
+		r.PayrollAmount = int(payrollAmount)
 		r.Ingredients = []RecipeIngredient{}
 		r.Services = []RecipeService{}
 		r.Outputs = []RecipeOutput{}
@@ -4336,16 +4339,17 @@ func (s *PostgresStore) CreateRecipe(user auth.User, input CreateRecipeInput) (R
 	recipeID := mustGenerateProductID()
 	if _, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO recipes (id, company_id, name, description, created_at, updated_at)
-		 VALUES ($1::uuid, $2::uuid, $3, $4, NOW(), NOW())`,
-		recipeID, companyID, normalized.Name, normalized.Description,
+		`INSERT INTO recipes (id, company_id, name, description, payroll_amount, created_at, updated_at)
+		 VALUES ($1::uuid, $2::uuid, $3, $4, $5, NOW(), NOW())`,
+		recipeID, companyID, normalized.Name, normalized.Description, normalized.PayrollAmount,
 	); err != nil {
 		return Recipe{}, err
 	}
 
 	recipe := Recipe{
 		ID: recipeID, Name: normalized.Name, Description: normalized.Description,
-		Ingredients: []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
+		PayrollAmount: normalized.PayrollAmount,
+		Ingredients:   []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
 	}
 
 	for _, ing := range normalized.Ingredients {
@@ -4415,9 +4419,9 @@ func (s *PostgresStore) UpdateRecipe(user auth.User, recipeID string, input Crea
 	}()
 
 	result, err := tx.ExecContext(ctx,
-		`UPDATE recipes SET name=$3, description=$4, updated_at=NOW()
+		`UPDATE recipes SET name=$3, description=$4, payroll_amount=$5, updated_at=NOW()
 		 WHERE id=$1::uuid AND company_id=$2::uuid AND archived_at IS NULL`,
-		recipeID, companyID, normalized.Name, normalized.Description,
+		recipeID, companyID, normalized.Name, normalized.Description, normalized.PayrollAmount,
 	)
 	if err != nil {
 		return Recipe{}, err
@@ -4434,7 +4438,8 @@ func (s *PostgresStore) UpdateRecipe(user auth.User, recipeID string, input Crea
 
 	recipe := Recipe{
 		ID: recipeID, Name: normalized.Name, Description: normalized.Description,
-		Ingredients: []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
+		PayrollAmount: normalized.PayrollAmount,
+		Ingredients:   []RecipeIngredient{}, Services: []RecipeService{}, Outputs: []RecipeOutput{},
 	}
 
 	for _, ing := range normalized.Ingredients {
@@ -4477,6 +4482,34 @@ func (s *PostgresStore) UpdateRecipe(user auth.User, recipeID string, input Crea
 		return Recipe{}, err
 	}
 	return recipe, nil
+}
+
+// SetRecipePayrollAmount updates only the recipe's payroll amount, used by the
+// salary settings screen without touching the recipe composition.
+func (s *PostgresStore) SetRecipePayrollAmount(user auth.User, recipeID string, amount int) error {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return err
+	}
+	if amount < 0 {
+		return fmt.Errorf("%w: amount must be zero or greater", ErrValidation)
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE recipes SET payroll_amount=$3, updated_at=NOW()
+		 WHERE id=$1::uuid AND company_id=$2::uuid AND archived_at IS NULL`,
+		recipeID, companyID, amount,
+	)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return fmt.Errorf("%w: recipe not found", ErrValidation)
+	}
+	return nil
 }
 
 func (s *PostgresStore) DeleteRecipe(user auth.User, recipeID string) error {
@@ -4544,6 +4577,7 @@ func (s *PostgresStore) ListProductionOrders(user auth.User) ([]ProductionOrder,
 	defer rows.Close()
 
 	orders := make([]ProductionOrder, 0)
+	indexByID := make(map[string]int)
 	for rows.Next() {
 		var o ProductionOrder
 		if err := rows.Scan(
@@ -4555,9 +4589,41 @@ func (s *PostgresStore) ListProductionOrders(user auth.User) ([]ProductionOrder,
 		); err != nil {
 			return nil, err
 		}
+		o.Participants = []ProductionParticipant{}
+		indexByID[o.ID] = len(orders)
 		orders = append(orders, o)
 	}
-	return orders, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(orders) == 0 {
+		return orders, nil
+	}
+
+	partRows, err := s.db.QueryContext(ctx,
+		`SELECT pp.order_id::text, pp.employee_id::text, COALESCE(e.full_name,''), pp.share_percent
+		 FROM production_order_participants pp
+		 JOIN production_orders po ON po.id = pp.order_id
+		 LEFT JOIN employees e ON e.id = pp.employee_id
+		 WHERE po.company_id = $1
+		 ORDER BY pp.share_percent DESC`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer partRows.Close()
+	for partRows.Next() {
+		var orderID string
+		var p ProductionParticipant
+		if err := partRows.Scan(&orderID, &p.EmployeeID, &p.EmployeeName, &p.SharePercent); err != nil {
+			return nil, err
+		}
+		if idx, ok := indexByID[orderID]; ok {
+			orders[idx].Participants = append(orders[idx].Participants, p)
+		}
+	}
+	return orders, partRows.Err()
 }
 
 func (s *PostgresStore) CreateProductionOrder(user auth.User, input CreateProductionOrderInput) (ProductionOrder, error) {
@@ -4584,7 +4650,17 @@ func (s *PostgresStore) CreateProductionOrder(user auth.User, input CreateProduc
 		plannedDate = &normalized.PlannedDate
 	}
 
-	_, err = s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ProductionOrder{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.ExecContext(ctx,
 		`INSERT INTO production_orders
 		   (id, company_id, document_no, recipe_id, source_warehouse_id, output_warehouse_id,
 		    batch_number, responsible_employee, planned_quantity, status, planned_date, notes,
@@ -4597,8 +4673,21 @@ func (s *PostgresStore) CreateProductionOrder(user auth.User, input CreateProduc
 		normalized.RecipeID, normalized.SourceWarehouseID, normalized.OutputWarehouseID,
 		normalized.BatchNumber, normalized.ResponsibleEmployee, normalized.PlannedQuantity,
 		plannedDate, normalized.Notes, user.ID,
-	)
-	if err != nil {
+	); err != nil {
+		return ProductionOrder{}, err
+	}
+
+	for _, p := range normalized.Participants {
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO production_order_participants (id, order_id, employee_id, share_percent, created_at)
+			 VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3, NOW())`,
+			orderID, p.EmployeeID, p.SharePercent,
+		); err != nil {
+			return ProductionOrder{}, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
 		return ProductionOrder{}, err
 	}
 

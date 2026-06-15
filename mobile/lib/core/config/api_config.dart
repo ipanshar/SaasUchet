@@ -102,6 +102,9 @@ class ApiConfig {
   static Uri payrollEntryUri(String periodId, String entryId) =>
       Uri.parse('$baseUrl/api/v1/payroll/periods/$periodId/entries/$entryId');
 
+  static Uri payrollRecipeRateUri(String recipeId) =>
+      Uri.parse('$baseUrl/api/v1/payroll/recipe-rates/$recipeId');
+
   static Uri get companiesUri => Uri.parse('$baseUrl/api/v1/companies');
 
   static Uri companyMembersUri(String companyId) =>
