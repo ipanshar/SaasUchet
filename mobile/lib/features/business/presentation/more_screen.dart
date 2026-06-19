@@ -560,7 +560,7 @@ class _MoreScreenState extends State<_MoreScreen> {
                   iconColor: _hiddenTabIconColor(widget.hiddenTabs[index]),
                   iconTone: _hiddenTabIconTone(widget.hiddenTabs[index]),
                   title: tabLabel(widget.hiddenTabs[index]),
-                  subtitle: 'Открыть раздел',
+                  subtitle: _hiddenTabSubtitle(widget.hiddenTabs[index]),
                 ),
               ),
             ),
@@ -570,6 +570,36 @@ class _MoreScreenState extends State<_MoreScreen> {
         ],
       ),
     );
+  }
+
+  String _hiddenTabSubtitle(BusinessTab tab) {
+    switch (tab) {
+      case BusinessTab.crm:
+        return 'Клиенты, продажи и долги';
+      case BusinessTab.warehouse:
+        return 'Остатки, склады и движения';
+      case BusinessTab.finance:
+        return 'Счета, операции и документы';
+      case BusinessTab.production:
+        return 'Рецепты и производственные заказы';
+      case BusinessTab.sales:
+        return 'Заказы, счета и накладные';
+      case BusinessTab.purchases:
+        return 'Поставщики, закупки и приход';
+      case BusinessTab.services:
+        return 'Каталог и оказание услуг';
+      case BusinessTab.catalog:
+        return 'Товары, услуги и цены';
+      case BusinessTab.salary:
+        return 'Сотрудники, начисления и выплаты';
+      case BusinessTab.reports:
+        return 'Показатели, сводки и анализ';
+      case BusinessTab.taxes:
+        return 'Налоги, ставки и обязательства';
+      case BusinessTab.dashboard:
+      case BusinessTab.more:
+        return 'Раздел приложения';
+    }
   }
 
   Color _hiddenTabIconColor(BusinessTab tab) {
