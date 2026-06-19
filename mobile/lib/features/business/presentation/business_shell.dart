@@ -539,13 +539,14 @@ class _BusinessShellState extends State<BusinessShell> {
         ? GlobalKey<_WarehouseScreenState>()
         : null;
 
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final selectedTab = await Navigator.of(context).push<BusinessTab?>(
+      MaterialPageRoute<BusinessTab?>(
         builder: (context) => _HiddenTabRouteScreen(
           tab: tab,
           title: tabLabel(tab),
           initialOverview: overview,
           reloadOverview: _refreshOverviewSnapshot,
+          bottomNavTabs: _activeTabs,
           screenBuilder: (overview, onOverviewChanged, routeWarehouseKey) =>
               _buildScreen(
             tab,
@@ -567,6 +568,12 @@ class _BusinessShellState extends State<BusinessShell> {
 
     if (!mounted) {
       return;
+    }
+    if (selectedTab != null && _activeTabs.contains(selectedTab)) {
+      setState(() {
+        _activeTab = selectedTab;
+        _isFabExpanded = false;
+      });
     }
     await _loadOverview();
   }
@@ -791,6 +798,7 @@ class _HiddenTabRouteScreen extends StatefulWidget {
     required this.title,
     required this.initialOverview,
     required this.reloadOverview,
+    required this.bottomNavTabs,
     required this.screenBuilder,
     this.fabActions = const [],
     this.onFabActionSelected,
@@ -801,6 +809,7 @@ class _HiddenTabRouteScreen extends StatefulWidget {
   final String title;
   final _OverviewData initialOverview;
   final Future<_OverviewData> Function() reloadOverview;
+  final List<BusinessTab> bottomNavTabs;
   final Widget Function(
     _OverviewData overview,
     Future<void> Function() onOverviewChanged,
@@ -890,6 +899,13 @@ class _HiddenTabRouteScreenState extends State<_HiddenTabRouteScreen> {
               ),
             ),
         ],
+      ),
+      bottomNavigationBar: _BottomNavBar(
+        activeTab: BusinessTab.more,
+        tabs: widget.bottomNavTabs,
+        onTabSelected: (tab) {
+          Navigator.of(context).pop(tab);
+        },
       ),
     );
   }
