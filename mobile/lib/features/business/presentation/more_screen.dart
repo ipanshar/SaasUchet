@@ -9,6 +9,8 @@ class _MoreScreen extends StatefulWidget {
     required this.onNavSettingsOpen,
     required this.businessGateway,
     required this.onOpenCompanyEditor,
+    required this.hiddenTabs,
+    required this.onOpenHiddenTab,
     this.activeCompany,
   });
 
@@ -19,6 +21,8 @@ class _MoreScreen extends StatefulWidget {
   final VoidCallback onNavSettingsOpen;
   final BusinessGateway businessGateway;
   final Future<void> Function() onOpenCompanyEditor;
+  final List<BusinessTab> hiddenTabs;
+  final Future<void> Function(BusinessTab tab) onOpenHiddenTab;
   final _Company? activeCompany;
 
   @override
@@ -381,35 +385,7 @@ class _MoreScreenState extends State<_MoreScreen> {
               offset: const Offset(0, -18),
               child: Column(
                 children: [
-                  const _BusinessCard(
-                    child: Column(
-                      children: [
-                        _MenuTile(
-                          icon: Icons.shopping_bag_rounded,
-                          iconColor: Color(0xFF00A86B),
-                          iconTone: Color(0x1400A86B),
-                          title: 'Продажи',
-                          subtitle: 'Заказы, счета, накладные',
-                        ),
-                        Divider(height: 24),
-                        _MenuTile(
-                          icon: Icons.inventory_rounded,
-                          iconColor: Color(0xFF3B82F6),
-                          iconTone: Color(0x143B82F6),
-                          title: 'Закупки',
-                          subtitle: 'Поставщики, заказы',
-                        ),
-                        Divider(height: 24),
-                        _MenuTile(
-                          icon: Icons.bar_chart_rounded,
-                          iconColor: Color(0xFF22C55E),
-                          iconTone: Color(0x1422C55E),
-                          title: 'Аналитика',
-                          subtitle: 'Отчеты, графики, ABC анализ',
-                        ),
-                      ],
-                    ),
-                  ),
+                  _buildHiddenTabsCard(),
                   const SizedBox(height: 16),
                   _BusinessCard(
                     child: Column(
@@ -533,5 +509,126 @@ class _MoreScreenState extends State<_MoreScreen> {
       parts.add(detail!.region!);
     }
     return parts.isEmpty ? 'Не указан' : parts.join(', ');
+  }
+
+  Widget _buildHiddenTabsCard() {
+    if (widget.hiddenTabs.isEmpty) {
+      return const _BusinessCard(
+        child: Column(
+          children: [
+            _TileIcon(
+              icon: Icons.check_circle_rounded,
+              color: Color(0xFF00A86B),
+              tone: Color(0x1400A86B),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Все доступные разделы уже вынесены на панель',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+              ),
+            ),
+            SizedBox(height: 6),
+            Text(
+              'Настройте состав вкладок внизу экрана, если захотите поменять разделы местами.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return _BusinessCard(
+      child: Column(
+        children: [
+          for (var index = 0; index < widget.hiddenTabs.length; index++) ...[
+            InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: () async {
+                await widget.onOpenHiddenTab(widget.hiddenTabs[index]);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: _MenuTile(
+                  icon: tabIcon(widget.hiddenTabs[index]),
+                  iconColor: _hiddenTabIconColor(widget.hiddenTabs[index]),
+                  iconTone: _hiddenTabIconTone(widget.hiddenTabs[index]),
+                  title: tabLabel(widget.hiddenTabs[index]),
+                  subtitle: 'Открыть раздел',
+                ),
+              ),
+            ),
+            if (index != widget.hiddenTabs.length - 1)
+              const Divider(height: 24),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Color _hiddenTabIconColor(BusinessTab tab) {
+    switch (tab) {
+      case BusinessTab.crm:
+        return const Color(0xFF00A86B);
+      case BusinessTab.warehouse:
+        return const Color(0xFF2563EB);
+      case BusinessTab.finance:
+        return const Color(0xFFF59E0B);
+      case BusinessTab.production:
+        return const Color(0xFF7C3AED);
+      case BusinessTab.sales:
+        return const Color(0xFF16A34A);
+      case BusinessTab.purchases:
+        return const Color(0xFF3B82F6);
+      case BusinessTab.services:
+        return const Color(0xFFF97316);
+      case BusinessTab.catalog:
+        return const Color(0xFF0891B2);
+      case BusinessTab.salary:
+        return const Color(0xFF0F766E);
+      case BusinessTab.reports:
+        return const Color(0xFF22C55E);
+      case BusinessTab.taxes:
+        return const Color(0xFFEF4444);
+      case BusinessTab.dashboard:
+      case BusinessTab.more:
+        return const Color(0xFF64748B);
+    }
+  }
+
+  Color _hiddenTabIconTone(BusinessTab tab) {
+    switch (tab) {
+      case BusinessTab.crm:
+        return const Color(0x1400A86B);
+      case BusinessTab.warehouse:
+        return const Color(0x142563EB);
+      case BusinessTab.finance:
+        return const Color(0x14F59E0B);
+      case BusinessTab.production:
+        return const Color(0x147C3AED);
+      case BusinessTab.sales:
+        return const Color(0x1416A34A);
+      case BusinessTab.purchases:
+        return const Color(0x143B82F6);
+      case BusinessTab.services:
+        return const Color(0x14F97316);
+      case BusinessTab.catalog:
+        return const Color(0x140891B2);
+      case BusinessTab.salary:
+        return const Color(0x140F766E);
+      case BusinessTab.reports:
+        return const Color(0x1422C55E);
+      case BusinessTab.taxes:
+        return const Color(0x14EF4444);
+      case BusinessTab.dashboard:
+      case BusinessTab.more:
+        return const Color(0xFFF1F5F9);
+    }
   }
 }

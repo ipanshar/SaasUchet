@@ -306,6 +306,13 @@ class _BusinessShellState extends State<BusinessShell> {
     );
   }
 
+  Future<_OverviewData> _fetchOverviewData() async {
+    final payload = await widget.businessGateway.fetchOverview(
+      accessToken: _session.accessToken,
+    );
+    return _OverviewData.fromJson(payload, _session.user);
+  }
+
   @override
   void didUpdateWidget(covariant BusinessShell oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -329,14 +336,12 @@ class _BusinessShellState extends State<BusinessShell> {
     });
 
     try {
-      final payload = await widget.businessGateway.fetchOverview(
-        accessToken: _session.accessToken,
-      );
+      final overview = await _fetchOverviewData();
       if (!mounted) {
         return;
       }
       setState(() {
-        _overview = _OverviewData.fromJson(payload, _session.user);
+        _overview = overview;
       });
     } catch (error) {
       if (!mounted) {
@@ -352,6 +357,19 @@ class _BusinessShellState extends State<BusinessShell> {
         });
       }
     }
+  }
+
+  Future<_OverviewData> _refreshOverviewSnapshot() async {
+    final overview = await _fetchOverviewData();
+    if (!mounted) {
+      return overview;
+    }
+    setState(() {
+      _overview = overview;
+      _loadError = null;
+      _isLoading = false;
+    });
+    return overview;
   }
 
   Future<void> _openProfileEditor() async {
@@ -478,31 +496,89 @@ class _BusinessShellState extends State<BusinessShell> {
     return [BusinessTab.dashboard, ...middle, BusinessTab.more];
   }
 
+  List<BusinessTab> _hiddenTabsForRole() {
+    final activeMiddleTabs = _activeTabs
+        .where((tab) => tab != BusinessTab.dashboard && tab != BusinessTab.more)
+        .toSet();
+    return _allowedMiddleTabsForRole(
+      _currentCompanyRole(),
+    ).where((tab) => !activeMiddleTabs.contains(tab)).toList(growable: false);
+  }
+
+  Future<void> _handleWarehouseFabAction(
+    _FabMenuAction action,
+    _WarehouseScreenState? warehouseState,
+  ) async {
+    if (warehouseState == null) {
+      return;
+    }
+
+    switch (action.id) {
+      case 'warehouse_add':
+        await warehouseState.openCreateWarehouse();
+        return;
+      case 'warehouse_documents':
+        await warehouseState.openInventoryDocuments();
+        return;
+      case 'warehouse_operation':
+        await warehouseState.openCreateInventoryDocument();
+        return;
+      case 'warehouse_product':
+        await warehouseState.openCreateProduct();
+        return;
+    }
+  }
+
+  Future<void> _openHiddenTab(BusinessTab tab) async {
+    final overview = _overview;
+    if (overview == null) {
+      return;
+    }
+
+    final warehouseScreenKey = tab == BusinessTab.warehouse
+        ? GlobalKey<_WarehouseScreenState>()
+        : null;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => _HiddenTabRouteScreen(
+          tab: tab,
+          title: tabLabel(tab),
+          initialOverview: overview,
+          reloadOverview: _refreshOverviewSnapshot,
+          screenBuilder: (overview, onOverviewChanged, routeWarehouseKey) =>
+              _buildScreen(
+            tab,
+            overview,
+            onOverviewChanged: onOverviewChanged,
+            warehouseScreenKey: routeWarehouseKey,
+          ),
+          fabActions:
+              tab == BusinessTab.warehouse ? _warehouseFabActions : const [],
+          onFabActionSelected: tab == BusinessTab.warehouse
+              ? (action, warehouseState) async {
+                  await _handleWarehouseFabAction(action, warehouseState);
+                }
+              : null,
+          warehouseScreenKey: warehouseScreenKey,
+        ),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+    await _loadOverview();
+  }
+
   Future<void> _handleFabAction(_FabMenuAction action) async {
     setState(() {
       _isFabExpanded = false;
     });
 
     if (_activeTab == BusinessTab.warehouse) {
-      final warehouseState = _warehouseScreenKey.currentState;
-      if (warehouseState == null) {
-        return;
-      }
-
-      switch (action.id) {
-        case 'warehouse_add':
-          await warehouseState.openCreateWarehouse();
-          return;
-        case 'warehouse_documents':
-          await warehouseState.openInventoryDocuments();
-          return;
-        case 'warehouse_operation':
-          await warehouseState.openCreateInventoryDocument();
-          return;
-        case 'warehouse_product':
-          await warehouseState.openCreateProduct();
-          return;
-      }
+      await _handleWarehouseFabAction(action, _warehouseScreenKey.currentState);
+      return;
     }
 
     if (!mounted) {
@@ -513,7 +589,13 @@ class _BusinessShellState extends State<BusinessShell> {
     );
   }
 
-  Widget _buildScreen(BusinessTab tab, _OverviewData overview) {
+  Widget _buildScreen(
+    BusinessTab tab,
+    _OverviewData overview, {
+    Future<void> Function()? onOverviewChanged,
+    GlobalKey<_WarehouseScreenState>? warehouseScreenKey,
+  }) {
+    final refreshOverview = onOverviewChanged ?? _loadOverview;
     switch (tab) {
       case BusinessTab.dashboard:
         return _DashboardScreen(
@@ -533,23 +615,23 @@ class _BusinessShellState extends State<BusinessShell> {
           products: overview.products,
           accounts: overview.finance.accounts,
           businessGateway: widget.businessGateway,
-          onClientsChanged: _loadOverview,
+          onClientsChanged: refreshOverview,
         );
       case BusinessTab.warehouse:
         return _WarehouseScreen(
-          key: _warehouseScreenKey,
+          key: warehouseScreenKey ?? _warehouseScreenKey,
           accessToken: _session.accessToken,
           products: overview.products,
           clients: overview.clients,
           businessGateway: widget.businessGateway,
-          onProductsChanged: _loadOverview,
+          onProductsChanged: refreshOverview,
         );
       case BusinessTab.finance:
         return _FinanceScreen(
           accessToken: _session.accessToken,
           finance: overview.finance,
           businessGateway: widget.businessGateway,
-          onFinanceChanged: _loadOverview,
+          onFinanceChanged: refreshOverview,
         );
       case BusinessTab.more:
         return _MoreScreen(
@@ -560,6 +642,8 @@ class _BusinessShellState extends State<BusinessShell> {
           onNavSettingsOpen: _openNavSettings,
           businessGateway: widget.businessGateway,
           onOpenCompanyEditor: _openCompanyEditor,
+          hiddenTabs: _hiddenTabsForRole(),
+          onOpenHiddenTab: _openHiddenTab,
           activeCompany: _activeCompanyId != null
               ? _companies.where((c) => c.id == _activeCompanyId).firstOrNull
               : null,
@@ -591,7 +675,7 @@ class _BusinessShellState extends State<BusinessShell> {
           accessToken: _session.accessToken,
           products: overview.products,
           businessGateway: widget.businessGateway,
-          onProductsChanged: _loadOverview,
+          onProductsChanged: refreshOverview,
         );
       case BusinessTab.salary:
         return _SalaryScreen(
@@ -696,6 +780,116 @@ class _BusinessShellState extends State<BusinessShell> {
             _isFabExpanded = false;
           });
         },
+      ),
+    );
+  }
+}
+
+class _HiddenTabRouteScreen extends StatefulWidget {
+  const _HiddenTabRouteScreen({
+    required this.tab,
+    required this.title,
+    required this.initialOverview,
+    required this.reloadOverview,
+    required this.screenBuilder,
+    this.fabActions = const [],
+    this.onFabActionSelected,
+    this.warehouseScreenKey,
+  });
+
+  final BusinessTab tab;
+  final String title;
+  final _OverviewData initialOverview;
+  final Future<_OverviewData> Function() reloadOverview;
+  final Widget Function(
+    _OverviewData overview,
+    Future<void> Function() onOverviewChanged,
+    GlobalKey<_WarehouseScreenState>? warehouseScreenKey,
+  ) screenBuilder;
+  final List<_FabMenuAction> fabActions;
+  final Future<void> Function(
+    _FabMenuAction action,
+    _WarehouseScreenState? warehouseState,
+  )? onFabActionSelected;
+  final GlobalKey<_WarehouseScreenState>? warehouseScreenKey;
+
+  @override
+  State<_HiddenTabRouteScreen> createState() => _HiddenTabRouteScreenState();
+}
+
+class _HiddenTabRouteScreenState extends State<_HiddenTabRouteScreen> {
+  late _OverviewData _overview;
+  bool _isFabExpanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _overview = widget.initialOverview;
+  }
+
+  Future<void> _refreshOverview() async {
+    final overview = await widget.reloadOverview();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _overview = overview;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7FAF8),
+      body: Stack(
+        children: [
+          widget.screenBuilder(
+            _overview,
+            _refreshOverview,
+            widget.warehouseScreenKey,
+          ),
+          Positioned(
+            left: 16,
+            top: 0,
+            child: SafeArea(
+              bottom: false,
+              child: Material(
+                color: const Color(0xE6FFFFFF),
+                shape: const CircleBorder(),
+                elevation: 6,
+                child: IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  tooltip: 'Назад',
+                ),
+              ),
+            ),
+          ),
+          if (widget.fabActions.isNotEmpty &&
+              widget.onFabActionSelected != null)
+            Positioned(
+              right: 16,
+              bottom: 90,
+              child: _FabMenu(
+                expanded: _isFabExpanded,
+                actions: widget.fabActions,
+                onToggle: () {
+                  setState(() {
+                    _isFabExpanded = !_isFabExpanded;
+                  });
+                },
+                onActionSelected: (action) async {
+                  setState(() {
+                    _isFabExpanded = false;
+                  });
+                  await widget.onFabActionSelected!(
+                    action,
+                    widget.warehouseScreenKey?.currentState,
+                  );
+                },
+              ),
+            ),
+        ],
       ),
     );
   }
