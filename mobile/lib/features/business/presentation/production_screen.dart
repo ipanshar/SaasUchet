@@ -109,9 +109,8 @@ class _ProductionScreenState extends State<_ProductionScreen>
       );
     }
 
-    final fabActions = _tabController.index == 0
-        ? _recipeFabActions
-        : _orderFabActions;
+    final fabActions =
+        _tabController.index == 0 ? _recipeFabActions : _orderFabActions;
 
     return Stack(
       children: [
@@ -401,8 +400,7 @@ class _RecipeTile extends StatelessWidget {
             const Divider(height: 1),
             const SizedBox(height: 10),
             const Text('Компоненты',
-                style:
-                    TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
             const SizedBox(height: 6),
             ...recipe.ingredients.map(
               (ing) => Padding(
@@ -415,8 +413,7 @@ class _RecipeTile extends StatelessWidget {
                     Expanded(
                         child: Text(ing.productName,
                             style: const TextStyle(fontSize: 13))),
-                    Text(
-                        '${_formatQty(ing.quantity)} ${ing.unitName}',
+                    Text('${_formatQty(ing.quantity)} ${ing.unitName}',
                         style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -451,8 +448,7 @@ class _RecipeTile extends StatelessWidget {
             const Divider(height: 1),
             const SizedBox(height: 10),
             const Text('Выход продукции',
-                style:
-                    TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
             const SizedBox(height: 6),
             ...recipe.outputs.map(
               (out) => Padding(
@@ -465,8 +461,7 @@ class _RecipeTile extends StatelessWidget {
                     Expanded(
                         child: Text(out.productName,
                             style: const TextStyle(fontSize: 13))),
-                    Text(
-                        '${_formatQty(out.quantity)} ${out.unitName}',
+                    Text('${_formatQty(out.quantity)} ${out.unitName}',
                         style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -502,15 +497,16 @@ class _RecipeTile extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Удалить рецепт?'),
-        content: Text('«${recipe.name}» будет удалён без возможности восстановления.'),
+        content: Text(
+            '«${recipe.name}» будет удалён без возможности восстановления.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Отмена')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style:
-                FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFEF4444)),
             child: const Text('Удалить'),
           ),
         ],
@@ -518,13 +514,12 @@ class _RecipeTile extends StatelessWidget {
     );
     if (confirmed != true || !context.mounted) return;
     try {
-      await gateway.deleteRecipe(
-          accessToken: accessToken, recipeId: recipe.id);
+      await gateway.deleteRecipe(accessToken: accessToken, recipeId: recipe.id);
       onChanged();
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Ошибка: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Ошибка: $e')));
       }
     }
   }
@@ -680,8 +675,7 @@ class _OrderTile extends StatelessWidget {
             children: [
               if (order.batchNumber.isNotEmpty)
                 Expanded(
-                  child: _LabelValue(
-                      label: 'Партия', value: order.batchNumber),
+                  child: _LabelValue(label: 'Партия', value: order.batchNumber),
                 ),
               if (order.responsibleEmployee.isNotEmpty)
                 Expanded(
@@ -702,8 +696,7 @@ class _OrderTile extends StatelessWidget {
                 if (order.status == 'draft')
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () =>
-                          _changeStatus(context, 'in_progress'),
+                      onPressed: () => _changeStatus(context, 'in_progress'),
                       style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF3B82F6)),
                       child: const Text('В работу'),
@@ -824,13 +817,13 @@ class _RecipeSheetState extends State<_RecipeSheet> {
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Введите название рецепта')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Введите название рецепта')));
       return;
     }
     if (_outputs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Добавьте хотя бы один выход продукции')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Добавьте хотя бы один выход продукции')));
       return;
     }
     setState(() => _isSubmitting = true);
@@ -915,17 +908,17 @@ class _RecipeSheetState extends State<_RecipeSheet> {
                   const SizedBox(height: 20),
                   const _SectionLabel(label: 'Входящие товары'),
                   ..._ingredients.asMap().entries.map(
-                    (e) => _IngredientRow(
-                      item: e.value,
-                      products: widget.products,
-                      onChanged: () => setState(() {}),
-                      onRemove: () =>
-                          setState(() => _ingredients.removeAt(e.key)),
-                    ),
-                  ),
+                        (e) => _IngredientRow(
+                          item: e.value,
+                          products: widget.products,
+                          onChanged: () => setState(() {}),
+                          onRemove: () =>
+                              setState(() => _ingredients.removeAt(e.key)),
+                        ),
+                      ),
                   TextButton.icon(
-                    onPressed: () => setState(
-                        () => _ingredients.add(_MutableIngredient())),
+                    onPressed: () =>
+                        setState(() => _ingredients.add(_MutableIngredient())),
                     icon: const Icon(Icons.add_rounded),
                     label: const Text('Добавить товар'),
                   ),
@@ -933,14 +926,14 @@ class _RecipeSheetState extends State<_RecipeSheet> {
                     const SizedBox(height: 8),
                     const _SectionLabel(label: 'Входящие услуги'),
                     ..._svcLines.asMap().entries.map(
-                      (e) => _ServiceRow(
-                        item: e.value,
-                        services: widget.services,
-                        onChanged: () => setState(() {}),
-                        onRemove: () =>
-                            setState(() => _svcLines.removeAt(e.key)),
-                      ),
-                    ),
+                          (e) => _ServiceRow(
+                            item: e.value,
+                            services: widget.services,
+                            onChanged: () => setState(() {}),
+                            onRemove: () =>
+                                setState(() => _svcLines.removeAt(e.key)),
+                          ),
+                        ),
                     TextButton.icon(
                       onPressed: () => setState(
                           () => _svcLines.add(_MutableRecipeService())),
@@ -951,14 +944,14 @@ class _RecipeSheetState extends State<_RecipeSheet> {
                   const SizedBox(height: 8),
                   const _SectionLabel(label: 'Выход готовой продукции *'),
                   ..._outputs.asMap().entries.map(
-                    (e) => _OutputRow(
-                      item: e.value,
-                      products: widget.products,
-                      onChanged: () => setState(() {}),
-                      onRemove: () =>
-                          setState(() => _outputs.removeAt(e.key)),
-                    ),
-                  ),
+                        (e) => _OutputRow(
+                          item: e.value,
+                          products: widget.products,
+                          onChanged: () => setState(() {}),
+                          onRemove: () =>
+                              setState(() => _outputs.removeAt(e.key)),
+                        ),
+                      ),
                   TextButton.icon(
                     onPressed: () =>
                         setState(() => _outputs.add(_MutableOutput())),
@@ -1039,8 +1032,7 @@ class _OrderSheetState extends State<_OrderSheet> {
     final o = widget.initialOrder;
     _docNoCtrl = TextEditingController(text: o?.documentNo ?? '');
     _batchCtrl = TextEditingController(text: o?.batchNumber ?? '');
-    _employeeCtrl =
-        TextEditingController(text: o?.responsibleEmployee ?? '');
+    _employeeCtrl = TextEditingController(text: o?.responsibleEmployee ?? '');
     _notesCtrl = TextEditingController(text: o?.notes ?? '');
     _qtyCtrl = TextEditingController(
         text: o == null ? '1' : _formatQty(o.plannedQuantity));
@@ -1058,8 +1050,7 @@ class _OrderSheetState extends State<_OrderSheet> {
     }
   }
 
-  double get _totalShare =>
-      _participants.fold(0.0, (sum, p) => sum + p.share);
+  double get _totalShare => _participants.fold(0.0, (sum, p) => sum + p.share);
 
   @override
   void dispose() {
@@ -1079,8 +1070,8 @@ class _OrderSheetState extends State<_OrderSheet> {
       return;
     }
     if (_selectedSourceWarehouseId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Выберите склад сырья')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Выберите склад сырья')));
       return;
     }
     if (_selectedOutputWarehouseId == null) {
@@ -1090,8 +1081,7 @@ class _OrderSheetState extends State<_OrderSheet> {
     }
     final filledParticipants =
         _participants.where((p) => p.employeeId.isNotEmpty).toList();
-    if (filledParticipants.isNotEmpty &&
-        (_totalShare - 100).abs() > 0.01) {
+    if (filledParticipants.isNotEmpty && (_totalShare - 100).abs() > 0.01) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Доли участников должны давать 100%')));
       return;
@@ -1152,7 +1142,6 @@ class _OrderSheetState extends State<_OrderSheet> {
                 children: [
                   const _SectionLabel(label: 'Рецепт *'),
                   DropdownButtonFormField<String>(
-                    key: ValueKey(_selectedRecipeId),
                     initialValue: _selectedRecipeId,
                     decoration: _inputDecoration('Выберите рецепт'),
                     items: widget.recipes
@@ -1161,13 +1150,11 @@ class _OrderSheetState extends State<_OrderSheet> {
                               child: Text(r.name),
                             ))
                         .toList(),
-                    onChanged: (v) =>
-                        setState(() => _selectedRecipeId = v),
+                    onChanged: (v) => setState(() => _selectedRecipeId = v),
                   ),
                   const SizedBox(height: 12),
                   const _SectionLabel(label: 'Склад сырья *'),
                   DropdownButtonFormField<String>(
-                    key: ValueKey(_selectedSourceWarehouseId),
                     initialValue: _selectedSourceWarehouseId,
                     decoration: _inputDecoration('Откуда брать материалы'),
                     items: widget.warehouses
@@ -1182,7 +1169,6 @@ class _OrderSheetState extends State<_OrderSheet> {
                   const SizedBox(height: 12),
                   const _SectionLabel(label: 'Склад готовой продукции *'),
                   DropdownButtonFormField<String>(
-                    key: ValueKey(_selectedOutputWarehouseId),
                     initialValue: _selectedOutputWarehouseId,
                     decoration: _inputDecoration('Куда помещать продукцию'),
                     items: widget.warehouses
@@ -1199,8 +1185,8 @@ class _OrderSheetState extends State<_OrderSheet> {
                   TextFormField(
                     controller: _qtyCtrl,
                     decoration: _inputDecoration('1'),
-                    keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
                   ),
                   const SizedBox(height: 12),
                   const _SectionLabel(label: 'Номер партии'),
@@ -1225,8 +1211,8 @@ class _OrderSheetState extends State<_OrderSheet> {
                   const _SectionLabel(label: 'Номер документа'),
                   TextFormField(
                     controller: _docNoCtrl,
-                    decoration: _inputDecoration(
-                        'Оставьте пустым для автогенерации'),
+                    decoration:
+                        _inputDecoration('Оставьте пустым для автогенерации'),
                   ),
                   const SizedBox(height: 12),
                   const _SectionLabel(label: 'Примечания'),
@@ -1260,7 +1246,8 @@ class _OrderSheetState extends State<_OrderSheet> {
                   ),
                   const SizedBox(height: 8),
                   if (widget.employees.isEmpty)
-                    const Text('Сначала добавьте сотрудников в разделе «Зарплата».',
+                    const Text(
+                        'Сначала добавьте сотрудников в разделе «Зарплата».',
                         style:
                             TextStyle(color: Color(0xFFEF4444), fontSize: 12))
                   else ...[
@@ -1382,12 +1369,11 @@ class _IngredientRow extends StatelessWidget {
           Expanded(
             flex: 3,
             child: DropdownButtonFormField<String>(
-              key: ValueKey(item.productId),
               initialValue: item.productId.isEmpty ? null : item.productId,
               decoration: _inputDecoration('Товар'),
               items: products
-                  .map((p) =>
-                      DropdownMenuItem(value: p.id, child: Text(p.name)))
+                  .map(
+                      (p) => DropdownMenuItem(value: p.id, child: Text(p.name)))
                   .toList(),
               onChanged: (v) {
                 if (v == null) return;
@@ -1445,12 +1431,11 @@ class _ServiceRow extends StatelessWidget {
           Expanded(
             flex: 3,
             child: DropdownButtonFormField<String>(
-              key: ValueKey(item.serviceId),
               initialValue: item.serviceId.isEmpty ? null : item.serviceId,
               decoration: _inputDecoration('Услуга'),
               items: services
-                  .map((s) =>
-                      DropdownMenuItem(value: s.id, child: Text(s.name)))
+                  .map(
+                      (s) => DropdownMenuItem(value: s.id, child: Text(s.name)))
                   .toList(),
               onChanged: (v) {
                 if (v == null) return;
@@ -1507,12 +1492,11 @@ class _OutputRow extends StatelessWidget {
           Expanded(
             flex: 3,
             child: DropdownButtonFormField<String>(
-              key: ValueKey(item.productId),
               initialValue: item.productId.isEmpty ? null : item.productId,
               decoration: _inputDecoration('Готовый продукт'),
               items: products
-                  .map((p) =>
-                      DropdownMenuItem(value: p.id, child: Text(p.name)))
+                  .map(
+                      (p) => DropdownMenuItem(value: p.id, child: Text(p.name)))
                   .toList(),
               onChanged: (v) {
                 if (v == null) return;
@@ -1570,15 +1554,14 @@ class _ParticipantRow extends StatelessWidget {
           Expanded(
             flex: 3,
             child: DropdownButtonFormField<String>(
-              key: ValueKey(item.employeeId),
               initialValue: item.employeeId.isEmpty ? null : item.employeeId,
               decoration: _inputDecoration('Сотрудник'),
               isExpanded: true,
               items: employees
                   .map((e) => DropdownMenuItem(
                         value: e.id,
-                        child: Text(e.fullName,
-                            overflow: TextOverflow.ellipsis),
+                        child:
+                            Text(e.fullName, overflow: TextOverflow.ellipsis),
                       ))
                   .toList(),
               onChanged: (v) {
@@ -1637,8 +1620,8 @@ class _SheetDragHandle extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(title,
-              style: const TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.w700)),
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
         ],
       ),
@@ -1667,8 +1650,7 @@ InputDecoration _inputDecoration(String hint) => InputDecoration(
       hintText: hint,
       filled: true,
       fillColor: Colors.white,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
         borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
