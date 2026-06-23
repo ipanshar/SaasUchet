@@ -1055,7 +1055,7 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
                     const SizedBox(height: 12),
                     _ClientTextField(
                       controller: _costController,
-                      label: 'Себестоимость',
+                      label: 'Закупочная цена',
                       keyboardType: TextInputType.number,
                       validator: _numberValidator,
                     ),
@@ -1198,20 +1198,21 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
 class _CreateInventoryDocumentSheetState
     extends State<_CreateInventoryDocumentSheet> {
   final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _warehouseController;
-  final _relatedWarehouseController = TextEditingController();
   final _noteController = TextEditingController();
   late final List<_InventoryDocumentDraftLine> _lines;
   late String _documentType;
   String? _clientId;
   String? _employeeId;
   List<_Service> _services = [];
+  List<_Warehouse> _warehouses = [];
+  bool _isLoadingWarehouses = false;
+  late String _warehouseName;
+  String _relatedWarehouseName = '';
 
   @override
   void initState() {
     super.initState();
-    _warehouseController =
-        TextEditingController(text: widget.initialWarehouseName);
+    _warehouseName = widget.initialWarehouseName.trim();
     _documentType = widget.initialDocumentType;
     _clientId = widget.initialClientId;
     _lines = [
@@ -1219,7 +1220,11 @@ class _CreateInventoryDocumentSheetState
           ? _InventoryDocumentDraftLine.fromProduct(widget.products.first)
           : _InventoryDocumentDraftLine.empty(),
     ];
+    if (widget.products.isNotEmpty) {
+      _applyProductPricing(_lines.first, widget.products.first);
+    }
     _loadServices();
+    _loadWarehouses();
   }
 
   Future<void> _loadServices() async {
@@ -1234,10 +1239,43 @@ class _CreateInventoryDocumentSheetState
     } catch (_) {}
   }
 
+  Future<void> _loadWarehouses() async {
+    setState(() {
+      _isLoadingWarehouses = true;
+    });
+    try {
+      final raw = await widget.businessGateway.fetchWarehouses(
+        accessToken: widget.accessToken,
+      );
+      final warehouses = raw
+          .map(_warehouseFromJson)
+          .where((warehouse) => warehouse.name.trim().isNotEmpty)
+          .toList(growable: false);
+      if (!mounted) return;
+      setState(() {
+        _warehouses = warehouses;
+        _isLoadingWarehouses = false;
+        final selectedWarehouse =
+            warehouses.where((w) => w.name == _warehouseName).firstOrNull ??
+                warehouses.firstOrNull;
+        if (selectedWarehouse != null) {
+          _warehouseName = selectedWarehouse.name;
+        }
+        if (_relatedWarehouseName.isNotEmpty &&
+            !_warehouses.any((w) => w.name == _relatedWarehouseName)) {
+          _relatedWarehouseName = '';
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingWarehouses = false;
+      });
+    }
+  }
+
   @override
   void dispose() {
-    _warehouseController.dispose();
-    _relatedWarehouseController.dispose();
     _noteController.dispose();
     for (final line in _lines) {
       line.dispose();
@@ -1321,6 +1359,7 @@ class _CreateInventoryDocumentSheetState
                                   _documentType != 'purchase_receipt') {
                                 _clientId = null;
                               }
+                              _syncLinePricesWithDocumentType();
                             });
                           }
                         },
@@ -1378,16 +1417,28 @@ class _CreateInventoryDocumentSheetState
                       ),
                     ],
                     const SizedBox(height: 12),
-                    _ClientTextField(
-                      controller: _warehouseController,
+                    _buildWarehouseField(
+                      keyPrefix: 'source',
                       label: 'Склад-источник',
+                      value: _warehouseName,
+                      onChanged: (value) {
+                        setState(() {
+                          _warehouseName = value;
+                        });
+                      },
                     ),
                     if (_documentType == 'transfer') ...[
                       const SizedBox(height: 12),
-                      _ClientTextField(
-                        controller: _relatedWarehouseController,
+                      _buildWarehouseField(
+                        keyPrefix: 'related',
                         label: 'Склад-получатель',
+                        value: _relatedWarehouseName,
                         validator: _requiredValidator,
+                        onChanged: (value) {
+                          setState(() {
+                            _relatedWarehouseName = value;
+                          });
+                        },
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -1511,8 +1562,7 @@ class _CreateInventoryDocumentSheetState
                     );
                     setState(() {
                       line.productId = value;
-                      line.unitPriceController.text = '${product.price}';
-                      line.unitCostController.text = '${product.cost}';
+                      _applyProductPricing(line, product);
                     });
                   },
                 )
@@ -1540,8 +1590,7 @@ class _CreateInventoryDocumentSheetState
                     final svc = _services.firstWhere((s) => s.id == value);
                     setState(() {
                       line.serviceId = value;
-                      line.unitPriceController.text =
-                          '${svc.price.truncate()}';
+                      line.unitPriceController.text = '${svc.price.truncate()}';
                       line.unitCostController.text = '0';
                     });
                   },
@@ -1564,15 +1613,6 @@ class _CreateInventoryDocumentSheetState
                       validator: _numberValidator,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _ClientTextField(
-                      controller: line.unitCostController,
-                      label: 'Себестоимость',
-                      keyboardType: TextInputType.number,
-                      validator: _numberValidator,
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -1589,11 +1629,13 @@ class _CreateInventoryDocumentSheetState
 
   void _addLine() {
     setState(() {
-      _lines.add(
-        widget.products.isNotEmpty
-            ? _InventoryDocumentDraftLine.fromProduct(widget.products.first)
-            : _InventoryDocumentDraftLine.empty(),
-      );
+      final line = widget.products.isNotEmpty
+          ? _InventoryDocumentDraftLine.fromProduct(widget.products.first)
+          : _InventoryDocumentDraftLine.empty();
+      if (widget.products.isNotEmpty) {
+        _applyProductPricing(line, widget.products.first);
+      }
+      _lines.add(line);
     });
   }
 
@@ -1613,8 +1655,8 @@ class _CreateInventoryDocumentSheetState
         documentType: _documentType,
         clientId: _clientId ?? '',
         employeeId: _employeeId ?? '',
-        warehouseName: _warehouseController.text.trim(),
-        relatedWarehouseName: _relatedWarehouseController.text.trim(),
+        warehouseName: _warehouseName.trim(),
+        relatedWarehouseName: _relatedWarehouseName.trim(),
         note: _noteController.text.trim(),
         lines: _lines
             .map(
@@ -1629,6 +1671,67 @@ class _CreateInventoryDocumentSheetState
             )
             .toList(growable: false),
       ),
+    );
+  }
+
+  Widget _buildWarehouseField({
+    required String keyPrefix,
+    required String label,
+    required String value,
+    required ValueChanged<String> onChanged,
+    String? Function(String?)? validator,
+  }) {
+    if (_isLoadingWarehouses && _warehouses.isEmpty) {
+      return InputDecorator(
+        decoration: InputDecoration(labelText: label),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Expanded(child: Text('Загрузка складов...')),
+          ],
+        ),
+      );
+    }
+
+    if (_warehouses.isNotEmpty) {
+      final selectedValue =
+          _warehouses.any((warehouse) => warehouse.name == value)
+              ? value
+              : null;
+      return DropdownButtonFormField<String>(
+        key: ValueKey('warehouse_${keyPrefix}_${_warehouses.length}_$label'),
+        initialValue: selectedValue,
+        items: _warehouses
+            .map(
+              (warehouse) => DropdownMenuItem<String>(
+                value: warehouse.name,
+                child: Text(warehouse.name),
+              ),
+            )
+            .toList(growable: false),
+        decoration: InputDecoration(labelText: label),
+        validator: validator,
+        onChanged: (selected) {
+          if (selected != null) {
+            onChanged(selected);
+          }
+        },
+      );
+    }
+
+    return TextFormField(
+      initialValue: value,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: 'Введите название склада',
+      ),
+      validator: validator,
+      onChanged: onChanged,
     );
   }
 
@@ -1647,6 +1750,34 @@ class _CreateInventoryDocumentSheetState
       return 'Введите число';
     }
     return null;
+  }
+
+  void _syncLinePricesWithDocumentType() {
+    for (final line in _lines) {
+      if (line.lineType == 'product' && line.productId.isNotEmpty) {
+        final product =
+            widget.products.where((item) => item.id == line.productId);
+        if (product.isNotEmpty) {
+          _applyProductPricing(line, product.first);
+        }
+        continue;
+      }
+      if (line.lineType == 'service' && line.serviceId.isNotEmpty) {
+        final service = _services.where((item) => item.id == line.serviceId);
+        if (service.isNotEmpty) {
+          line.unitPriceController.text = '${service.first.price.truncate()}';
+          line.unitCostController.text = '0';
+        }
+      }
+    }
+  }
+
+  void _applyProductPricing(
+      _InventoryDocumentDraftLine line, _Product product) {
+    final unitPrice =
+        _documentType == 'purchase_receipt' ? product.cost : product.price;
+    line.unitPriceController.text = '$unitPrice';
+    line.unitCostController.text = '${product.cost}';
   }
 }
 

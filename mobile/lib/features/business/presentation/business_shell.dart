@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:saas_uchet_mobile/core/config/api_config.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_gateway.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/company_profile.dart';
@@ -41,6 +43,8 @@ class BusinessShell extends StatefulWidget {
     required this.onLogout,
     required this.onSessionChanged,
     required this.onAccountDeleted,
+    required this.isDarkTheme,
+    required this.onThemeChanged,
   });
 
   final AuthGateway authGateway;
@@ -49,6 +53,8 @@ class BusinessShell extends StatefulWidget {
   final VoidCallback onLogout;
   final ValueChanged<AuthSession> onSessionChanged;
   final VoidCallback onAccountDeleted;
+  final bool isDarkTheme;
+  final ValueChanged<bool> onThemeChanged;
 
   @override
   State<BusinessShell> createState() => _BusinessShellState();
@@ -111,11 +117,13 @@ class _BusinessShellState extends State<BusinessShell> {
 
   static const _prefKey = 'nav_tabs';
   static const _activeCompanyKey = 'active_company_id';
+  static const _startTabPrefKey = 'start_tab';
 
   List<_Company> _companies = const [];
   String? _activeCompanyId;
 
   BusinessTab _activeTab = BusinessTab.dashboard;
+  BusinessTab _preferredStartTab = BusinessTab.dashboard;
   List<BusinessTab> _activeTabs = const [
     BusinessTab.dashboard,
     BusinessTab.crm,
@@ -153,6 +161,7 @@ class _BusinessShellState extends State<BusinessShell> {
     // then overview data loads and the spinner clears.
     await _loadCompanies();
     await _loadTabPrefs();
+    await _loadStartTabPref();
     await _loadOverview();
   }
 
@@ -181,9 +190,10 @@ class _BusinessShellState extends State<BusinessShell> {
       setState(() {
         _companies = companies;
         _activeTabs = _normalizeTabsForRole(_activeTabs);
-        if (!_activeTabs.contains(_activeTab)) {
-          _activeTab = BusinessTab.dashboard;
-        }
+        _activeTab = _resolvePreferredStartTab(
+          preferredTab: _activeTab,
+          tabs: _activeTabs,
+        );
       });
     } catch (_) {
       // Non-fatal: switcher just stays empty/unchanged.
@@ -198,7 +208,7 @@ class _BusinessShellState extends State<BusinessShell> {
     setState(() {
       _activeCompanyId = companyId;
       _activeTabs = _normalizeTabsForRole(_activeTabs);
-      _activeTab = BusinessTab.dashboard;
+      _activeTab = _resolvePreferredStartTab(tabs: _activeTabs);
       _isFabExpanded = false;
     });
     await _loadOverview();
@@ -273,6 +283,7 @@ class _BusinessShellState extends State<BusinessShell> {
         ...middle,
         BusinessTab.more,
       ]);
+      _activeTab = _resolvePreferredStartTab(tabs: _activeTabs);
     });
   }
 
@@ -286,8 +297,41 @@ class _BusinessShellState extends State<BusinessShell> {
         ...middleTabs,
         BusinessTab.more,
       ]);
-      _activeTab = BusinessTab.dashboard;
+      _activeTab = _resolvePreferredStartTab(tabs: _activeTabs);
       _isFabExpanded = false;
+    });
+  }
+
+  Future<void> _loadStartTabPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_startTabPrefKey);
+    if (stored == null || stored.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _activeTab = _resolvePreferredStartTab(tabs: _activeTabs);
+      });
+      return;
+    }
+    final preferred =
+        BusinessTab.values.where((tab) => tab.name == stored).firstOrNull;
+    if (preferred == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _preferredStartTab = preferred;
+      _activeTab = _resolvePreferredStartTab(tabs: _activeTabs);
+    });
+  }
+
+  Future<void> _saveStartTab(BusinessTab tab) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_startTabPrefKey, tab.name);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _preferredStartTab = tab;
+      _activeTab = _resolvePreferredStartTab(tabs: _activeTabs);
     });
   }
 
@@ -304,6 +348,18 @@ class _BusinessShellState extends State<BusinessShell> {
         ),
       ),
     );
+  }
+
+  BusinessTab _resolvePreferredStartTab({
+    BusinessTab? preferredTab,
+    List<BusinessTab>? tabs,
+  }) {
+    final currentTabs = tabs ?? _activeTabs;
+    final candidate = preferredTab ?? _preferredStartTab;
+    if (currentTabs.contains(candidate)) {
+      return candidate;
+    }
+    return BusinessTab.dashboard;
   }
 
   Future<_OverviewData> _fetchOverviewData() async {
@@ -575,6 +631,20 @@ class _BusinessShellState extends State<BusinessShell> {
     await _loadOverview();
   }
 
+  Future<void> _openBusinessTab(BusinessTab tab) async {
+    if (_activeTabs.contains(tab)) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeTab = tab;
+        _isFabExpanded = false;
+      });
+      return;
+    }
+    await _openHiddenTab(tab);
+  }
+
   Future<void> _handleFabAction(_FabMenuAction action) async {
     setState(() {
       _isFabExpanded = false;
@@ -648,9 +718,15 @@ class _BusinessShellState extends State<BusinessShell> {
           onOpenCompanyEditor: _openCompanyEditor,
           hiddenTabs: _hiddenTabsForRole(),
           onOpenHiddenTab: _openHiddenTab,
+          onOpenBusinessTab: _openBusinessTab,
           activeCompany: _activeCompanyId != null
               ? _companies.where((c) => c.id == _activeCompanyId).firstOrNull
               : null,
+          isDarkTheme: widget.isDarkTheme,
+          onThemeChanged: widget.onThemeChanged,
+          startTab: _resolvePreferredStartTab(tabs: _activeTabs),
+          onStartTabChanged: _saveStartTab,
+          bottomNavTabs: _activeTabs,
         );
       case BusinessTab.production:
         return _ProductionScreen(

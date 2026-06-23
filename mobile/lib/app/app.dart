@@ -29,6 +29,7 @@ class SaasUchetApp extends StatefulWidget {
 
 class _SaasUchetAppState extends State<SaasUchetApp> {
   static const _sessionPrefKey = 'auth_session';
+  static const _themePrefKey = 'app_dark_theme';
 
   late final AuthGateway _authGateway;
   late final bool _ownsAuthGateway;
@@ -37,6 +38,7 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
   AuthSession? _session;
   bool _hasCompletedOnboarding = false;
   bool _isRestoringSession = false;
+  bool _isDarkTheme = false;
 
   @override
   void initState() {
@@ -53,6 +55,7 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
       _isRestoringSession = true;
       _restoreSession();
     }
+    _restoreThemePreference();
   }
 
   @override
@@ -133,14 +136,13 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_sessionPrefKey);
     } finally {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() {
+          _session = restoredSession;
+          _hasCompletedOnboarding = restoredSession != null;
+          _isRestoringSession = false;
+        });
       }
-      setState(() {
-        _session = restoredSession;
-        _hasCompletedOnboarding = restoredSession != null;
-        _isRestoringSession = false;
-      });
     }
   }
 
@@ -152,6 +154,32 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
   Future<void> _clearStoredSession() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionPrefKey);
+  }
+
+  Future<void> _restoreThemePreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final value = prefs.getBool(_themePrefKey) ?? false;
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isDarkTheme = value;
+      });
+    } catch (_) {
+      // Keep default theme.
+    }
+  }
+
+  Future<void> _handleThemeChanged(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_themePrefKey, value);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isDarkTheme = value;
+    });
   }
 
   @override
@@ -223,6 +251,53 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
           ),
         ),
       ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF00A86B),
+          brightness: Brightness.dark,
+        ),
+        scaffoldBackgroundColor: const Color(0xFF0F172A),
+        fontFamily: 'SF Pro Display',
+        cardTheme: const CardThemeData(
+          elevation: 0,
+          margin: EdgeInsets.zero,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF111827),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFF1F2937)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFF00A86B), width: 1.4),
+          ),
+        ),
+        snackBarTheme: const SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF00A86B),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+      themeMode: _isDarkTheme ? ThemeMode.dark : ThemeMode.light,
       home: _isRestoringSession
           ? const _SessionRestoreScreen()
           : _session != null
@@ -233,6 +308,8 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
                   onLogout: _handleLogout,
                   onSessionChanged: _handleSessionChanged,
                   onAccountDeleted: _handleLogout,
+                  isDarkTheme: _isDarkTheme,
+                  onThemeChanged: _handleThemeChanged,
                 )
               : !_hasCompletedOnboarding
                   ? OnboardingFlowScreen(

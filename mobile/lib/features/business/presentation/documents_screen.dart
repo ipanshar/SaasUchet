@@ -1,7 +1,14 @@
 part of 'business_shell.dart';
 
 /// Варианты сортировки списка документов продаж/закупок.
-enum _DocumentSort { dateDesc, dateAsc, amountDesc, amountAsc, numberDesc, numberAsc }
+enum _DocumentSort {
+  dateDesc,
+  dateAsc,
+  amountDesc,
+  amountAsc,
+  numberDesc,
+  numberAsc
+}
 
 String _documentSortLabel(_DocumentSort sort) {
   switch (sort) {
@@ -147,9 +154,8 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
         return;
       }
       setState(() {
-        _documents = documents
-            .map(_inventoryDocumentFromJson)
-            .toList(growable: false);
+        _documents =
+            documents.map(_inventoryDocumentFromJson).toList(growable: false);
         _employees = employees;
         _isLoading = false;
       });
@@ -481,15 +487,6 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
         _GradientHeader(
           title: widget.title,
           subtitle: 'Документы',
-          trailing: Material(
-            color: const Color(0x1AFFFFFF),
-            shape: const CircleBorder(),
-            child: IconButton(
-              onPressed: _showCreateDocument,
-              icon: const Icon(Icons.add_rounded, color: Colors.white),
-              tooltip: 'Создать',
-            ),
-          ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -596,129 +593,141 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
 
     final documents = _filteredDocuments;
     if (documents.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.inbox_rounded,
-                size: 52,
-                color: Color(0xFF94A3B8),
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+          children: [
+            const SizedBox(height: 72),
+            const Icon(
+              Icons.inbox_rounded,
+              size: 52,
+              color: Color(0xFF94A3B8),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _documents.isEmpty
+                  ? 'Документов пока нет'
+                  : 'Ничего не найдено по выбранным фильтрам',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF64748B),
               ),
-              const SizedBox(height: 12),
-              Text(
-                _documents.isEmpty
-                    ? 'Документов пока нет'
-                    : 'Ничего не найдено по выбранным фильтрам',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF64748B),
-                ),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _showCreateDocument,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Создать документ'),
+            ),
+          ],
         ),
       );
     }
 
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView.separated(
+      child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-        itemCount: documents.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final document = documents[index];
-          return _BusinessCard(
-            onTap: () => _openDocumentDetail(document),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+        children: [
+          ...documents.map(
+            (document) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _BusinessCard(
+                onTap: () => _openDocumentDetail(document),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        document.documentNo,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            document.documentNo,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        _StatusBadge(
+                          label: _documentStatusLabel(document.status),
+                          kind: _documentStatusKind(document.status),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      document.documentDate,
+                      style: const TextStyle(
+                        color: Color(0xFF7B8794),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _LabelValue(
+                            label: 'Склад',
+                            value: document.warehouseName.isEmpty
+                                ? '—'
+                                : document.warehouseName,
+                          ),
+                        ),
+                        if (document.clientName.isNotEmpty)
+                          Expanded(
+                            child: _LabelValue(
+                              label: widget.counterpartyLabel,
+                              value: document.clientName,
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        _LabelValue(
+                          label: 'Сумма',
+                          value: formatMoney(document.totalAmount),
+                          textAlign: TextAlign.right,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _LabelValue(
+                            label: 'Количество',
+                            value: '${document.totalQuantity}',
+                          ),
+                        ),
+                        _LabelValue(
+                          label: 'Строк',
+                          value: '${document.productLines}',
+                          textAlign: TextAlign.right,
+                        ),
+                      ],
+                    ),
+                    if (document.note.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        document.note,
                         style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
+                          color: Color(0xFF475569),
+                          fontSize: 13,
                         ),
                       ),
-                    ),
-                    _StatusBadge(
-                      label: _documentStatusLabel(document.status),
-                      kind: _documentStatusKind(document.status),
-                    ),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  document.documentDate,
-                  style: const TextStyle(
-                    color: Color(0xFF7B8794),
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _LabelValue(
-                        label: 'Склад',
-                        value: document.warehouseName.isEmpty
-                            ? '—'
-                            : document.warehouseName,
-                      ),
-                    ),
-                    if (document.clientName.isNotEmpty)
-                      Expanded(
-                        child: _LabelValue(
-                          label: widget.counterpartyLabel,
-                          value: document.clientName,
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    _LabelValue(
-                      label: 'Сумма',
-                      value: formatMoney(document.totalAmount),
-                      textAlign: TextAlign.right,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _LabelValue(
-                        label: 'Количество',
-                        value: '${document.totalQuantity}',
-                      ),
-                    ),
-                    _LabelValue(
-                      label: 'Строк',
-                      value: '${document.productLines}',
-                      textAlign: TextAlign.right,
-                    ),
-                  ],
-                ),
-                if (document.note.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    document.note,
-                    style: const TextStyle(
-                      color: Color(0xFF475569),
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ],
+              ),
             ),
-          );
-        },
+          ),
+          FilledButton.icon(
+            onPressed: _showCreateDocument,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Создать документ'),
+          ),
+        ],
       ),
     );
   }
@@ -861,8 +870,9 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
               Expanded(
                 child: _LabelValue(
                   label: 'Склад',
-                  value:
-                      summary.warehouseName.isEmpty ? '—' : summary.warehouseName,
+                  value: summary.warehouseName.isEmpty
+                      ? '—'
+                      : summary.warehouseName,
                 ),
               ),
               if (summary.clientName.isNotEmpty)

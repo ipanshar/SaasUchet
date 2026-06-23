@@ -96,9 +96,6 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
         _canManageMembers = _canViewMembers;
         _isLoading = false;
       });
-      if (_canViewMembers) {
-        await _loadMembers();
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -508,46 +505,6 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
                           ),
                         ],
                       ),
-                      if (_canViewMembers) ...[
-                        const SizedBox(height: 12),
-                        _EditorCard(
-                          title: 'Участники',
-                          actions: _canManageMembers
-                              ? [
-                                  TextButton.icon(
-                                    onPressed: _showAddMemberDialog,
-                                    icon: const Icon(Icons.person_add_alt_1),
-                                    label: const Text('Добавить'),
-                                  ),
-                                ]
-                              : null,
-                          children: [
-                            if (_isMembersLoading)
-                              const Padding(
-                                padding: EdgeInsets.all(16),
-                                child: Center(
-                                  child: CircularProgressIndicator(),
-                                ),
-                              )
-                            else if (_members.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.all(16),
-                                child: Text('Участники пока не добавлены.'),
-                              )
-                            else
-                              ..._members.map(
-                                (member) => _MemberTile(
-                                  member: member,
-                                  canManage: _canManageMembers &&
-                                      !member.isOwner &&
-                                      !member.isCurrentUser,
-                                  onEdit: () => _changeMemberRole(member),
-                                  onRemove: () => _removeMember(member),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
                       const SizedBox(height: 32),
                     ],
                   ),
