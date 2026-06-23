@@ -449,10 +449,8 @@ class _BusinessShellState extends State<BusinessShell> {
           BusinessTab.production,
           BusinessTab.sales,
           BusinessTab.purchases,
-          BusinessTab.services,
           BusinessTab.salary,
           BusinessTab.reports,
-          BusinessTab.taxes,
         ];
       case 'manager':
         return const [
@@ -469,7 +467,6 @@ class _BusinessShellState extends State<BusinessShell> {
           BusinessTab.finance,
           BusinessTab.salary,
           BusinessTab.reports,
-          BusinessTab.taxes,
         ];
       case 'warehouse':
         return const [
@@ -691,7 +688,11 @@ class _BusinessShellState extends State<BusinessShell> {
           accounts: overview.finance.accounts,
         );
       case BusinessTab.reports:
-        return const _ReportsScreen();
+        return _ReportsScreen(
+          accessToken: widget.session.accessToken,
+          businessGateway: widget.businessGateway,
+          overview: overview,
+        );
       case BusinessTab.taxes:
         return const _TaxesScreen();
     }

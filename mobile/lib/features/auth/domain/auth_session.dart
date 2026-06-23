@@ -23,6 +23,15 @@ class AuthSession {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'access_token': accessToken,
+      'token_type': tokenType,
+      'expires_at': expiresAt.toUtc().toIso8601String(),
+      'user': user.toJson(),
+    };
+  }
+
   AuthSession copyWith({
     String? accessToken,
     String? tokenType,

@@ -29,6 +29,16 @@ class UserProfile {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'full_name': fullName,
+      'phone': phone,
+      'companies': companies.map((company) => company.toJson()).toList(),
+      'created_at': createdAt.toUtc().toIso8601String(),
+    };
+  }
+
   UserProfile copyWith({
     String? id,
     String? fullName,

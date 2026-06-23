@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -3498,7 +3499,7 @@ func (s *PostgresStore) applyInventoryMovement(
 	documentDate time.Time,
 ) error {
 	switch documentType {
-	case "purchase_receipt", "adjustment":
+	case "purchase_receipt", "adjustment", "production_in":
 		currentBalance, err := s.currentInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID)
 		if err != nil {
 			return err
@@ -3525,7 +3526,7 @@ func (s *PostgresStore) applyInventoryMovement(
 			return err
 		}
 		return s.upsertInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID, newBalance, unitCost)
-	case "write_off", "sale_issue":
+	case "write_off", "sale_issue", "production_out":
 		currentBalance, err := s.currentInventoryBalance(ctx, tx, companyID, sourceWarehouseID, product.ID)
 		if err != nil {
 			return err
@@ -3857,6 +3858,10 @@ func (s *PostgresStore) nextInventoryDocumentNo(documentType string) string {
 		prefix = "SAL"
 	case "adjustment":
 		prefix = "ADJ"
+	case "production_in":
+		prefix = "PIN"
+	case "production_out":
+		prefix = "POUT"
 	}
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
@@ -4537,6 +4542,24 @@ func (s *PostgresStore) DeleteRecipe(user auth.User, recipeID string) error {
 
 // ── Production Orders ─────────────────────────────────────────────────────────
 
+type productionInventoryLine struct {
+	Product   Product
+	Quantity  int
+	UnitPrice int
+	UnitCost  int
+}
+
+type productionOrderPosting struct {
+	DocumentNo              string
+	RecipeID                string
+	SourceWarehouseID       string
+	OutputWarehouseID       string
+	PlannedQuantity         float64
+	Status                  string
+	ProductionOutDocumentID string
+	ProductionInDocumentID  string
+}
+
 func (s *PostgresStore) ListProductionOrders(user auth.User) ([]ProductionOrder, error) {
 	ctx, cancel := s.withTimeout()
 	defer cancel()
@@ -4718,16 +4741,37 @@ func (s *PostgresStore) UpdateProductionOrderStatus(user auth.User, orderID stri
 		return ProductionOrder{}, fmt.Errorf("%w: invalid status", ErrValidation)
 	}
 
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE production_orders SET status=$3, updated_at=NOW()
-		 WHERE id=$1::uuid AND company_id=$2::uuid`,
-		orderID, companyID, input.Status,
-	)
-	if err != nil {
-		return ProductionOrder{}, err
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return ProductionOrder{}, fmt.Errorf("%w: production order not found", ErrValidation)
+	if input.Status == "completed" {
+		tx, txErr := s.db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return ProductionOrder{}, txErr
+		}
+		err = txErr
+		defer func() {
+			if err != nil {
+				_ = tx.Rollback()
+			}
+		}()
+
+		if err = s.completeProductionOrder(ctx, tx, companyID, user.ID, orderID); err != nil {
+			return ProductionOrder{}, err
+		}
+		if err = tx.Commit(); err != nil {
+			return ProductionOrder{}, err
+		}
+	} else {
+		result, updateErr := s.db.ExecContext(ctx,
+			`UPDATE production_orders SET status=$3, updated_at=NOW()
+			 WHERE id=$1::uuid AND company_id=$2::uuid
+			   AND status NOT IN ('completed', 'cancelled')`,
+			orderID, companyID, input.Status,
+		)
+		if updateErr != nil {
+			return ProductionOrder{}, updateErr
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			return ProductionOrder{}, fmt.Errorf("%w: production order not found or already closed", ErrValidation)
+		}
 	}
 
 	orders, err := s.ListProductionOrders(user)
@@ -4740,4 +4784,312 @@ func (s *PostgresStore) UpdateProductionOrderStatus(user auth.User, orderID stri
 		}
 	}
 	return ProductionOrder{ID: orderID, Status: input.Status}, nil
+}
+
+func (s *PostgresStore) completeProductionOrder(ctx context.Context, tx *sql.Tx, companyID string, userID string, orderID string) error {
+	var order productionOrderPosting
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT
+		    document_no,
+		    COALESCE(recipe_id::text, ''),
+		    COALESCE(source_warehouse_id::text, ''),
+		    COALESCE(output_warehouse_id::text, ''),
+		    planned_quantity,
+		    status,
+		    COALESCE(production_out_document_id::text, ''),
+		    COALESCE(production_in_document_id::text, '')
+		 FROM production_orders
+		 WHERE id = $1::uuid AND company_id = $2::uuid
+		 FOR UPDATE`,
+		orderID,
+		companyID,
+	).Scan(
+		&order.DocumentNo,
+		&order.RecipeID,
+		&order.SourceWarehouseID,
+		&order.OutputWarehouseID,
+		&order.PlannedQuantity,
+		&order.Status,
+		&order.ProductionOutDocumentID,
+		&order.ProductionInDocumentID,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: production order not found", ErrValidation)
+		}
+		return err
+	}
+
+	if order.Status == "completed" || order.ProductionOutDocumentID != "" || order.ProductionInDocumentID != "" {
+		return fmt.Errorf("%w: production order is already completed", ErrValidation)
+	}
+	if order.Status == "cancelled" {
+		return fmt.Errorf("%w: cancelled production order cannot be completed", ErrValidation)
+	}
+	if order.RecipeID == "" || order.SourceWarehouseID == "" || order.OutputWarehouseID == "" {
+		return fmt.Errorf("%w: production order is missing recipe or warehouses", ErrValidation)
+	}
+
+	inputLines, err := s.loadProductionIngredientLines(ctx, tx, companyID, order.RecipeID, order.PlannedQuantity)
+	if err != nil {
+		return err
+	}
+	outputLines, err := s.loadProductionOutputLines(ctx, tx, companyID, order.RecipeID, order.PlannedQuantity)
+	if err != nil {
+		return err
+	}
+	if len(outputLines) == 0 {
+		return fmt.Errorf("%w: production recipe has no output products", ErrValidation)
+	}
+
+	documentDate := time.Now()
+	outDocumentID, err := s.createProductionInventoryDocument(
+		ctx,
+		tx,
+		companyID,
+		userID,
+		"production_out",
+		order.DocumentNo,
+		order.SourceWarehouseID,
+		order.OutputWarehouseID,
+		fmt.Sprintf("Списание сырья по производству %s", order.DocumentNo),
+		documentDate,
+		inputLines,
+	)
+	if err != nil {
+		return err
+	}
+
+	inDocumentID, err := s.createProductionInventoryDocument(
+		ctx,
+		tx,
+		companyID,
+		userID,
+		"production_in",
+		order.DocumentNo,
+		order.OutputWarehouseID,
+		order.SourceWarehouseID,
+		fmt.Sprintf("Выпуск продукции по производству %s", order.DocumentNo),
+		documentDate,
+		outputLines,
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`UPDATE production_orders
+		 SET status = 'completed',
+		     completed_at = NOW(),
+		     production_out_document_id = NULLIF($3, '')::uuid,
+		     production_in_document_id = NULLIF($4, '')::uuid,
+		     updated_at = NOW()
+		 WHERE id = $1::uuid AND company_id = $2::uuid`,
+		orderID,
+		companyID,
+		outDocumentID,
+		inDocumentID,
+	)
+	return err
+}
+
+func (s *PostgresStore) loadProductionIngredientLines(ctx context.Context, tx *sql.Tx, companyID string, recipeID string, plannedQuantity float64) ([]productionInventoryLine, error) {
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT p.id::text, p.name, p.sku, p.sale_price, p.cost_price, ri.quantity
+		 FROM recipe_ingredients ri
+		 JOIN products p ON p.id = ri.product_id
+		 WHERE ri.recipe_id = $1::uuid
+		   AND p.company_id = $2::uuid
+		   AND p.archived_at IS NULL
+		 ORDER BY ri.created_at ASC`,
+		recipeID,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	lines := make([]productionInventoryLine, 0)
+	for rows.Next() {
+		line, scanErr := scanProductionInventoryLine(rows, plannedQuantity)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		lines = append(lines, line)
+	}
+	return lines, rows.Err()
+}
+
+func (s *PostgresStore) loadProductionOutputLines(ctx context.Context, tx *sql.Tx, companyID string, recipeID string, plannedQuantity float64) ([]productionInventoryLine, error) {
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT p.id::text, p.name, p.sku, p.sale_price, p.cost_price, ro.quantity
+		 FROM recipe_outputs ro
+		 JOIN products p ON p.id = ro.product_id
+		 WHERE ro.recipe_id = $1::uuid
+		   AND p.company_id = $2::uuid
+		   AND p.archived_at IS NULL
+		 ORDER BY ro.created_at ASC`,
+		recipeID,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	lines := make([]productionInventoryLine, 0)
+	for rows.Next() {
+		line, scanErr := scanProductionInventoryLine(rows, plannedQuantity)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		lines = append(lines, line)
+	}
+	return lines, rows.Err()
+}
+
+type productionLineScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanProductionInventoryLine(scanner productionLineScanner, plannedQuantity float64) (productionInventoryLine, error) {
+	var (
+		line           productionInventoryLine
+		price          float64
+		cost           float64
+		recipeQuantity float64
+	)
+	if err := scanner.Scan(
+		&line.Product.ID,
+		&line.Product.Name,
+		&line.Product.SKU,
+		&price,
+		&cost,
+		&recipeQuantity,
+	); err != nil {
+		return productionInventoryLine{}, err
+	}
+
+	quantity, err := productionWholeQuantity(recipeQuantity * plannedQuantity)
+	if err != nil {
+		return productionInventoryLine{}, fmt.Errorf("%w: %s", err, line.Product.Name)
+	}
+
+	line.Quantity = quantity
+	line.Product.Price = int(price)
+	line.Product.Cost = int(cost)
+	line.UnitPrice = int(cost)
+	line.UnitCost = int(cost)
+	return line, nil
+}
+
+func productionWholeQuantity(value float64) (int, error) {
+	rounded := math.Round(value)
+	if rounded <= 0 {
+		return 0, fmt.Errorf("%w: production quantity must be greater than zero", ErrValidation)
+	}
+	if math.Abs(value-rounded) > 0.000001 {
+		return 0, fmt.Errorf("%w: production quantities must be whole numbers", ErrValidation)
+	}
+	return int(rounded), nil
+}
+
+func (s *PostgresStore) createProductionInventoryDocument(
+	ctx context.Context,
+	tx *sql.Tx,
+	companyID string,
+	userID string,
+	documentType string,
+	orderDocumentNo string,
+	warehouseID string,
+	relatedWarehouseID string,
+	note string,
+	documentDate time.Time,
+	lines []productionInventoryLine,
+) (string, error) {
+	if len(lines) == 0 {
+		return "", nil
+	}
+
+	documentNo := productionInventoryDocumentNo(documentType, orderDocumentNo)
+	var documentID string
+	if err := tx.QueryRowContext(
+		ctx,
+		`INSERT INTO inventory_documents (
+		   company_id, document_no, document_type, status, document_date, warehouse_id,
+		   related_warehouse_id, note, created_by_user_id, posted_by_user_id,
+		   posted_at, created_at, updated_at
+		 ) VALUES (
+		   $1::uuid, $2, $3, 'posted', $4, $5::uuid, NULLIF($6, '')::uuid,
+		   NULLIF($7, ''), $8, $8, NOW(), NOW(), NOW()
+		 )
+		 RETURNING id::text`,
+		companyID,
+		documentNo,
+		documentType,
+		documentDate.Format("2006-01-02"),
+		warehouseID,
+		relatedWarehouseID,
+		note,
+		userID,
+	).Scan(&documentID); err != nil {
+		return "", err
+	}
+
+	for index, line := range lines {
+		var lineID string
+		if err := tx.QueryRowContext(
+			ctx,
+			`INSERT INTO inventory_document_lines (
+			   document_id, line_no, product_id, quantity, unit_price, unit_cost, note, created_at
+			 ) VALUES (
+			   $1::uuid, $2, $3::uuid, $4, $5, $6, NULLIF($7, ''), NOW()
+			 )
+			 RETURNING id::text`,
+			documentID,
+			index+1,
+			line.Product.ID,
+			line.Quantity,
+			line.UnitPrice,
+			line.UnitCost,
+			note,
+		).Scan(&lineID); err != nil {
+			return "", err
+		}
+
+		if err := s.applyInventoryMovement(
+			ctx,
+			tx,
+			companyID,
+			documentType,
+			warehouseID,
+			relatedWarehouseID,
+			line.Product,
+			documentID,
+			lineID,
+			line.Quantity,
+			line.UnitCost,
+			documentDate,
+		); err != nil {
+			return "", err
+		}
+	}
+
+	return documentID, nil
+}
+
+func productionInventoryDocumentNo(documentType string, orderDocumentNo string) string {
+	switch documentType {
+	case "production_out":
+		return fmt.Sprintf("POUT-%s", orderDocumentNo)
+	case "production_in":
+		return fmt.Sprintf("PIN-%s", orderDocumentNo)
+	default:
+		return fmt.Sprintf("PRD-%s", orderDocumentNo)
+	}
 }

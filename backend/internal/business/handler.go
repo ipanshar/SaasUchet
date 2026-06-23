@@ -960,7 +960,11 @@ func (h Handler) ProductionOrderByID(w http.ResponseWriter, r *http.Request) {
 	}
 	order, err := h.store.UpdateProductionOrderStatus(user, orderID, input)
 	if err != nil {
-		response.Error(w, http.StatusNotFound, "order not found")
+		if errors.Is(err, ErrValidation) {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	response.JSON(w, http.StatusOK, order)
