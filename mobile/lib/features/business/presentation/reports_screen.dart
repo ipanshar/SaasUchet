@@ -440,10 +440,14 @@ class _ReportSection extends StatelessWidget {
           ),
           LayoutBuilder(
             builder: (context, constraints) {
-              final width = (constraints.maxWidth - 12) / 2;
+              const spacing = 12.0;
+              final columns = constraints.maxWidth >= 720 ? 2 : 1;
+              final width = columns == 1
+                  ? constraints.maxWidth
+                  : (constraints.maxWidth - spacing) / 2;
               return Wrap(
-                spacing: 12,
-                runSpacing: 12,
+                spacing: spacing,
+                runSpacing: spacing,
                 children: children
                     .map((child) => SizedBox(width: width, child: child))
                     .toList(),
@@ -481,6 +485,7 @@ class _ReportMetricCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             width: 38,
@@ -491,7 +496,7 @@ class _ReportMetricCard extends StatelessWidget {
             ),
             child: Icon(icon, color: color, size: 21),
           ),
-          const Spacer(),
+          const SizedBox(height: 24),
           Text(
             value,
             maxLines: 2,
