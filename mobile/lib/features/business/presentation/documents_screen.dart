@@ -552,7 +552,27 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        Expanded(child: _buildBody()),
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(child: _buildBody()),
+              Positioned(
+                right: 16,
+                bottom: 90,
+                child: FloatingActionButton(
+                  heroTag: '${widget.documentType}_create_document',
+                  backgroundColor: const Color(0xFF00A86B),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  onPressed: _showCreateDocument,
+                  child: const Icon(Icons.add_rounded),
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -615,12 +635,6 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
                 fontWeight: FontWeight.w600,
                 color: Color(0xFF64748B),
               ),
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: _showCreateDocument,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Создать документ'),
             ),
           ],
         ),
@@ -721,11 +735,6 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
                 ),
               ),
             ),
-          ),
-          FilledButton.icon(
-            onPressed: _showCreateDocument,
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Создать документ'),
           ),
         ],
       ),

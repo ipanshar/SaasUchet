@@ -676,77 +676,12 @@ class _WarehouseScreenState extends State<_WarehouseScreen>
   }
 
   Future<void> _showCreateWarehouseSheet() async {
-    final controller = TextEditingController();
-    final formKey = GlobalKey<FormState>();
     final created = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-        return Padding(
-          padding: EdgeInsets.only(bottom: bottomInset),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFFF7FAF8),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                child: Form(
-                  key: formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Center(
-                        child:
-                            SizedBox(width: 48, child: Divider(thickness: 4)),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Новый склад',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _ClientTextField(
-                        controller: controller,
-                        label: 'Название склада',
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Введите название';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          onPressed: () {
-                            if (!formKey.currentState!.validate()) {
-                              return;
-                            }
-                            Navigator.of(context).pop(controller.text.trim());
-                          },
-                          child: const Text('Сохранить'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+      builder: (context) => const _CreateWarehouseSheet(),
     );
-    controller.dispose();
 
     if (created == null || created.isEmpty) {
       return;
@@ -756,11 +691,22 @@ class _WarehouseScreenState extends State<_WarehouseScreen>
       _isSubmitting = true;
     });
     try {
-      await widget.businessGateway.createWarehouse(
+      final payload = await widget.businessGateway.createWarehouse(
         accessToken: widget.accessToken,
         payload: {'name': created},
       );
-      await _loadWarehouses();
+      final createdWarehouse = _warehouseFromJson(payload);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _warehouses = [
+          ..._warehouses.where((item) => item.id != createdWarehouse.id),
+          createdWarehouse,
+        ];
+        _selectedWarehouse = createdWarehouse;
+      });
+      await _reloadWarehouseSection();
       if (!mounted) {
         return;
       }
@@ -807,6 +753,87 @@ class _WarehouseScreenState extends State<_WarehouseScreen>
         SnackBar(content: Text('$error')),
       );
     }
+  }
+}
+
+class _CreateWarehouseSheet extends StatefulWidget {
+  const _CreateWarehouseSheet();
+
+  @override
+  State<_CreateWarehouseSheet> createState() => _CreateWarehouseSheetState();
+}
+
+class _CreateWarehouseSheetState extends State<_CreateWarehouseSheet> {
+  final _controller = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFFF7FAF8),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Center(
+                    child: SizedBox(width: 48, child: Divider(thickness: 4)),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Новый склад',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 16),
+                  _ClientTextField(
+                    controller: _controller,
+                    label: 'Название склада',
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Введите название';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () {
+                        if (!_formKey.currentState!.validate()) {
+                          return;
+                        }
+                        Navigator.of(
+                          context,
+                        ).pop(_controller.text.trim());
+                      },
+                      child: const Text('Сохранить'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -50,6 +50,7 @@ class _MoreScreenState extends State<_MoreScreen> {
   _Company? _detailCompany;
   List<_MoreCompanyMemberVm> _members = const [];
   List<_MoneyDocument> _notificationMoneyDocuments = const [];
+  Set<String> _seenNotificationIds = <String>{};
   List<_InventoryDocument> _inventoryDocuments = const [];
   List<_MoneyDocument> _moneyDocuments = const [];
   _MoreDocumentsView _documentsView = _MoreDocumentsView.inventory;
@@ -57,6 +58,129 @@ class _MoreScreenState extends State<_MoreScreen> {
   final TextEditingController _documentsSearchController =
       TextEditingController();
   final Set<String> _expandedFaqIds = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreSeenNotifications();
+    _loadNotifications(showLoading: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant _MoreScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final companyChanged =
+        oldWidget.activeCompany?.id != widget.activeCompany?.id;
+    final userChanged = oldWidget.session.user.id != widget.session.user.id;
+    if (companyChanged || userChanged) {
+      _seenNotificationIds = <String>{};
+      _notificationMoneyDocuments = const [];
+      _restoreSeenNotifications();
+      _loadNotifications(showLoading: false);
+      return;
+    }
+    if (oldWidget.overview.products != widget.overview.products) {
+      _syncSeenNotifications();
+    }
+  }
+
+  String get _notificationSeenPrefKey =>
+      'more_seen_notifications_${widget.session.user.id}_${widget.activeCompany?.id ?? widget.overview.companyName}';
+
+  List<_Product> get _lowStockProducts => widget.overview.products
+      .where(
+          (item) => item.minQuantity > 0 && item.quantity <= item.minQuantity)
+      .toList(growable: false);
+
+  int get _unreadNotificationsCount => _currentNotificationIds()
+      .where((id) => !_seenNotificationIds.contains(id))
+      .length;
+
+  String _lowStockNotificationId(_Product product) => 'low_stock:${product.id}';
+
+  String _moneyDocumentNotificationId(_MoneyDocument document) =>
+      'money_due:${document.id}';
+
+  Set<String> _currentNotificationIds({
+    List<_MoneyDocument>? moneyDocuments,
+  }) =>
+      {
+        for (final product in _lowStockProducts)
+          _lowStockNotificationId(product),
+        for (final document in moneyDocuments ?? _notificationMoneyDocuments)
+          _moneyDocumentNotificationId(document),
+      };
+
+  Future<void> _restoreSeenNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getStringList(_notificationSeenPrefKey) ?? const [];
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _seenNotificationIds = stored.toSet();
+      });
+    } catch (_) {
+      // Keep unread state in memory only if preferences are unavailable.
+    }
+  }
+
+  Future<void> _persistSeenNotifications(Set<String> ids) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(
+        _notificationSeenPrefKey,
+        ids.toList(growable: false),
+      );
+    } catch (_) {
+      // Non-fatal: unread markers will persist only for the current session.
+    }
+  }
+
+  Future<void> _syncSeenNotifications({
+    List<_MoneyDocument>? moneyDocuments,
+  }) async {
+    final activeIds = _currentNotificationIds(moneyDocuments: moneyDocuments);
+    final nextSeen = _seenNotificationIds.where(activeIds.contains).toSet();
+    if (_sameStringSet(nextSeen, _seenNotificationIds)) {
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _seenNotificationIds = nextSeen;
+      });
+    }
+    await _persistSeenNotifications(nextSeen);
+  }
+
+  Future<void> _markNotificationsViewed() async {
+    final nextSeen = {
+      ..._seenNotificationIds,
+      ..._currentNotificationIds(),
+    };
+    if (_sameStringSet(nextSeen, _seenNotificationIds)) {
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _seenNotificationIds = nextSeen;
+      });
+    }
+    await _persistSeenNotifications(nextSeen);
+  }
+
+  bool _sameStringSet(Set<String> left, Set<String> right) {
+    if (left.length != right.length) {
+      return false;
+    }
+    for (final value in left) {
+      if (!right.contains(value)) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   Future<void> _loadDetail() async {
     final id = widget.activeCompany?.id;
@@ -119,24 +243,33 @@ class _MoreScreenState extends State<_MoreScreen> {
   Future<void> _openNotifications() async {
     setState(() => _section = _MoreSection.notifications);
     await _loadNotifications();
+    await _markNotificationsViewed();
   }
 
-  Future<void> _loadNotifications() async {
-    setState(() => _isNotificationsLoading = true);
+  Future<void> _loadNotifications({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() => _isNotificationsLoading = true);
+    }
     try {
       final payload = await widget.businessGateway.fetchMoneyDocuments(
         accessToken: widget.session.accessToken,
       );
+      final documents = payload
+          .map(_moneyDocumentFromJson)
+          .where((item) => item.remainingAmount > 0)
+          .toList(growable: false);
+      final nextSeen = _seenNotificationIds
+          .where(_currentNotificationIds(moneyDocuments: documents).contains)
+          .toSet();
       if (!mounted) {
         return;
       }
       setState(() {
-        _notificationMoneyDocuments = payload
-            .map(_moneyDocumentFromJson)
-            .where((item) => item.remainingAmount > 0)
-            .toList(growable: false);
+        _notificationMoneyDocuments = documents;
+        _seenNotificationIds = nextSeen;
         _isNotificationsLoading = false;
       });
+      await _persistSeenNotifications(nextSeen);
     } catch (e) {
       if (!mounted) {
         return;
@@ -586,7 +719,9 @@ class _MoreScreenState extends State<_MoreScreen> {
                             iconTone: const Color(0x14F59E0B),
                             title: 'Уведомления',
                             subtitle: 'Напоминания и события',
-                            badge: '${widget.overview.menuNotifications}',
+                            badge: _unreadNotificationsCount > 0
+                                ? '$_unreadNotificationsCount'
+                                : null,
                           ),
                         ),
                         const Divider(height: 24),
@@ -1021,11 +1156,6 @@ class _MoreScreenState extends State<_MoreScreen> {
       ),
     );
   }
-
-  List<_Product> get _lowStockProducts => widget.overview.products
-      .where(
-          (item) => item.minQuantity > 0 && item.quantity <= item.minQuantity)
-      .toList(growable: false);
 
   Widget _buildNotificationsPage() {
     final lowStockProducts = _lowStockProducts;
