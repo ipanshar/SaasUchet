@@ -116,14 +116,17 @@ class _BottomNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return DecoratedBox(
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: tokens.navBackground,
+        border: Border(top: BorderSide(color: tokens.border)),
         boxShadow: [
           BoxShadow(
-            color: Color(0x12000000),
+            color: tokens.shadow,
             blurRadius: 20,
-            offset: Offset(0, -6),
+            offset: const Offset(0, -6),
           ),
         ],
       ),
@@ -136,23 +139,33 @@ class _BottomNavBar extends StatelessWidget {
               final isActive = tab == activeTab;
               return Expanded(
                 child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
                   onTap: () => onTabSelected(tab),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: isActive ? 28 : 4,
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: isActive ? tokens.primary : Colors.transparent,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                      ),
+                      const SizedBox(height: 7),
                       Icon(
                         tabIcon(tab),
-                        color: isActive
-                            ? const Color(0xFF00A86B)
-                            : const Color(0xFF7B8794),
+                        color:
+                            isActive ? tokens.primary : tokens.mutedForeground,
                       ),
                       const SizedBox(height: 4),
                       Text(
                         tabLabel(tab),
                         style: TextStyle(
                           color: isActive
-                              ? const Color(0xFF00A86B)
-                              : const Color(0xFF7B8794),
+                              ? tokens.primary
+                              : tokens.mutedForeground,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -198,6 +211,8 @@ class _FabMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
@@ -238,7 +253,8 @@ class _FabMenu extends StatelessWidget {
           ),
         FloatingActionButton(
           onPressed: onToggle,
-          backgroundColor: const Color(0xFF00A86B),
+          backgroundColor: tokens.primary,
+          foregroundColor: tokens.onPrimary,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -270,15 +286,13 @@ class _GradientHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Container(
       padding: EdgeInsets.fromLTRB(16, 20, 16, child != null ? 34 : 20),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF00A86B), Color(0xFF008F5B)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(30)),
+      decoration: BoxDecoration(
+        gradient: tokens.heroGradient,
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(30)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -295,8 +309,8 @@ class _GradientHeader extends StatelessWidget {
                         if (subtitle != null)
                           Text(
                             subtitle!,
-                            style: const TextStyle(
-                              color: Color(0xCCFFFFFF),
+                            style: TextStyle(
+                              color: tokens.onPrimary.withValues(alpha: 0.8),
                               fontSize: 13,
                             ),
                           ),
@@ -310,17 +324,17 @@ class _GradientHeader extends StatelessWidget {
                                 Flexible(
                                   child: Text(
                                     title,
-                                    style: const TextStyle(
-                                      color: Colors.white,
+                                    style: TextStyle(
+                                      color: tokens.onPrimary,
                                       fontSize: 28,
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
-                                const Icon(
+                                Icon(
                                   Icons.expand_more_rounded,
-                                  color: Colors.white,
+                                  color: tokens.onPrimary,
                                   size: 26,
                                 ),
                               ],
@@ -329,8 +343,8 @@ class _GradientHeader extends StatelessWidget {
                         else
                           Text(
                             title,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: tokens.onPrimary,
                               fontSize: 28,
                               fontWeight: FontWeight.w800,
                             ),
@@ -347,8 +361,8 @@ class _GradientHeader extends StatelessWidget {
               padding: EdgeInsets.only(bottom: child != null ? 18 : 0),
               child: Text(
                 title,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: tokens.onPrimary,
                   fontSize: 28,
                   fontWeight: FontWeight.w800,
                 ),
@@ -359,9 +373,11 @@ class _GradientHeader extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: const Color(0x1AFFFFFF),
+                color: tokens.onPrimary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: const Color(0x33FFFFFF)),
+                border: Border.all(
+                  color: tokens.onPrimary.withValues(alpha: 0.2),
+                ),
               ),
               child: child,
             ),
@@ -384,19 +400,18 @@ class _BusinessCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
     final content = Container(
       decoration: BoxDecoration(
-        color: background == null ? Colors.white : null,
+        color: background == null ? tokens.card : null,
         gradient: background,
-        borderRadius: BorderRadius.circular(24),
-        border: background == null
-            ? Border.all(color: const Color(0xFFE2E8F0))
-            : null,
-        boxShadow: const [
+        borderRadius: BorderRadius.circular(18),
+        border: background == null ? Border.all(color: tokens.border) : null,
+        boxShadow: [
           BoxShadow(
-            color: Color(0x0F0F172A),
+            color: tokens.shadow,
             blurRadius: 20,
-            offset: Offset(0, 10),
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -412,7 +427,7 @@ class _BusinessCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(18),
         child: content,
       ),
     );
@@ -430,19 +445,23 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Row(
       children: [
         Expanded(
           child: Text(
             title,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 18,
+                ),
           ),
         ),
         if (actionLabel != null)
           Text(
             actionLabel!,
-            style: const TextStyle(
-              color: Color(0xFF00A86B),
+            style: TextStyle(
+              color: tokens.primary,
               fontWeight: FontWeight.w700,
               fontSize: 12,
             ),
@@ -471,6 +490,8 @@ class _KpiCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return _BusinessCard(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -481,15 +502,16 @@ class _KpiCard extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
-                    color: Color(0xFF7B8794),
+                  style: TextStyle(
+                    color: tokens.mutedForeground,
                     fontSize: 13,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   value,
-                  style: const TextStyle(
+                  style: TextStyle(
+                    color: tokens.cardForeground,
                     fontSize: 24,
                     fontWeight: FontWeight.w800,
                   ),
@@ -527,13 +549,19 @@ class _SalesChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
     final values = points.map((point) => point.value).toList(growable: false);
 
     return Column(
       children: [
         Expanded(
           child: CustomPaint(
-            painter: _LineChartPainter(values: values),
+            painter: _LineChartPainter(
+              values: values,
+              gridColor: tokens.border,
+              lineColor: tokens.chart1,
+              dotBorderColor: tokens.card,
+            ),
             child: const SizedBox.expand(),
           ),
         ),
@@ -544,9 +572,9 @@ class _SalesChart extends StatelessWidget {
               .map(
                 (point) => Text(
                   point.label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: Color(0xFF7B8794),
+                    color: tokens.mutedForeground,
                   ),
                 ),
               )
@@ -558,14 +586,20 @@ class _SalesChart extends StatelessWidget {
 }
 
 class _LineChartPainter extends CustomPainter {
-  const _LineChartPainter({required this.values});
+  const _LineChartPainter({
+    required this.values,
+    required this.gridColor,
+    required this.lineColor,
+    required this.dotBorderColor,
+  });
 
   final List<double> values;
+  final Color gridColor;
+  final Color lineColor;
+  final Color dotBorderColor;
 
   @override
   void paint(Canvas canvas, Size size) {
-    const gridColor = Color(0xFFE2E8F0);
-    const lineColor = Color(0xFF00A86B);
     final paintGrid = Paint()
       ..color = gridColor
       ..strokeWidth = 1;
@@ -607,8 +641,11 @@ class _LineChartPainter extends CustomPainter {
       ..close();
 
     final gradientPaint = Paint()
-      ..shader = const LinearGradient(
-        colors: [Color(0x5500A86B), Color(0x0000A86B)],
+      ..shader = LinearGradient(
+        colors: [
+          lineColor.withValues(alpha: 0.32),
+          lineColor.withValues(alpha: 0),
+        ],
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
@@ -621,7 +658,7 @@ class _LineChartPainter extends CustomPainter {
     canvas.drawPath(linePath, strokePaint);
 
     final dotPaint = Paint()..color = lineColor;
-    final dotBorderPaint = Paint()..color = Colors.white;
+    final dotBorderPaint = Paint()..color = dotBorderColor;
     for (var i = 0; i < values.length; i++) {
       final point = pointFor(i);
       canvas.drawCircle(point, 4.5, dotBorderPaint);
@@ -631,7 +668,10 @@ class _LineChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LineChartPainter oldDelegate) {
-    return oldDelegate.values != values;
+    return oldDelegate.values != values ||
+        oldDelegate.gridColor != gridColor ||
+        oldDelegate.lineColor != lineColor ||
+        oldDelegate.dotBorderColor != dotBorderColor;
   }
 }
 
@@ -642,6 +682,8 @@ class _ActivityRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Row(
       children: [
         Container(
@@ -659,13 +701,16 @@ class _ActivityRow extends StatelessWidget {
             children: [
               Text(
                 activity.title,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: tokens.cardForeground,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               Text(
                 activity.time,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: Color(0xFF7B8794),
+                  color: tokens.mutedForeground,
                 ),
               ),
             ],
@@ -673,7 +718,10 @@ class _ActivityRow extends StatelessWidget {
         ),
         Text(
           activity.amount,
-          style: const TextStyle(fontWeight: FontWeight.w800),
+          style: TextStyle(
+            color: tokens.cardForeground,
+            fontWeight: FontWeight.w800,
+          ),
         ),
       ],
     );
@@ -695,6 +743,8 @@ class _MetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -716,9 +766,9 @@ class _MetricCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
-              color: Color(0xFF7B8794),
+              color: tokens.mutedForeground,
             ),
           ),
         ],
@@ -738,35 +788,36 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
     late final Color background;
     late final Color foreground;
     late final Color borderColor;
 
     switch (kind) {
       case StatusKind.success:
-        background = const Color(0x1422C55E);
-        foreground = const Color(0xFF16A34A);
-        borderColor = const Color(0x3322C55E);
+        background = tokens.tone(tokens.success);
+        foreground = tokens.success;
+        borderColor = tokens.success.withValues(alpha: 0.2);
         break;
       case StatusKind.warning:
-        background = const Color(0x14F59E0B);
-        foreground = const Color(0xFFD97706);
-        borderColor = const Color(0x33F59E0B);
+        background = tokens.tone(tokens.warning);
+        foreground = tokens.warning;
+        borderColor = tokens.warning.withValues(alpha: 0.2);
         break;
       case StatusKind.error:
-        background = const Color(0x14EF4444);
-        foreground = const Color(0xFFDC2626);
-        borderColor = const Color(0x33EF4444);
+        background = tokens.tone(tokens.destructive);
+        foreground = tokens.destructive;
+        borderColor = tokens.destructive.withValues(alpha: 0.2);
         break;
       case StatusKind.info:
-        background = const Color(0x143B82F6);
-        foreground = const Color(0xFF2563EB);
-        borderColor = const Color(0x333B82F6);
+        background = tokens.tone(tokens.info);
+        foreground = tokens.info;
+        borderColor = tokens.info.withValues(alpha: 0.2);
         break;
       case StatusKind.neutral:
-        background = const Color(0xFFF1F5F9);
-        foreground = const Color(0xFF64748B);
-        borderColor = const Color(0xFFE2E8F0);
+        background = tokens.secondary;
+        foreground = tokens.mutedForeground;
+        borderColor = tokens.border;
         break;
     }
 
@@ -804,14 +855,16 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
           _TileIcon(
             icon: icon,
-            color: const Color(0xFF64748B),
-            tone: const Color(0xFFF1F5F9),
+            color: tokens.mutedForeground,
+            tone: tokens.secondary,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -820,8 +873,8 @@ class _InfoTile extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(
-                    color: Color(0xFF7B8794),
+                  style: TextStyle(
+                    color: tokens.mutedForeground,
                     fontSize: 12,
                   ),
                 ),
@@ -854,11 +907,17 @@ class _TileIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+    final effectiveTone =
+        tokens.brightness == Brightness.dark && tone.computeLuminance() > 0.75
+            ? tokens.muted
+            : tone;
+
     return Container(
       width: 42,
       height: 42,
       decoration: BoxDecoration(
-        color: tone,
+        color: effectiveTone,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Icon(icon, color: color),
@@ -904,19 +963,24 @@ class _FilterChipButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: onPressed,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: active ? activeColor : const Color(0xFFF1F5F9),
+          color: active ? activeColor : tokens.secondary,
           borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: active ? activeColor.withValues(alpha: 0.4) : tokens.border,
+          ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: active ? Colors.white : const Color(0xFF334155),
+            color: active ? Colors.white : tokens.secondaryForeground,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -974,6 +1038,8 @@ class _LabelValue extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Column(
       crossAxisAlignment: textAlign == TextAlign.right
           ? CrossAxisAlignment.end
@@ -981,8 +1047,8 @@ class _LabelValue extends StatelessWidget {
       children: [
         Text(
           label,
-          style: const TextStyle(
-            color: Color(0xFF7B8794),
+          style: TextStyle(
+            color: tokens.mutedForeground,
             fontSize: 12,
           ),
           textAlign: textAlign,
@@ -992,7 +1058,7 @@ class _LabelValue extends StatelessWidget {
           value,
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: valueColor,
+            color: valueColor ?? tokens.cardForeground,
           ),
           textAlign: textAlign,
         ),
@@ -1096,6 +1162,8 @@ class _ExpensesChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Row(
       children: [
         Expanded(
@@ -1103,7 +1171,10 @@ class _ExpensesChart extends StatelessWidget {
           child: SizedBox(
             height: 180,
             child: CustomPaint(
-              painter: _DonutChartPainter(categories: categories),
+              painter: _DonutChartPainter(
+                categories: categories,
+                labelColor: tokens.cardForeground,
+              ),
             ),
           ),
         ),
@@ -1133,13 +1204,16 @@ class _ExpensesChart extends StatelessWidget {
                             children: [
                               Text(
                                 category.name,
-                                style: const TextStyle(fontSize: 12),
+                                style: TextStyle(
+                                  color: tokens.cardForeground,
+                                  fontSize: 12,
+                                ),
                               ),
                               Text(
                                 formatMoney(category.value),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
-                                  color: Color(0xFF7B8794),
+                                  color: tokens.mutedForeground,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -1159,9 +1233,13 @@ class _ExpensesChart extends StatelessWidget {
 }
 
 class _DonutChartPainter extends CustomPainter {
-  const _DonutChartPainter({required this.categories});
+  const _DonutChartPainter({
+    required this.categories,
+    required this.labelColor,
+  });
 
   final List<_ExpenseCategory> categories;
+  final Color labelColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1184,10 +1262,10 @@ class _DonutChartPainter extends CustomPainter {
     }
 
     final textPainter = TextPainter(
-      text: const TextSpan(
+      text: TextSpan(
         text: 'Расходы',
         style: TextStyle(
-          color: Color(0xFF0F172A),
+          color: labelColor,
           fontWeight: FontWeight.w700,
           fontSize: 16,
         ),
@@ -1205,7 +1283,8 @@ class _DonutChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _DonutChartPainter oldDelegate) {
-    return oldDelegate.categories != categories;
+    return oldDelegate.categories != categories ||
+        oldDelegate.labelColor != labelColor;
   }
 }
 
@@ -1216,7 +1295,9 @@ class _TransactionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
     final income = transaction.type == TransactionType.income;
+    final valueColor = income ? tokens.success : tokens.destructive;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1224,12 +1305,12 @@ class _TransactionRow extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: income ? const Color(0x1422C55E) : const Color(0x14EF4444),
+            color: tokens.tone(valueColor),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Icon(
             income ? Icons.trending_up_rounded : Icons.trending_down_rounded,
-            color: income ? const Color(0xFF22C55E) : const Color(0xFFEF4444),
+            color: valueColor,
           ),
         ),
         const SizedBox(width: 12),
@@ -1239,19 +1320,22 @@ class _TransactionRow extends StatelessWidget {
             children: [
               Text(
                 transaction.description,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: tokens.cardForeground,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               Text(
                 '${transaction.category} • ${transaction.account}',
-                style: const TextStyle(
-                  color: Color(0xFF7B8794),
+                style: TextStyle(
+                  color: tokens.mutedForeground,
                   fontSize: 12,
                 ),
               ),
               Text(
                 transaction.date,
-                style: const TextStyle(
-                  color: Color(0xFF7B8794),
+                style: TextStyle(
+                  color: tokens.mutedForeground,
                   fontSize: 12,
                 ),
               ),
@@ -1262,7 +1346,7 @@ class _TransactionRow extends StatelessWidget {
           '${income ? '+' : '-'}${formatMoney(transaction.amount.abs())}',
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: income ? const Color(0xFF22C55E) : const Color(0xFFEF4444),
+            color: valueColor,
           ),
         ),
       ],
@@ -1289,13 +1373,19 @@ class _CashFlowTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+    final effectiveTone =
+        tokens.brightness == Brightness.dark && tone.computeLuminance() > 0.75
+            ? tokens.secondary
+            : tone;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: tone,
+        color: effectiveTone,
         borderRadius: BorderRadius.circular(18),
         border: highlighted
-            ? Border.all(color: const Color(0x3300A86B), width: 2)
+            ? Border.all(color: tokens.primary.withValues(alpha: 0.2), width: 2)
             : null,
       ),
       child: Row(
@@ -1306,15 +1396,18 @@ class _CashFlowTile extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
-                    color: Color(0xFF7B8794),
+                  style: TextStyle(
+                    color: tokens.mutedForeground,
                     fontSize: 12,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                    color: tokens.cardForeground,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ),
@@ -1352,6 +1445,8 @@ class _MenuTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return Row(
       children: [
         _TileIcon(icon: icon, color: iconColor, tone: iconTone),
@@ -1362,12 +1457,15 @@ class _MenuTile extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: tokens.cardForeground,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               Text(
                 subtitle,
-                style: const TextStyle(
-                  color: Color(0xFF7B8794),
+                style: TextStyle(
+                  color: tokens.mutedForeground,
                   fontSize: 12,
                 ),
               ),
@@ -1378,7 +1476,7 @@ class _MenuTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: const Color(0xFFF59E0B),
+              color: tokens.warning,
               borderRadius: BorderRadius.circular(99),
             ),
             child: Text(
@@ -1391,49 +1489,123 @@ class _MenuTile extends StatelessWidget {
             ),
           ),
         const SizedBox(width: 6),
-        const Icon(
+        Icon(
           Icons.chevron_right_rounded,
-          color: Color(0xFF9AA5B1),
+          color: tokens.mutedForeground,
         ),
       ],
     );
   }
 }
 
-class _SwitchTile extends StatelessWidget {
-  const _SwitchTile({
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.onChanged,
+class _ThemePresetTile extends StatelessWidget {
+  const _ThemePresetTile({
+    required this.preset,
+    required this.currentPreset,
+    required this.onTap,
   });
 
-  final IconData icon;
-  final String title;
-  final bool value;
-  final ValueChanged<bool> onChanged;
+  final AppThemePreset preset;
+  final AppThemePreset currentPreset;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _TileIcon(
-          icon: icon,
-          color: const Color(0xFF64748B),
-          tone: const Color(0xFFF1F5F9),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.w700),
+    final tokens = context.appThemeTokens;
+    final presetTokens = preset.tokens;
+    final selected = preset == currentPreset;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: selected
+                ? tokens.primary.withValues(alpha: 0.08)
+                : tokens.secondary,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? tokens.primary : tokens.border,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              _TileIcon(
+                icon: preset.icon,
+                color: presetTokens.primary,
+                tone: presetTokens.primary.withValues(alpha: 0.12),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      preset.label,
+                      style: TextStyle(
+                        color: tokens.cardForeground,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      preset.description,
+                      style: TextStyle(
+                        color: tokens.mutedForeground,
+                        fontSize: 12,
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        _ThemeSwatch(color: presetTokens.primary),
+                        _ThemeSwatch(color: presetTokens.background),
+                        _ThemeSwatch(color: presetTokens.card),
+                        _ThemeSwatch(color: presetTokens.info),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_off_rounded,
+                color: selected ? tokens.primary : tokens.mutedForeground,
+              ),
+            ],
           ),
         ),
-        Switch(
-          value: value,
-          onChanged: onChanged,
-        ),
-      ],
+      ),
+    );
+  }
+}
+
+class _ThemeSwatch extends StatelessWidget {
+  const _ThemeSwatch({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
+    return Container(
+      width: 22,
+      height: 22,
+      margin: const EdgeInsets.only(right: 6),
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: tokens.border),
+      ),
     );
   }
 }
@@ -1451,6 +1623,8 @@ class _PlaceholderScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+
     return SafeArea(
       bottom: false,
       child: Center(
@@ -1471,18 +1645,18 @@ class _PlaceholderScreen extends StatelessWidget {
               const SizedBox(height: 20),
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFF0F172A),
+                  color: tokens.foreground,
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Раздел в разработке',
                 style: TextStyle(
                   fontSize: 15,
-                  color: Color(0xFF64748B),
+                  color: tokens.mutedForeground,
                 ),
               ),
             ],

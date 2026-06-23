@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:saas_uchet_mobile/app/app_theme.dart';
 import 'package:saas_uchet_mobile/core/network/api_exception.dart';
 import 'package:saas_uchet_mobile/features/auth/data/auth_api_client.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_gateway.dart';
@@ -29,7 +30,8 @@ class SaasUchetApp extends StatefulWidget {
 
 class _SaasUchetAppState extends State<SaasUchetApp> {
   static const _sessionPrefKey = 'auth_session';
-  static const _themePrefKey = 'app_dark_theme';
+  static const _themePrefKey = 'app_theme_preset';
+  static const _legacyDarkThemePrefKey = 'app_dark_theme';
 
   late final AuthGateway _authGateway;
   late final bool _ownsAuthGateway;
@@ -38,7 +40,7 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
   AuthSession? _session;
   bool _hasCompletedOnboarding = false;
   bool _isRestoringSession = false;
-  bool _isDarkTheme = false;
+  AppThemePreset _themePreset = AppThemePreset.emerald;
 
   @override
   void initState() {
@@ -159,26 +161,34 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
   Future<void> _restoreThemePreference() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final value = prefs.getBool(_themePrefKey) ?? false;
+      final stored = prefs.getString(_themePrefKey);
+      var value = AppThemePresetInfo.fromStorageKey(stored);
+      if (stored == null) {
+        final legacyDark = prefs.getBool(_legacyDarkThemePrefKey) ?? false;
+        if (legacyDark) {
+          value = AppThemePreset.graphite;
+          await prefs.setString(_themePrefKey, value.storageKey);
+        }
+      }
       if (!mounted) {
         return;
       }
       setState(() {
-        _isDarkTheme = value;
+        _themePreset = value;
       });
     } catch (_) {
       // Keep default theme.
     }
   }
 
-  Future<void> _handleThemeChanged(bool value) async {
+  Future<void> _handleThemeChanged(AppThemePreset value) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_themePrefKey, value);
+    await prefs.setString(_themePrefKey, value.storageKey);
     if (!mounted) {
       return;
     }
     setState(() {
-      _isDarkTheme = value;
+      _themePreset = value;
     });
   }
 
@@ -187,117 +197,7 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
     return MaterialApp(
       title: 'Saas Uchet',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00A86B),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF7FAF8),
-        fontFamily: 'SF Pro Display',
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          margin: EdgeInsets.zero,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFFF8FAFC),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(
-              color: Color(0xFF00A86B),
-              width: 1.4,
-            ),
-          ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF00A86B),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            textStyle: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFF0F172A),
-            side: const BorderSide(color: Color(0xFFE2E8F0)),
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            textStyle: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00A86B),
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: const Color(0xFF0F172A),
-        fontFamily: 'SF Pro Display',
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          margin: EdgeInsets.zero,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF111827),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFF1F2937)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFF00A86B), width: 1.4),
-          ),
-        ),
-        snackBarTheme: const SnackBarThemeData(
-          behavior: SnackBarBehavior.floating,
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF00A86B),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            textStyle: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ),
-      themeMode: _isDarkTheme ? ThemeMode.dark : ThemeMode.light,
+      theme: _themePreset.themeData,
       home: _isRestoringSession
           ? const _SessionRestoreScreen()
           : _session != null
@@ -308,7 +208,7 @@ class _SaasUchetAppState extends State<SaasUchetApp> {
                   onLogout: _handleLogout,
                   onSessionChanged: _handleSessionChanged,
                   onAccountDeleted: _handleLogout,
-                  isDarkTheme: _isDarkTheme,
+                  themePreset: _themePreset,
                   onThemeChanged: _handleThemeChanged,
                 )
               : !_hasCompletedOnboarding

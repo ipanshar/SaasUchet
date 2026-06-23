@@ -12,7 +12,7 @@ class _MoreScreen extends StatefulWidget {
     required this.hiddenTabs,
     required this.onOpenHiddenTab,
     required this.onOpenBusinessTab,
-    required this.isDarkTheme,
+    required this.themePreset,
     required this.onThemeChanged,
     required this.startTab,
     required this.onStartTabChanged,
@@ -30,8 +30,8 @@ class _MoreScreen extends StatefulWidget {
   final List<BusinessTab> hiddenTabs;
   final Future<void> Function(BusinessTab tab) onOpenHiddenTab;
   final Future<void> Function(BusinessTab tab) onOpenBusinessTab;
-  final bool isDarkTheme;
-  final ValueChanged<bool> onThemeChanged;
+  final AppThemePreset themePreset;
+  final ValueChanged<AppThemePreset> onThemeChanged;
   final BusinessTab startTab;
   final Future<void> Function(BusinessTab tab) onStartTabChanged;
   final List<BusinessTab> bottomNavTabs;
@@ -1704,6 +1704,8 @@ class _MoreScreenState extends State<_MoreScreen> {
   }
 
   Widget _buildSettingsPage() {
+    final tokens = context.appThemeTokens;
+
     return SafeArea(
       bottom: false,
       child: ListView(
@@ -1719,20 +1721,32 @@ class _MoreScreenState extends State<_MoreScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Настройки',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 16),
-                _SwitchTile(
-                  icon: widget.isDarkTheme
-                      ? Icons.dark_mode_rounded
-                      : Icons.light_mode_rounded,
-                  title: 'Темная тема',
-                  value: widget.isDarkTheme,
-                  onChanged: widget.onThemeChanged,
+                const SizedBox(height: 6),
+                Text(
+                  'Оформление, стартовый экран и нижняя панель.',
+                  style: TextStyle(color: tokens.mutedForeground),
                 ),
-                const Divider(height: 24),
+                const SizedBox(height: 18),
+                Text(
+                  'Тема приложения',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 10),
+                ...AppThemePreset.values.map(
+                  (preset) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _ThemePresetTile(
+                      preset: preset,
+                      currentPreset: widget.themePreset,
+                      onTap: () => widget.onThemeChanged(preset),
+                    ),
+                  ),
+                ),
+                const Divider(height: 26),
                 DropdownButtonFormField<BusinessTab>(
                   initialValue: widget.startTab,
                   decoration: const InputDecoration(
@@ -1767,10 +1781,10 @@ class _MoreScreenState extends State<_MoreScreen> {
                 InkWell(
                   borderRadius: BorderRadius.circular(18),
                   onTap: widget.onNavSettingsOpen,
-                  child: const _MenuTile(
+                  child: _MenuTile(
                     icon: Icons.tune_rounded,
-                    iconColor: Color(0xFF3B82F6),
-                    iconTone: Color(0x143B82F6),
+                    iconColor: tokens.info,
+                    iconTone: tokens.tone(tokens.info),
                     title: 'Настройка навигации',
                     subtitle: 'Разделы в нижней панели',
                   ),

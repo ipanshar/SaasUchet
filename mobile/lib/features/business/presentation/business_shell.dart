@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:saas_uchet_mobile/app/app_theme.dart';
 import 'package:saas_uchet_mobile/core/config/api_config.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_gateway.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
@@ -43,7 +44,7 @@ class BusinessShell extends StatefulWidget {
     required this.onLogout,
     required this.onSessionChanged,
     required this.onAccountDeleted,
-    required this.isDarkTheme,
+    required this.themePreset,
     required this.onThemeChanged,
   });
 
@@ -53,8 +54,8 @@ class BusinessShell extends StatefulWidget {
   final VoidCallback onLogout;
   final ValueChanged<AuthSession> onSessionChanged;
   final VoidCallback onAccountDeleted;
-  final bool isDarkTheme;
-  final ValueChanged<bool> onThemeChanged;
+  final AppThemePreset themePreset;
+  final ValueChanged<AppThemePreset> onThemeChanged;
 
   @override
   State<BusinessShell> createState() => _BusinessShellState();
@@ -722,7 +723,7 @@ class _BusinessShellState extends State<BusinessShell> {
           activeCompany: _activeCompanyId != null
               ? _companies.where((c) => c.id == _activeCompanyId).firstOrNull
               : null,
-          isDarkTheme: widget.isDarkTheme,
+          themePreset: widget.themePreset,
           onThemeChanged: widget.onThemeChanged,
           startTab: _resolvePreferredStartTab(tabs: _activeTabs),
           onStartTabChanged: _saveStartTab,
@@ -789,7 +790,7 @@ class _BusinessShellState extends State<BusinessShell> {
     final overview = _overview;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7FAF8),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           if (_isLoading)
@@ -801,10 +802,10 @@ class _BusinessShellState extends State<BusinessShell> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.cloud_off_rounded,
                       size: 52,
-                      color: Color(0xFF94A3B8),
+                      color: context.appThemeTokens.mutedForeground,
                     ),
                     const SizedBox(height: 12),
                     const Text(
@@ -819,7 +820,9 @@ class _BusinessShellState extends State<BusinessShell> {
                     Text(
                       _loadError ?? 'Попробуйте обновить позже.',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Color(0xFF64748B)),
+                      style: TextStyle(
+                        color: context.appThemeTokens.mutedForeground,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     FilledButton.icon(
@@ -926,7 +929,7 @@ class _HiddenTabRouteScreenState extends State<_HiddenTabRouteScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7FAF8),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           widget.screenBuilder(
@@ -940,7 +943,7 @@ class _HiddenTabRouteScreenState extends State<_HiddenTabRouteScreen> {
             child: SafeArea(
               bottom: false,
               child: Material(
-                color: const Color(0xE6FFFFFF),
+                color: context.appThemeTokens.card.withValues(alpha: 0.92),
                 shape: const CircleBorder(),
                 elevation: 6,
                 child: IconButton(
