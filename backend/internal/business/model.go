@@ -307,8 +307,21 @@ type InventoryDocumentLine struct {
 }
 
 type InventoryDocumentDetail struct {
-	Summary InventoryDocumentSummary `json:"summary"`
-	Lines   []InventoryDocumentLine  `json:"lines"`
+	Summary        InventoryDocumentSummary   `json:"summary"`
+	Lines          []InventoryDocumentLine    `json:"lines"`
+	LinkedPayments []InventoryDocumentPayment `json:"linked_payments,omitempty"`
+}
+
+// InventoryDocumentPayment описывает денежный документ (sale_receivable /
+// purchase_payable), автоматически созданный при создании складского
+// документа продажи/закупки (см. createLinkedMoneyDocumentDraft) — используется
+// в печатных формах для отображения статуса оплаты и номеров платёжных документов.
+type InventoryDocumentPayment struct {
+	DocumentNo      string `json:"document_no"`
+	Status          string `json:"status"`
+	Amount          int    `json:"amount"`
+	PaidAmount      int    `json:"paid_amount"`
+	RemainingAmount int    `json:"remaining_amount"`
 }
 
 type Finance struct {

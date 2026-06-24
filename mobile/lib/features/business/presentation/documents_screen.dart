@@ -89,6 +89,7 @@ class _DocumentsListScreen extends StatefulWidget {
   const _DocumentsListScreen({
     required this.accessToken,
     required this.businessGateway,
+    required this.companyId,
     required this.documentType,
     required this.title,
     required this.accentColor,
@@ -99,6 +100,7 @@ class _DocumentsListScreen extends StatefulWidget {
 
   final String accessToken;
   final BusinessGateway businessGateway;
+  final String companyId;
   final String documentType;
   final String title;
   final Color accentColor;
@@ -472,6 +474,8 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
         builder: (_) => _DocumentDetailScreen(
           accessToken: widget.accessToken,
           businessGateway: widget.businessGateway,
+          companyId: widget.companyId,
+          clients: widget.clients,
           document: document,
           accentColor: widget.accentColor,
           counterpartyLabel: widget.counterpartyLabel,
@@ -747,6 +751,8 @@ class _DocumentDetailScreen extends StatefulWidget {
   const _DocumentDetailScreen({
     required this.accessToken,
     required this.businessGateway,
+    required this.companyId,
+    required this.clients,
     required this.document,
     required this.accentColor,
     required this.counterpartyLabel,
@@ -754,6 +760,8 @@ class _DocumentDetailScreen extends StatefulWidget {
 
   final String accessToken;
   final BusinessGateway businessGateway;
+  final String companyId;
+  final List<_Client> clients;
   final _InventoryDocument document;
   final Color accentColor;
   final String counterpartyLabel;
@@ -766,6 +774,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   bool _isLoading = true;
   String? _loadError;
   _InventoryDocumentDetail? _detail;
+  bool _isPreparingPrintedForm = false;
 
   @override
   void initState() {
@@ -801,6 +810,53 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     }
   }
 
+  Future<void> _openPrintedForm() async {
+    final detail = _detail;
+    if (detail == null || _isPreparingPrintedForm) {
+      return;
+    }
+    setState(() => _isPreparingPrintedForm = true);
+    try {
+      final companyPayload = await widget.businessGateway.fetchCompany(
+        accessToken: widget.accessToken,
+        companyId: widget.companyId,
+      );
+      final company = _companyDetailFromJson(companyPayload);
+      final client = widget.clients
+          .where((c) => c.id == detail.summary.clientId)
+          .firstOrNull;
+      final bytes = await _buildInventoryDocumentPrintedForm(
+        detail: detail,
+        company: company,
+        client: client,
+        counterpartyLabel: widget.counterpartyLabel,
+        accessToken: widget.accessToken,
+      );
+      if (!mounted) {
+        return;
+      }
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => _PrintedFormScreen(
+            documentNo: detail.summary.documentNo,
+            bytes: bytes,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isPreparingPrintedForm = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -813,6 +869,20 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
           widget.document.documentNo,
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
+        actions: [
+          if (_detail != null)
+            IconButton(
+              onPressed: _isPreparingPrintedForm ? null : _openPrintedForm,
+              icon: _isPreparingPrintedForm
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.picture_as_pdf_rounded),
+              tooltip: 'Печатная форма',
+            ),
+        ],
       ),
       body: _buildBody(),
     );

@@ -485,10 +485,31 @@ class _InventoryDocumentDetail {
   const _InventoryDocumentDetail({
     required this.summary,
     required this.lines,
+    required this.linkedPayments,
   });
 
   final _InventoryDocument summary;
   final List<_InventoryDocumentLine> lines;
+  final List<_LinkedPayment> linkedPayments;
+}
+
+/// Денежный документ (sale_receivable/purchase_payable), автоматически
+/// созданный при создании складского документа — используется в печатных
+/// формах для отображения статуса оплаты и номеров платёжных документов.
+class _LinkedPayment {
+  const _LinkedPayment({
+    required this.documentNo,
+    required this.status,
+    required this.amount,
+    required this.paidAmount,
+    required this.remainingAmount,
+  });
+
+  final String documentNo;
+  final String status;
+  final int amount;
+  final int paidAmount;
+  final int remainingAmount;
 }
 
 class _MoneyDocumentLine {
@@ -1108,6 +1129,19 @@ _InventoryDocumentDetail _inventoryDocumentDetailFromJson(
           .whereType<Map<String, dynamic>>()
           .map(_inventoryDocumentLineFromJson)
           .toList(growable: false),
+      linkedPayments: (json['linked_payments'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_linkedPaymentFromJson)
+          .toList(growable: false),
+    );
+
+_LinkedPayment _linkedPaymentFromJson(Map<String, dynamic> json) =>
+    _LinkedPayment(
+      documentNo: json['document_no'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      amount: json['amount'] as int? ?? 0,
+      paidAmount: json['paid_amount'] as int? ?? 0,
+      remainingAmount: json['remaining_amount'] as int? ?? 0,
     );
 
 _MoneyDocumentLine _moneyDocumentLineFromJson(Map<String, dynamic> json) =>

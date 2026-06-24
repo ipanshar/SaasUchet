@@ -1657,6 +1657,8 @@ class _MoreScreenState extends State<_MoreScreen> {
         builder: (context) => _DocumentDetailScreen(
           accessToken: widget.session.accessToken,
           businessGateway: widget.businessGateway,
+          companyId: widget.activeCompany?.id ?? '',
+          clients: widget.overview.clients,
           document: document,
           accentColor: const Color(0xFF00A86B),
           counterpartyLabel: 'Контрагент',

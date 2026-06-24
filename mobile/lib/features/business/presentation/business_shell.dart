@@ -2,6 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:saas_uchet_mobile/app/app_theme.dart';
 import 'package:saas_uchet_mobile/core/config/api_config.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_gateway.dart';
@@ -24,6 +28,7 @@ part 'production_screen.dart';
 part 'sales_screen.dart';
 part 'purchases_screen.dart';
 part 'documents_screen.dart';
+part 'printed_forms.dart';
 part 'services_screen.dart';
 part 'catalog_screen.dart';
 part 'salary_screen.dart';
@@ -742,6 +747,7 @@ class _BusinessShellState extends State<BusinessShell> {
         return _SalesScreen(
           accessToken: _session.accessToken,
           businessGateway: widget.businessGateway,
+          companyId: _activeCompanyId ?? '',
           products: overview.products,
           clients: overview.clients,
         );
@@ -749,6 +755,7 @@ class _BusinessShellState extends State<BusinessShell> {
         return _PurchasesScreen(
           accessToken: _session.accessToken,
           businessGateway: widget.businessGateway,
+          companyId: _activeCompanyId ?? '',
           products: overview.products,
           clients: overview.clients,
         );

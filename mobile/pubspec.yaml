@@ -13,6 +13,8 @@ dependencies:
   http: ^1.2.2
   file_picker: ^11.0.2
   shared_preferences: ^2.3.2
+  pdf: ^3.12.0
+  printing: ^5.14.3
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +23,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/fonts/PTSans-Regular.ttf
+    - assets/fonts/PTSans-Bold.ttf
