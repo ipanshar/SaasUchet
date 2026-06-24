@@ -1523,7 +1523,7 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		    COALESCE((SELECT SUM(l.amount) FROM money_document_lines l WHERE l.document_id = d.id), 0),
 		    COALESCE((SELECT SUM(mm.amount) FROM money_movements mm WHERE mm.document_id = d.id), 0)
 		 FROM money_documents d
-		 WHERE d.company_id = $1::uuid AND d.source_module = 'inventory' AND d.source_reference = $2::uuid
+		 WHERE d.company_id = $1::uuid AND d.source_module = 'inventory' AND d.source_reference = $2
 		 ORDER BY d.created_at ASC`,
 		companyID,
 		documentID,
