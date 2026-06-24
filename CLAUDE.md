@@ -185,6 +185,7 @@ backend/
     ├── business/
     │   ├── handler.go                   # Бизнес-хэндлеры (catalog, warehouse, finance, production…)
     │   ├── payroll_handler.go           # Хэндлеры зарплаты (employees, periods, recipe-rates)
+    │   ├── company_logo.go              # Нормализация логотипа (raster/SVG/ICO → PNG) + хелперы
     │   ├── store.go
     │   ├── postgres_store.go            # Основные бизнес-запросы (большой файл)
     │   ├── payroll_postgres_store.go    # SQL зарплатного модуля
@@ -235,6 +236,7 @@ backend/
 - HTTP: стандартный `net/http.ServeMux`, без gin/chi/echo
 - Ответы: `response.JSON()` / `response.Error()` из `internal/response`
 - Таймауты запросов к БД: 5 секунд по умолчанию
+- Зависимости минимальны (упор на stdlib). Исключение — обработка логотипа в `company_logo.go`: `golang.org/x/image`, `srwiley/oksvg`, `srwiley/rasterx` (raster/SVG/ICO → PNG)
 
 ---
 
@@ -261,6 +263,8 @@ backend/
 - `007_payroll.sql` — `employees` (справочник сотрудников), `payroll_periods`, строки начислений
 - `008_payroll_rules.sql` — правила сдельной: `employees.sales_percent`/`sales_basis`, сумма за рецепт, участники производства
 - `009_production_inventory_links.sql` — связь `production_orders` со складскими документами (`production_out/in_document_id`, `completed_at`)
+- `010_client_bank_details.sql` — банковские реквизиты контрагента: `clients.bank_name`/`bank_account`/`bank_bik`
+- `011_company_logo.sql` — логотип компании: `companies.logo_png` (BYTEA), `logo_updated_at`
 
 ### Подключение (локально)
 
@@ -312,6 +316,7 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | GET | `/payroll/recipe-rates/{recipeId}` | Сдельные ставки по рецепту |
 | GET/POST | `/companies` | Компании пользователя — список / создание |
 | GET/PUT/DELETE | `/companies/{id}` | Компания — детали / обновление / удаление |
+| GET/PUT | `/companies/{id}/logo` | Логотип: отдать PNG / загрузить (multipart `file`, сервер нормализует в PNG) |
 
 Авторизация: `Authorization: Bearer <token>` для всех `/business/*`, `/catalog/*`, `/production/*`, `/payroll/*` и `/profile`.
 
@@ -324,11 +329,11 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | Аутентификация (телефон + пароль) | Готово |
 | Онбординг (3 слайда) | Готово |
 | Дашборд (KPI, график продаж) | Готово |
-| CRM (клиенты, сегменты, долги) | Готово |
+| CRM (клиенты, сегменты, долги, банковские реквизиты контрагента) | Готово |
 | Склад (товары, документы, штрихкоды) | Готово |
 | Финансы (счета, операции, отчёты) | Готово |
 | Профиль компании (просмотр) | Готово |
-| Редактор компании (реквизиты, банк, адрес) | Готово |
+| Редактор компании (реквизиты, банк, адрес, логотип) | Готово |
 | Справочник — Товары (type/unit/allowed_to_sell) | Готово |
 | Справочник — Услуги (BOM: товары / подуслуги / внешние) | Готово |
 | Настройка вкладок навигации (SharedPreferences) | Готово |
@@ -369,7 +374,13 @@ flutter analyze               # Линтер (должно быть 0 warnings)
 flutter pub get               # После изменений pubspec.yaml
 ```
 
+### Web dev-режим (из корня)
+```bash
+./scripts/run-mobile-web-dev.sh   # Flutter web + API_BASE_URL (для быстрой проверки UI в браузере)
+```
+
 Конфигурация бэкенда: `backend/.env` (пример: `backend/.env.example`).
+БД (compose.yaml): `saas_uchet` / `algotrade` / `algotrade` на `localhost:5432`. Поднять только Postgres: `docker compose up -d postgres`. (README в корне частично устарел — актуальны реквизиты из `compose.yaml`.)
 
 ---
 
@@ -391,7 +402,7 @@ flutter pub get               # После изменений pubspec.yaml
 2. **Не добавлять state management** в Flutter (BLoC, Riverpod, Provider) — пока `setState`
 3. **Не менять формат токена** — клиент и сервер ожидают Bearer session token
 4. **Не ломать существующие API** — мобильное приложение жёстко завязано на контракты
-5. **Новые SQL-схемы** — только через новый файл `010_*.sql` и далее, не редактировать существующие
+5. **Новые SQL-схемы** — только через новый файл `012_*.sql` и далее, не редактировать существующие
 6. **Кодогенерацию не вводить** без договорённости (`json_serializable`, `freezed` и т.д.)
 7. **Параллельный агент Codex** — возможны изменения от него; перед крупными рефакторингами проверять git log
 8. **Тесты не писать** — разработчик тестирует вручную; тестовые файлы не создавать и не запускать
