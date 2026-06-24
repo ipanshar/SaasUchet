@@ -592,8 +592,14 @@ class _WarehouseScreenState extends State<_WarehouseScreen>
         builder: (context) => _InventoryDocumentsSheet(
           accessToken: widget.accessToken,
           businessGateway: widget.businessGateway,
+          products: widget.products,
+          clients: widget.clients,
           documents:
               documents.map(_inventoryDocumentFromJson).toList(growable: false),
+          onChanged: () async {
+            await widget.onProductsChanged();
+            await _reloadWarehouseSection();
+          },
         ),
       );
     } catch (error) {
@@ -631,25 +637,7 @@ class _WarehouseScreenState extends State<_WarehouseScreen>
     try {
       await widget.businessGateway.createInventoryDocument(
         accessToken: widget.accessToken,
-        payload: {
-          'document_type': result.documentType,
-          'client_id': result.clientId,
-          'warehouse_name': result.warehouseName,
-          'related_warehouse_name': result.relatedWarehouseName,
-          'note': result.note,
-          'lines': result.lines
-              .map(
-                (line) => {
-                  'product_id': line.productId,
-                  'service_id': line.serviceId,
-                  'quantity': line.quantity,
-                  'unit_price': line.unitPrice,
-                  'unit_cost': line.unitCost,
-                  'note': line.note,
-                },
-              )
-              .toList(growable: false),
-        },
+        payload: _inventoryDocumentPayloadFromForm(result),
       );
       await widget.onProductsChanged();
       await _reloadWarehouseSection();
@@ -657,7 +645,13 @@ class _WarehouseScreenState extends State<_WarehouseScreen>
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Складской документ создан')),
+        SnackBar(
+          content: Text(
+            result.action == _InventoryDocumentFormAction.post
+                ? 'Складской документ проведен'
+                : 'Черновик сохранен',
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
@@ -1156,10 +1150,16 @@ class _CreateProductSheetState extends State<_CreateProductSheet> {
   }
 }
 
+enum _InventoryDocumentFormAction { saveDraft, post }
+
+enum _InventoryDocumentDetailAction { edit, post, delete }
+
 class _CreateInventoryDocumentFormData {
   const _CreateInventoryDocumentFormData({
     required this.documentType,
+    required this.action,
     required this.clientId,
+    required this.documentDate,
     required this.warehouseName,
     required this.relatedWarehouseName,
     required this.note,
@@ -1168,12 +1168,45 @@ class _CreateInventoryDocumentFormData {
   });
 
   final String documentType;
+  final _InventoryDocumentFormAction action;
   final String clientId;
+  final String documentDate;
   final String warehouseName;
   final String relatedWarehouseName;
   final String note;
   final List<_CreateInventoryDocumentLineFormData> lines;
   final String employeeId;
+}
+
+Map<String, dynamic> _inventoryDocumentPayloadFromForm(
+  _CreateInventoryDocumentFormData result, {
+  String? status,
+}) {
+  return {
+    'document_type': result.documentType,
+    'status': status ??
+        (result.action == _InventoryDocumentFormAction.post
+            ? 'posted'
+            : 'draft'),
+    if (result.documentDate.isNotEmpty) 'document_date': result.documentDate,
+    'client_id': result.clientId,
+    if (result.employeeId.isNotEmpty) 'employee_id': result.employeeId,
+    'warehouse_name': result.warehouseName,
+    'related_warehouse_name': result.relatedWarehouseName,
+    'note': result.note,
+    'lines': result.lines
+        .map(
+          (line) => {
+            'product_id': line.productId,
+            'service_id': line.serviceId,
+            'quantity': line.quantity,
+            'unit_price': line.unitPrice,
+            'unit_cost': line.unitCost,
+            'note': line.note,
+          },
+        )
+        .toList(growable: false),
+  };
 }
 
 class _CreateInventoryDocumentLineFormData {
@@ -1204,6 +1237,7 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
     this.initialDocumentType = 'purchase_receipt',
     this.initialClientId,
     this.initialWarehouseName = 'Основной склад',
+    this.initialDetail,
     this.lockDocumentType = false,
   });
 
@@ -1215,6 +1249,7 @@ class _CreateInventoryDocumentSheet extends StatefulWidget {
   final String initialDocumentType;
   final String? initialClientId;
   final String initialWarehouseName;
+  final _InventoryDocumentDetail? initialDetail;
   final bool lockDocumentType;
 
   @override
@@ -1233,22 +1268,46 @@ class _CreateInventoryDocumentSheetState
   List<_Service> _services = [];
   List<_Warehouse> _warehouses = [];
   bool _isLoadingWarehouses = false;
+  String _documentDate = '';
   late String _warehouseName;
   String _relatedWarehouseName = '';
 
   @override
   void initState() {
     super.initState();
-    _warehouseName = widget.initialWarehouseName.trim();
-    _documentType = widget.initialDocumentType;
-    _clientId = widget.initialClientId;
-    _lines = [
-      widget.products.isNotEmpty
-          ? _InventoryDocumentDraftLine.fromProduct(widget.products.first)
-          : _InventoryDocumentDraftLine.empty(),
-    ];
-    if (widget.products.isNotEmpty) {
-      _applyProductPricing(_lines.first, widget.products.first);
+    final detail = widget.initialDetail;
+    if (detail != null) {
+      _warehouseName = detail.summary.warehouseName.trim();
+      _documentType = detail.summary.documentType;
+      _clientId =
+          detail.summary.clientId.isEmpty ? null : detail.summary.clientId;
+      _employeeId =
+          detail.summary.employeeId.isEmpty ? null : detail.summary.employeeId;
+      _documentDate = detail.summary.documentDate;
+      _relatedWarehouseName = detail.summary.relatedWarehouseName;
+      _noteController.text = detail.summary.note;
+      _lines = detail.lines
+          .map(_InventoryDocumentDraftLine.fromDocumentLine)
+          .toList(growable: true);
+      if (_lines.isEmpty) {
+        _lines.add(
+          widget.products.isNotEmpty
+              ? _InventoryDocumentDraftLine.fromProduct(widget.products.first)
+              : _InventoryDocumentDraftLine.empty(),
+        );
+      }
+    } else {
+      _warehouseName = widget.initialWarehouseName.trim();
+      _documentType = widget.initialDocumentType;
+      _clientId = widget.initialClientId;
+      _lines = [
+        widget.products.isNotEmpty
+            ? _InventoryDocumentDraftLine.fromProduct(widget.products.first)
+            : _InventoryDocumentDraftLine.empty(),
+      ];
+      if (widget.products.isNotEmpty) {
+        _applyProductPricing(_lines.first, widget.products.first);
+      }
     }
     _loadServices();
     _loadWarehouses();
@@ -1335,9 +1394,11 @@ class _CreateInventoryDocumentSheetState
                       child: SizedBox(width: 48, child: Divider(thickness: 4)),
                     ),
                     const SizedBox(height: 12),
-                    const Text(
-                      'Новый складской документ',
-                      style: TextStyle(
+                    Text(
+                      widget.initialDetail == null
+                          ? 'Новый складской документ'
+                          : 'Редактировать черновик',
+                      style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w800,
                       ),
@@ -1497,9 +1558,27 @@ class _CreateInventoryDocumentSheetState
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _submit,
-                        child: const Text('Провести документ'),
+                      child: OutlinedButton.icon(
+                        onPressed: () => _submit(
+                          _InventoryDocumentFormAction.saveDraft,
+                        ),
+                        icon: const Icon(Icons.save_outlined),
+                        label: Text(
+                          widget.initialDetail == null
+                              ? 'Сохранить черновик'
+                              : 'Сохранить изменения',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () => _submit(
+                          _InventoryDocumentFormAction.post,
+                        ),
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: const Text('Провести документ'),
                       ),
                     ),
                   ],
@@ -1516,6 +1595,14 @@ class _CreateInventoryDocumentSheetState
     return List<Widget>.generate(_lines.length, (index) {
       final line = _lines[index];
       final isService = line.lineType == 'service';
+      final productValue =
+          widget.products.any((product) => product.id == line.productId)
+              ? line.productId
+              : null;
+      final serviceValue =
+          _services.any((service) => service.id == line.serviceId)
+              ? line.serviceId
+              : null;
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: _BusinessCard(
@@ -1566,7 +1653,7 @@ class _CreateInventoryDocumentSheetState
               if (!isService)
                 DropdownButtonFormField<String>(
                   key: ValueKey('product_${line.productId}_$index'),
-                  initialValue: line.productId.isEmpty ? null : line.productId,
+                  initialValue: productValue,
                   items: widget.products
                       .map(
                         (product) => DropdownMenuItem(
@@ -1596,7 +1683,7 @@ class _CreateInventoryDocumentSheetState
               else
                 DropdownButtonFormField<String>(
                   key: ValueKey('service_${line.serviceId}_$index'),
-                  initialValue: line.serviceId.isEmpty ? null : line.serviceId,
+                  initialValue: serviceValue,
                   items: _services
                       .map(
                         (svc) => DropdownMenuItem(
@@ -1672,7 +1759,7 @@ class _CreateInventoryDocumentSheetState
     setState(() {});
   }
 
-  void _submit() {
+  void _submit(_InventoryDocumentFormAction action) {
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -1680,7 +1767,9 @@ class _CreateInventoryDocumentSheetState
     Navigator.of(context).pop(
       _CreateInventoryDocumentFormData(
         documentType: _documentType,
+        action: action,
         clientId: _clientId ?? '',
+        documentDate: _documentDate,
         employeeId: _employeeId ?? '',
         warehouseName: _warehouseName.trim(),
         relatedWarehouseName: _relatedWarehouseName.trim(),
@@ -1831,6 +1920,21 @@ class _InventoryDocumentDraftLine {
     );
   }
 
+  factory _InventoryDocumentDraftLine.fromDocumentLine(
+    _InventoryDocumentLine line,
+  ) {
+    final isService = line.itemType == 'service' || line.serviceId.isNotEmpty;
+    return _InventoryDocumentDraftLine(
+      lineType: isService ? 'service' : 'product',
+      productId: isService ? '' : line.productId,
+      serviceId: isService ? line.serviceId : '',
+      quantityController: TextEditingController(text: '${line.quantity}'),
+      unitPriceController: TextEditingController(text: '${line.unitPrice}'),
+      unitCostController: TextEditingController(text: '${line.unitCost}'),
+      noteController: TextEditingController(text: line.note),
+    );
+  }
+
   factory _InventoryDocumentDraftLine.empty() {
     return _InventoryDocumentDraftLine(
       lineType: 'product',
@@ -1863,12 +1967,18 @@ class _InventoryDocumentsSheet extends StatefulWidget {
   const _InventoryDocumentsSheet({
     required this.accessToken,
     required this.businessGateway,
+    required this.products,
+    required this.clients,
     required this.documents,
+    required this.onChanged,
   });
 
   final String accessToken;
   final BusinessGateway businessGateway;
+  final List<_Product> products;
+  final List<_Client> clients;
   final List<_InventoryDocument> documents;
+  final Future<void> Function() onChanged;
 
   @override
   State<_InventoryDocumentsSheet> createState() =>
@@ -1878,10 +1988,17 @@ class _InventoryDocumentsSheet extends StatefulWidget {
 class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
   String _query = '';
   String _type = '';
+  late List<_InventoryDocument> _documents;
+
+  @override
+  void initState() {
+    super.initState();
+    _documents = widget.documents;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = widget.documents.where((document) {
+    final filtered = _documents.where((document) {
       final matchesType = _type.isEmpty || document.documentType == _type;
       final query = _query.toLowerCase();
       final matchesQuery = query.isEmpty ||
@@ -1892,7 +2009,7 @@ class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
       return matchesType && matchesQuery;
     }).toList(growable: false);
 
-    final documentTypes = widget.documents
+    final documentTypes = _documents
         .map((item) => item.documentType)
         .where((item) => item.isNotEmpty)
         .toSet()
@@ -1977,14 +2094,14 @@ class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
                                       ),
                                     ),
                                     _StatusBadge(
-                                      label: document.status,
-                                      kind: StatusKind.success,
+                                      label: document.statusLabel,
+                                      kind: document.statusKind,
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  '${document.documentType} • ${document.documentDate}',
+                                  '${document.documentTypeLabel} • ${document.documentDate}',
                                   style: const TextStyle(
                                     color: Color(0xFF7B8794),
                                     fontSize: 12,
@@ -2063,12 +2180,18 @@ class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
         return;
       }
       final detail = _inventoryDocumentDetailFromJson(payload);
-      await showModalBottomSheet<void>(
+      final action = await showModalBottomSheet<_InventoryDocumentDetailAction>(
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (context) => _InventoryDocumentDetailSheet(detail: detail),
+        builder: (context) => _InventoryDocumentDetailSheet(
+          detail: detail,
+          allowDraftActions: true,
+        ),
       );
+      if (action != null) {
+        await _handleDocumentAction(detail, action);
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -2078,12 +2201,112 @@ class _InventoryDocumentsSheetState extends State<_InventoryDocumentsSheet> {
       );
     }
   }
+
+  Future<void> _handleDocumentAction(
+    _InventoryDocumentDetail detail,
+    _InventoryDocumentDetailAction action,
+  ) async {
+    switch (action) {
+      case _InventoryDocumentDetailAction.edit:
+        await _showEditDocument(detail);
+      case _InventoryDocumentDetailAction.post:
+        await widget.businessGateway.postInventoryDocument(
+          accessToken: widget.accessToken,
+          documentId: detail.summary.id,
+        );
+        await _refreshAfterMutation('Документ проведен');
+      case _InventoryDocumentDetailAction.delete:
+        final confirmed = await _confirmDeleteDraft(detail.summary.documentNo);
+        if (confirmed != true) {
+          return;
+        }
+        await widget.businessGateway.deleteInventoryDocument(
+          accessToken: widget.accessToken,
+          documentId: detail.summary.id,
+        );
+        await _refreshAfterMutation('Черновик удален');
+    }
+  }
+
+  Future<void> _showEditDocument(_InventoryDocumentDetail detail) async {
+    final result = await showModalBottomSheet<_CreateInventoryDocumentFormData>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CreateInventoryDocumentSheet(
+        accessToken: widget.accessToken,
+        businessGateway: widget.businessGateway,
+        products: widget.products,
+        clients: widget.clients,
+        initialDetail: detail,
+      ),
+    );
+    if (result == null) {
+      return;
+    }
+
+    await widget.businessGateway.updateInventoryDocument(
+      accessToken: widget.accessToken,
+      documentId: detail.summary.id,
+      payload: _inventoryDocumentPayloadFromForm(result, status: 'draft'),
+    );
+    if (result.action == _InventoryDocumentFormAction.post) {
+      await widget.businessGateway.postInventoryDocument(
+        accessToken: widget.accessToken,
+        documentId: detail.summary.id,
+      );
+      await _refreshAfterMutation('Документ проведен');
+      return;
+    }
+    await _refreshAfterMutation('Черновик обновлен');
+  }
+
+  Future<bool?> _confirmDeleteDraft(String documentNo) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить черновик?'),
+        content: Text('Документ $documentNo будет удален без проведения.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _refreshAfterMutation(String message) async {
+    final documents = await widget.businessGateway.fetchInventoryDocuments(
+      accessToken: widget.accessToken,
+    );
+    await widget.onChanged();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _documents =
+          documents.map(_inventoryDocumentFromJson).toList(growable: false);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
 }
 
 class _InventoryDocumentDetailSheet extends StatelessWidget {
-  const _InventoryDocumentDetailSheet({required this.detail});
+  const _InventoryDocumentDetailSheet({
+    required this.detail,
+    this.allowDraftActions = false,
+  });
 
   final _InventoryDocumentDetail detail;
+  final bool allowDraftActions;
 
   @override
   Widget build(BuildContext context) {
@@ -2107,9 +2330,21 @@ class _InventoryDocumentDetailSheet extends StatelessWidget {
                     const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 8),
-              Text(
-                '${detail.summary.documentType} • ${detail.summary.documentDate}',
-                style: const TextStyle(color: Color(0xFF7B8794)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      '${detail.summary.documentTypeLabel} • ${detail.summary.documentDate}',
+                      style: const TextStyle(color: Color(0xFF7B8794)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _StatusBadge(
+                    label: detail.summary.statusLabel,
+                    kind: detail.summary.statusKind,
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Flexible(
@@ -2230,6 +2465,41 @@ class _InventoryDocumentDetailSheet extends StatelessWidget {
                   ],
                 ),
               ),
+              if (allowDraftActions && detail.summary.status == 'draft') ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).pop(
+                      _InventoryDocumentDetailAction.edit,
+                    ),
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Редактировать'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () => Navigator.of(context).pop(
+                      _InventoryDocumentDetailAction.post,
+                    ),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Провести документ'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.of(context).pop(
+                      _InventoryDocumentDetailAction.delete,
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    label: const Text('Удалить черновик'),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

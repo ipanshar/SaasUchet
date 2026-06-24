@@ -164,6 +164,7 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 		   WHERE d.company_id = $1::uuid
 		     AND d.client_id IS NOT NULL
 		     AND d.document_type = 'sale_issue'
+		     AND d.status = 'posted'
 		   GROUP BY d.client_id
 		 ) sales ON sales.client_id = c.id
 		 LEFT JOIN (
@@ -348,6 +349,7 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 		   WHERE d.company_id = $1::uuid
 		     AND d.client_id IS NOT NULL
 		     AND d.document_type IN ('sale_issue', 'purchase_receipt')
+		     AND d.status = 'posted'
 
 		   UNION ALL
 
@@ -1094,8 +1096,9 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 	if err != nil {
 		return InventoryDocumentDetail{}, err
 	}
+	committed := false
 	defer func() {
-		if err != nil {
+		if !committed {
 			_ = tx.Rollback()
 		}
 	}()
@@ -1139,6 +1142,7 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 	if documentNo == "" {
 		documentNo = s.nextInventoryDocumentNo(normalized.DocumentType)
 	}
+	status := inventoryDocumentStatusForCreate(normalized.Status)
 
 	var documentID string
 	if err = tx.QueryRowContext(
@@ -1146,12 +1150,16 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 		`INSERT INTO inventory_documents (
 		   company_id, document_no, document_type, status, document_date, warehouse_id, related_warehouse_id, client_id, employee_id, note, created_by_user_id, posted_by_user_id, posted_at, created_at, updated_at
 		 ) VALUES (
-		   $1::uuid, $2, $3, 'posted', $4, $5::uuid, $6::uuid, $7::uuid, $8::uuid, NULLIF($9, ''), $10, $10, NOW(), NOW(), NOW()
+		   $1::uuid, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::uuid, $9::uuid, NULLIF($10, ''), $11,
+		   CASE WHEN $4 = 'posted' THEN $11 ELSE NULL END,
+		   CASE WHEN $4 = 'posted' THEN NOW() ELSE NULL END,
+		   NOW(), NOW()
 		 )
 		 RETURNING id::text`,
 		companyID,
 		documentNo,
 		normalized.DocumentType,
+		status,
 		documentDate.Format("2006-01-02"),
 		sourceWarehouseID,
 		nullUUID(relatedWarehouseID),
@@ -1168,9 +1176,10 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 			ID:               documentID,
 			DocumentNo:       documentNo,
 			DocumentType:     normalized.DocumentType,
-			Status:           "posted",
+			Status:           status,
 			DocumentDate:     documentDate.Format("2006-01-02"),
 			ClientID:         normalized.ClientID,
+			EmployeeID:       normalized.EmployeeID,
 			ClientName:       clientName,
 			WarehouseName:    sourceWarehouseName,
 			RelatedWarehouse: relatedWarehouseName,
@@ -1222,6 +1231,7 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 			totalQuantity += inputLine.Quantity
 			totalAmount += lineTotal
 			detail.Lines = append(detail.Lines, InventoryDocumentLine{
+				ServiceID: inputLine.ServiceID,
 				ItemName:  svcName,
 				ItemType:  "service",
 				Quantity:  inputLine.Quantity,
@@ -1267,26 +1277,29 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 				return InventoryDocumentDetail{}, err
 			}
 
-			if err = s.applyInventoryMovement(
-				ctx,
-				tx,
-				companyID,
-				normalized.DocumentType,
-				sourceWarehouseID,
-				relatedWarehouseID,
-				product,
-				documentID,
-				lineID,
-				inputLine.Quantity,
-				unitCost,
-				documentDate,
-			); err != nil {
-				return InventoryDocumentDetail{}, err
+			if status == "posted" {
+				if err = s.applyInventoryMovement(
+					ctx,
+					tx,
+					companyID,
+					normalized.DocumentType,
+					sourceWarehouseID,
+					relatedWarehouseID,
+					product,
+					documentID,
+					lineID,
+					inputLine.Quantity,
+					unitCost,
+					documentDate,
+				); err != nil {
+					return InventoryDocumentDetail{}, err
+				}
 			}
 
 			totalQuantity += inputLine.Quantity
 			totalAmount += lineTotal
 			detail.Lines = append(detail.Lines, InventoryDocumentLine{
+				ProductID: product.ID,
 				ItemName:  product.Name,
 				ItemType:  "product",
 				SKU:       product.SKU,
@@ -1302,22 +1315,345 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 	detail.Summary.TotalQuantity = totalQuantity
 	detail.Summary.TotalAmount = totalAmount
 
-	if err = s.createLinkedMoneyDocumentDraft(
+	if status == "posted" {
+		if err = s.createLinkedMoneyDocumentDraft(
+			ctx,
+			tx,
+			companyID,
+			documentID,
+			detail.Summary,
+			documentDate,
+		); err != nil {
+			return InventoryDocumentDetail{}, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	committed = true
+
+	return detail, nil
+}
+
+func (s *PostgresStore) UpdateInventoryDocument(user auth.User, documentID string, input CreateInventoryDocumentInput) (InventoryDocumentDetail, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	normalized := NormalizeInventoryDocumentInput(input)
+	documentDate := time.Now()
+	if normalized.DocumentDate != "" {
+		documentDate, err = time.Parse("2006-01-02", normalized.DocumentDate)
+		if err != nil {
+			return InventoryDocumentDetail{}, fmt.Errorf("%w: document date must be in YYYY-MM-DD format", ErrValidation)
+		}
+	}
+
+	var currentNo string
+	var currentStatus string
+	var currentDate time.Time
+	if err = tx.QueryRowContext(
 		ctx,
-		tx,
-		companyID,
+		`SELECT document_no, status, document_date
+		 FROM inventory_documents
+		 WHERE id = $1::uuid AND company_id = $2::uuid
+		 FOR UPDATE`,
 		documentID,
-		detail.Summary,
-		documentDate,
+		companyID,
+	).Scan(&currentNo, &currentStatus, &currentDate); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	if currentStatus != "draft" {
+		return InventoryDocumentDetail{}, fmt.Errorf("%w: only draft inventory documents can be edited", ErrValidation)
+	}
+	if normalized.DocumentDate == "" {
+		documentDate = currentDate
+	}
+
+	sourceWarehouseID, _, err := s.ensureWarehouse(ctx, tx, companyID, normalized.WarehouseName, "MAIN", "Основной склад")
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	relatedWarehouseID := ""
+	if normalized.DocumentType == "transfer" {
+		relatedWarehouseID, _, err = s.ensureWarehouse(ctx, tx, companyID, normalized.RelatedWarehouseName, "TRANSIT", normalized.RelatedWarehouseName)
+		if err != nil {
+			return InventoryDocumentDetail{}, err
+		}
+	}
+	if normalized.ClientID != "" {
+		if _, err = s.findClientByID(ctx, companyID, normalized.ClientID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return InventoryDocumentDetail{}, fmt.Errorf("%w: client not found", ErrValidation)
+			}
+			return InventoryDocumentDetail{}, err
+		}
+	}
+
+	documentNo := normalized.DocumentNo
+	if documentNo == "" {
+		documentNo = currentNo
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`UPDATE inventory_documents
+		 SET document_no = $3,
+		     document_type = $4,
+		     document_date = $5,
+		     warehouse_id = $6::uuid,
+		     related_warehouse_id = $7::uuid,
+		     client_id = $8::uuid,
+		     employee_id = $9::uuid,
+		     note = NULLIF($10, ''),
+		     updated_at = NOW()
+		 WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+		documentID,
+		companyID,
+		documentNo,
+		normalized.DocumentType,
+		documentDate.Format("2006-01-02"),
+		sourceWarehouseID,
+		nullUUID(relatedWarehouseID),
+		nullUUID(normalized.ClientID),
+		nullUUID(normalized.EmployeeID),
+		normalized.Note,
 	); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	if _, _, _, err = s.replaceInventoryDocumentDraftLines(ctx, tx, companyID, documentID, normalized.Lines); err != nil {
 		return InventoryDocumentDetail{}, err
 	}
 
 	if err = tx.Commit(); err != nil {
 		return InventoryDocumentDetail{}, err
 	}
+	committed = true
 
-	return detail, nil
+	return s.GetInventoryDocument(user, documentID)
+}
+
+func (s *PostgresStore) PostInventoryDocument(user auth.User, documentID string) (InventoryDocumentDetail, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var summary InventoryDocumentSummary
+	var documentDate time.Time
+	var sourceWarehouseID string
+	var relatedWarehouseID string
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT
+		    d.document_no,
+		    d.document_type,
+		    d.status,
+		    d.document_date,
+		    COALESCE(d.warehouse_id::text, ''),
+		    COALESCE(d.related_warehouse_id::text, ''),
+		    COALESCE(d.client_id::text, '')
+		 FROM inventory_documents d
+		 WHERE d.id = $1::uuid AND d.company_id = $2::uuid
+		 FOR UPDATE`,
+		documentID,
+		companyID,
+	).Scan(
+		&summary.DocumentNo,
+		&summary.DocumentType,
+		&summary.Status,
+		&documentDate,
+		&sourceWarehouseID,
+		&relatedWarehouseID,
+		&summary.ClientID,
+	); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	if summary.Status != "draft" {
+		return InventoryDocumentDetail{}, fmt.Errorf("%w: only draft inventory documents can be posted", ErrValidation)
+	}
+	if sourceWarehouseID == "" {
+		return InventoryDocumentDetail{}, fmt.Errorf("%w: warehouse is required", ErrValidation)
+	}
+	if summary.DocumentType == "transfer" && relatedWarehouseID == "" {
+		return InventoryDocumentDetail{}, fmt.Errorf("%w: related warehouse is required for transfer", ErrValidation)
+	}
+
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT
+		    id::text,
+		    COALESCE(product_id::text, ''),
+		    quantity,
+		    unit_cost,
+		    COALESCE(line_total, 0)
+		 FROM inventory_document_lines
+		 WHERE document_id = $1::uuid
+		 ORDER BY line_no ASC`,
+		documentID,
+	)
+	if err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	defer rows.Close()
+
+	totalAmount := 0
+	for rows.Next() {
+		var lineID string
+		var productID string
+		var quantity float64
+		var unitCost float64
+		var lineTotal float64
+		if err = rows.Scan(&lineID, &productID, &quantity, &unitCost, &lineTotal); err != nil {
+			return InventoryDocumentDetail{}, err
+		}
+		totalAmount += int(lineTotal)
+		if productID == "" {
+			continue
+		}
+		product, productErr := s.findProductByID(ctx, companyID, productID)
+		if productErr != nil {
+			if errors.Is(productErr, sql.ErrNoRows) {
+				return InventoryDocumentDetail{}, fmt.Errorf("%w: product not found", ErrValidation)
+			}
+			return InventoryDocumentDetail{}, productErr
+		}
+		if err = s.applyInventoryMovement(
+			ctx,
+			tx,
+			companyID,
+			summary.DocumentType,
+			sourceWarehouseID,
+			relatedWarehouseID,
+			product,
+			documentID,
+			lineID,
+			int(quantity),
+			int(unitCost),
+			documentDate,
+		); err != nil {
+			return InventoryDocumentDetail{}, err
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	if err = rows.Close(); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`UPDATE inventory_documents
+		 SET status = 'posted',
+		     posted_by_user_id = $3,
+		     posted_at = NOW(),
+		     updated_at = NOW()
+		 WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+		documentID,
+		companyID,
+		user.ID,
+	); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	summary.ID = documentID
+	summary.Status = "posted"
+	summary.TotalAmount = totalAmount
+	if err = s.createLinkedMoneyDocumentDraft(ctx, tx, companyID, documentID, summary, documentDate); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return InventoryDocumentDetail{}, err
+	}
+	committed = true
+
+	return s.GetInventoryDocument(user, documentID)
+}
+
+func (s *PostgresStore) DeleteInventoryDocument(user auth.User, documentID string) error {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var status string
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT status
+		 FROM inventory_documents
+		 WHERE id = $1::uuid AND company_id = $2::uuid
+		 FOR UPDATE`,
+		documentID,
+		companyID,
+	).Scan(&status); err != nil {
+		return err
+	}
+	if status != "draft" {
+		return fmt.Errorf("%w: only draft inventory documents can be deleted", ErrValidation)
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`DELETE FROM inventory_documents
+		 WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+		documentID,
+		companyID,
+	); err != nil {
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func (s *PostgresStore) ListInventoryDocuments(user auth.User, documentType string, search string) ([]InventoryDocumentSummary, error) {
@@ -1338,6 +1674,7 @@ func (s *PostgresStore) ListInventoryDocuments(user auth.User, documentType stri
 		    d.status,
 		    d.document_date,
 		    COALESCE(c.id::text, ''),
+		    COALESCE(d.employee_id::text, ''),
 		    COALESCE(c.name, ''),
 		    COALESCE(w.name, ''),
 		    COALESCE(rw.name, ''),
@@ -1359,7 +1696,7 @@ func (s *PostgresStore) ListInventoryDocuments(user auth.User, documentType stri
 		     OR COALESCE(c.name, '') ILIKE '%' || $3 || '%'
 		     OR COALESCE(w.name, '') ILIKE '%' || $3 || '%'
 		   )
-		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.document_date, c.id, c.name, w.name, rw.name, d.note
+		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.document_date, c.id, d.employee_id, c.name, w.name, rw.name, d.note
 		 ORDER BY d.document_date DESC, d.created_at DESC
 		 LIMIT 100`,
 		companyID,
@@ -1384,6 +1721,7 @@ func (s *PostgresStore) ListInventoryDocuments(user auth.User, documentType stri
 			&document.Status,
 			&documentDate,
 			&document.ClientID,
+			&document.EmployeeID,
 			&document.ClientName,
 			&document.WarehouseName,
 			&document.RelatedWarehouse,
@@ -1425,6 +1763,7 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		    d.status,
 		    d.document_date,
 		    COALESCE(c.id::text, ''),
+		    COALESCE(d.employee_id::text, ''),
 		    COALESCE(c.name, ''),
 		    COALESCE(w.name, ''),
 		    COALESCE(rw.name, ''),
@@ -1438,7 +1777,7 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		 LEFT JOIN warehouses rw ON rw.id = d.related_warehouse_id
 		 LEFT JOIN inventory_document_lines l ON l.document_id = d.id
 		 WHERE d.company_id = $1::uuid AND d.id = $2::uuid
-		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.document_date, c.id, c.name, w.name, rw.name, d.note`,
+		 GROUP BY d.id, d.document_no, d.document_type, d.status, d.document_date, c.id, d.employee_id, c.name, w.name, rw.name, d.note`,
 		companyID,
 		documentID,
 	).Scan(
@@ -1448,6 +1787,7 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		&detail.Summary.Status,
 		&documentDate,
 		&detail.Summary.ClientID,
+		&detail.Summary.EmployeeID,
 		&detail.Summary.ClientName,
 		&detail.Summary.WarehouseName,
 		&detail.Summary.RelatedWarehouse,
@@ -1467,6 +1807,8 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		ctx,
 		`SELECT
 		    CASE WHEN l.service_id IS NOT NULL THEN 'service' ELSE 'product' END,
+		    COALESCE(l.product_id::text, ''),
+		    COALESCE(l.service_id::text, ''),
 		    COALESCE(p.name, s.name, ''),
 		    COALESCE(p.sku, ''),
 		    COALESCE(p.barcode, ''),
@@ -1496,6 +1838,8 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 		var lineTotal float64
 		if err := rows.Scan(
 			&line.ItemType,
+			&line.ProductID,
+			&line.ServiceID,
 			&line.ItemName,
 			&line.SKU,
 			&line.Barcode,
@@ -1555,6 +1899,122 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 	}
 
 	return detail, paymentRows.Err()
+}
+
+func (s *PostgresStore) replaceInventoryDocumentDraftLines(ctx context.Context, tx *sql.Tx, companyID string, documentID string, lines []CreateInventoryDocumentLineInput) ([]InventoryDocumentLine, int, int, error) {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM inventory_document_lines WHERE document_id = $1::uuid`, documentID); err != nil {
+		return nil, 0, 0, err
+	}
+
+	detailLines := make([]InventoryDocumentLine, 0, len(lines))
+	totalQuantity := 0
+	totalAmount := 0
+	for index, inputLine := range lines {
+		unitPrice := inputLine.UnitPrice
+		unitCost := inputLine.UnitCost
+		lineTotal := inputLine.Quantity * unitPrice
+
+		if strings.TrimSpace(inputLine.ServiceID) != "" {
+			var serviceName string
+			if err := tx.QueryRowContext(
+				ctx,
+				`SELECT name
+				 FROM services
+				 WHERE id = $1::uuid AND company_id = $2::uuid AND archived_at IS NULL`,
+				inputLine.ServiceID,
+				companyID,
+			).Scan(&serviceName); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, 0, 0, fmt.Errorf("%w: service not found", ErrValidation)
+				}
+				return nil, 0, 0, err
+			}
+			if _, err := tx.ExecContext(
+				ctx,
+				`INSERT INTO inventory_document_lines (
+				   document_id, line_no, service_id, quantity, unit_price, unit_cost, note, created_at
+				 ) VALUES (
+				   $1::uuid, $2, $3::uuid, $4, $5, $6, NULLIF($7, ''), NOW()
+				 )`,
+				documentID,
+				index+1,
+				inputLine.ServiceID,
+				inputLine.Quantity,
+				unitPrice,
+				unitCost,
+				inputLine.Note,
+			); err != nil {
+				return nil, 0, 0, err
+			}
+			totalQuantity += inputLine.Quantity
+			totalAmount += lineTotal
+			detailLines = append(detailLines, InventoryDocumentLine{
+				ServiceID: inputLine.ServiceID,
+				ItemName:  serviceName,
+				ItemType:  "service",
+				Quantity:  inputLine.Quantity,
+				UnitPrice: unitPrice,
+				UnitCost:  unitCost,
+				LineTotal: lineTotal,
+				Note:      inputLine.Note,
+			})
+			continue
+		}
+
+		product, err := s.findProductByID(ctx, companyID, inputLine.ProductID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, 0, 0, fmt.Errorf("%w: product not found", ErrValidation)
+			}
+			return nil, 0, 0, err
+		}
+		if unitPrice == 0 {
+			unitPrice = product.Price
+		}
+		if unitCost == 0 {
+			unitCost = product.Cost
+		}
+		lineTotal = inputLine.Quantity * unitPrice
+		if _, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO inventory_document_lines (
+			   document_id, line_no, product_id, quantity, unit_price, unit_cost, note, created_at
+			 ) VALUES (
+			   $1::uuid, $2, $3::uuid, $4, $5, $6, NULLIF($7, ''), NOW()
+			 )`,
+			documentID,
+			index+1,
+			product.ID,
+			inputLine.Quantity,
+			unitPrice,
+			unitCost,
+			inputLine.Note,
+		); err != nil {
+			return nil, 0, 0, err
+		}
+		totalQuantity += inputLine.Quantity
+		totalAmount += lineTotal
+		detailLines = append(detailLines, InventoryDocumentLine{
+			ProductID: product.ID,
+			ItemName:  product.Name,
+			ItemType:  "product",
+			SKU:       product.SKU,
+			Quantity:  inputLine.Quantity,
+			UnitPrice: unitPrice,
+			UnitCost:  unitCost,
+			LineTotal: lineTotal,
+			Note:      inputLine.Note,
+		})
+	}
+
+	return detailLines, totalQuantity, totalAmount, nil
+}
+
+func inventoryDocumentStatusForCreate(status string) string {
+	if status == "draft" {
+		return "draft"
+	}
+	return "posted"
 }
 
 type clientRecord struct {

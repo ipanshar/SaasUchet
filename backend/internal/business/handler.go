@@ -1,6 +1,7 @@
 package business
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -489,26 +490,99 @@ func (h Handler) InventoryDocumentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method != http.MethodGet {
+	path := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/inventory-documents/"))
+	if path == "" {
+		response.Error(w, http.StatusNotFound, "document not found")
+		return
+	}
+
+	parts := strings.Split(path, "/")
+	documentID := strings.TrimSpace(parts[0])
+	action := ""
+	if len(parts) > 1 {
+		action = strings.TrimSpace(parts[1])
+	}
+	if documentID == "" || len(parts) > 2 {
+		response.Error(w, http.StatusNotFound, "document not found")
+		return
+	}
+
+	if action == "post" {
+		if r.Method != http.MethodPost {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if !h.requireActiveCompanyPermission(w, user, permWarehouseWrite) {
+			return
+		}
+		document, err := h.store.PostInventoryDocument(user, documentID)
+		if err != nil {
+			h.writeInventoryDocumentMutationError(w, err)
+			return
+		}
+		response.JSON(w, http.StatusOK, document)
+		return
+	}
+	if action != "" {
+		response.Error(w, http.StatusNotFound, "document action not found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		if !h.requireActiveCompanyPermission(w, user, permWarehouseRead) {
+			return
+		}
+		document, err := h.store.GetInventoryDocument(user, documentID)
+		if err != nil {
+			response.Error(w, http.StatusNotFound, "document not found")
+			return
+		}
+		response.JSON(w, http.StatusOK, document)
+	case http.MethodPut:
+		if !h.requireActiveCompanyPermission(w, user, permWarehouseWrite) {
+			return
+		}
+		var input CreateInventoryDocumentInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			response.Error(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		input = NormalizeInventoryDocumentInput(input)
+		if err := ValidateInventoryDocumentInput(input); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		document, err := h.store.UpdateInventoryDocument(user, documentID, input)
+		if err != nil {
+			h.writeInventoryDocumentMutationError(w, err)
+			return
+		}
+		response.JSON(w, http.StatusOK, document)
+	case http.MethodDelete:
+		if !h.requireActiveCompanyPermission(w, user, permWarehouseWrite) {
+			return
+		}
+		if err := h.store.DeleteInventoryDocument(user, documentID); err != nil {
+			h.writeInventoryDocumentMutationError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
 	}
-	if !h.requireActiveCompanyPermission(w, user, permWarehouseRead) {
-		return
-	}
+}
 
-	documentID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/inventory-documents/"))
-	if documentID == "" || strings.Contains(documentID, "/") {
+func (h Handler) writeInventoryDocumentMutationError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrValidation) {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, sql.ErrNoRows) {
 		response.Error(w, http.StatusNotFound, "document not found")
 		return
 	}
-
-	document, err := h.store.GetInventoryDocument(user, documentID)
-	if err != nil {
-		response.Error(w, http.StatusNotFound, "document not found")
-		return
-	}
-	response.JSON(w, http.StatusOK, document)
+	response.Error(w, http.StatusInternalServerError, "internal server error")
 }
 
 func (h Handler) WarehouseByID(w http.ResponseWriter, r *http.Request) {

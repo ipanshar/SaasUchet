@@ -262,6 +262,7 @@ type WarehouseMovement struct {
 
 type CreateInventoryDocumentInput struct {
 	DocumentType         string                             `json:"document_type"`
+	Status               string                             `json:"status,omitempty"`
 	DocumentDate         string                             `json:"document_date,omitempty"`
 	DocumentNo           string                             `json:"document_no,omitempty"`
 	WarehouseName        string                             `json:"warehouse_name,omitempty"`
@@ -288,6 +289,7 @@ type InventoryDocumentSummary struct {
 	WarehouseName    string `json:"warehouse_name"`
 	RelatedWarehouse string `json:"related_warehouse_name,omitempty"`
 	ClientID         string `json:"client_id,omitempty"`
+	EmployeeID       string `json:"employee_id,omitempty"`
 	ClientName       string `json:"client_name,omitempty"`
 	ProductLines     int    `json:"product_lines"`
 	TotalQuantity    int    `json:"total_quantity"`
@@ -296,6 +298,8 @@ type InventoryDocumentSummary struct {
 }
 
 type InventoryDocumentLine struct {
+	ProductID string `json:"product_id,omitempty"`
+	ServiceID string `json:"service_id,omitempty"`
 	ItemName  string `json:"product_name"`
 	ItemType  string `json:"item_type"` // product | service
 	SKU       string `json:"sku,omitempty"`
@@ -740,6 +744,9 @@ func buildRecentActivities(input overviewBuildInput) []Activity {
 			if len(activities) >= 5 {
 				break
 			}
+			if document.Status != "posted" {
+				continue
+			}
 			activities = append(activities, inventoryActivity(document))
 		}
 	}
@@ -846,6 +853,9 @@ func inventoryDocumentPresentation(documentType string) (string, string, string)
 func sumInventoryForMonth(documents []InventoryDocumentSummary, documentType string, month time.Time) int {
 	total := 0
 	for _, document := range documents {
+		if document.Status != "posted" {
+			continue
+		}
 		if document.DocumentType != documentType {
 			continue
 		}
@@ -864,6 +874,9 @@ func buildDailySalesSeries(documents []InventoryDocumentSummary, now time.Time) 
 		day := now.AddDate(0, 0, -offset)
 		total := 0
 		for _, document := range documents {
+			if document.Status != "posted" {
+				continue
+			}
 			if document.DocumentType != "sale_issue" {
 				continue
 			}
@@ -1160,6 +1173,7 @@ func NormalizeServiceInput(input CreateServiceInput) CreateServiceInput {
 
 func NormalizeInventoryDocumentInput(input CreateInventoryDocumentInput) CreateInventoryDocumentInput {
 	input.DocumentType = strings.TrimSpace(strings.ToLower(input.DocumentType))
+	input.Status = strings.TrimSpace(strings.ToLower(input.Status))
 	input.DocumentDate = strings.TrimSpace(input.DocumentDate)
 	input.DocumentNo = strings.TrimSpace(strings.ToUpper(input.DocumentNo))
 	input.WarehouseName = strings.TrimSpace(input.WarehouseName)
@@ -1170,6 +1184,7 @@ func NormalizeInventoryDocumentInput(input CreateInventoryDocumentInput) CreateI
 
 	for index := range input.Lines {
 		input.Lines[index].ProductID = strings.TrimSpace(input.Lines[index].ProductID)
+		input.Lines[index].ServiceID = strings.TrimSpace(input.Lines[index].ServiceID)
 		input.Lines[index].Note = strings.TrimSpace(input.Lines[index].Note)
 	}
 
@@ -1285,6 +1300,11 @@ func ValidateInventoryDocumentInput(input CreateInventoryDocumentInput) error {
 	case "purchase_receipt", "write_off", "transfer", "sale_issue", "adjustment":
 	default:
 		return fmt.Errorf("%w: document type is invalid", ErrValidation)
+	}
+	switch input.Status {
+	case "", "draft", "posted":
+	default:
+		return fmt.Errorf("%w: document status is invalid", ErrValidation)
 	}
 	if input.DocumentDate != "" {
 		if _, err := time.Parse("2006-01-02", input.DocumentDate); err != nil {

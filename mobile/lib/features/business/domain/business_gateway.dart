@@ -110,6 +110,22 @@ abstract class BusinessGateway {
     required Map<String, dynamic> payload,
   });
 
+  Future<Map<String, dynamic>> updateInventoryDocument({
+    required String accessToken,
+    required String documentId,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<Map<String, dynamic>> postInventoryDocument({
+    required String accessToken,
+    required String documentId,
+  });
+
+  Future<void> deleteInventoryDocument({
+    required String accessToken,
+    required String documentId,
+  });
+
   Future<Map<String, dynamic>> updateProduct({
     required String accessToken,
     required String productId,

@@ -23,6 +23,9 @@ type Store interface {
 	CreateInventoryDocument(user auth.User, input CreateInventoryDocumentInput) (InventoryDocumentDetail, error)
 	ListInventoryDocuments(user auth.User, documentType string, search string) ([]InventoryDocumentSummary, error)
 	GetInventoryDocument(user auth.User, documentID string) (InventoryDocumentDetail, error)
+	UpdateInventoryDocument(user auth.User, documentID string, input CreateInventoryDocumentInput) (InventoryDocumentDetail, error)
+	PostInventoryDocument(user auth.User, documentID string) (InventoryDocumentDetail, error)
+	DeleteInventoryDocument(user auth.User, documentID string) error
 	GetFinance(user auth.User) (Finance, error)
 	CreateCashAccount(user auth.User, input CreateCashAccountInput) (BankAccount, error)
 	CreateMoneyOperation(user auth.User, input CreateMoneyOperationInput) error
@@ -317,6 +320,10 @@ func (s *MemoryStore) CreateInventoryDocument(user auth.User, input CreateInvent
 	}
 
 	normalized := NormalizeInventoryDocumentInput(input)
+	status := normalized.Status
+	if status == "" {
+		status = "posted"
+	}
 	s.ensureMemoryWarehouses(user.ID)
 	documentID := mustGenerateProductID()
 	documentDate := time.Now().Format("2006-01-02")
@@ -378,51 +385,54 @@ func (s *MemoryStore) CreateInventoryDocument(user auth.User, input CreateInvent
 			unitCost = product.Cost
 		}
 
-		switch normalized.DocumentType {
-		case "purchase_receipt":
-			product.Quantity += line.Quantity
-			product.Movements = append([]StockMovement{{
-				Date:     documentDate,
-				Document: documentNo,
-				Quantity: line.Quantity,
-				Balance:  product.Quantity,
-			}}, product.Movements...)
-		case "write_off", "sale_issue":
-			if product.Quantity < line.Quantity {
-				return InventoryDocumentDetail{}, ErrValidation
+		if status == "posted" {
+			switch normalized.DocumentType {
+			case "purchase_receipt":
+				product.Quantity += line.Quantity
+				product.Movements = append([]StockMovement{{
+					Date:     documentDate,
+					Document: documentNo,
+					Quantity: line.Quantity,
+					Balance:  product.Quantity,
+				}}, product.Movements...)
+			case "write_off", "sale_issue":
+				if product.Quantity < line.Quantity {
+					return InventoryDocumentDetail{}, ErrValidation
+				}
+				product.Quantity -= line.Quantity
+				product.Movements = append([]StockMovement{{
+					Date:     documentDate,
+					Document: documentNo,
+					Quantity: -line.Quantity,
+					Balance:  product.Quantity,
+				}}, product.Movements...)
+			case "transfer":
+				if product.Quantity < line.Quantity {
+					return InventoryDocumentDetail{}, ErrValidation
+				}
+				product.Quantity -= line.Quantity
+				product.Movements = append([]StockMovement{{
+					Date:     documentDate,
+					Document: documentNo,
+					Quantity: -line.Quantity,
+					Balance:  product.Quantity,
+				}}, product.Movements...)
+			case "adjustment":
+				product.Quantity += line.Quantity
+				product.Movements = append([]StockMovement{{
+					Date:     documentDate,
+					Document: documentNo,
+					Quantity: line.Quantity,
+					Balance:  product.Quantity,
+				}}, product.Movements...)
 			}
-			product.Quantity -= line.Quantity
-			product.Movements = append([]StockMovement{{
-				Date:     documentDate,
-				Document: documentNo,
-				Quantity: -line.Quantity,
-				Balance:  product.Quantity,
-			}}, product.Movements...)
-		case "transfer":
-			if product.Quantity < line.Quantity {
-				return InventoryDocumentDetail{}, ErrValidation
-			}
-			product.Quantity -= line.Quantity
-			product.Movements = append([]StockMovement{{
-				Date:     documentDate,
-				Document: documentNo,
-				Quantity: -line.Quantity,
-				Balance:  product.Quantity,
-			}}, product.Movements...)
-		case "adjustment":
-			product.Quantity += line.Quantity
-			product.Movements = append([]StockMovement{{
-				Date:     documentDate,
-				Document: documentNo,
-				Quantity: line.Quantity,
-				Balance:  product.Quantity,
-			}}, product.Movements...)
+			product.Status = productStatus(product.Quantity, product.MinQuantity)
 		}
-		product.Status = productStatus(product.Quantity, product.MinQuantity)
 
 		totalQuantity += line.Quantity
 		totalAmount += line.Quantity * unitPrice
 		lines = append(lines, InventoryDocumentLine{
+			ProductID: line.ProductID,
 			ItemName:  product.Name,
 			ItemType:  "product",
 			SKU:       product.SKU,
@@ -440,9 +450,10 @@ func (s *MemoryStore) CreateInventoryDocument(user auth.User, input CreateInvent
 			ID:               documentID,
 			DocumentNo:       documentNo,
 			DocumentType:     normalized.DocumentType,
-			Status:           "posted",
+			Status:           status,
 			DocumentDate:     documentDate,
 			ClientID:         normalized.ClientID,
+			EmployeeID:       normalized.EmployeeID,
 			ClientName:       clientName,
 			WarehouseName:    warehouseName,
 			RelatedWarehouse: normalized.RelatedWarehouseName,
@@ -454,7 +465,9 @@ func (s *MemoryStore) CreateInventoryDocument(user auth.User, input CreateInvent
 		Lines: lines,
 	}
 	s.inventoryDocsByUser[user.ID] = append([]InventoryDocumentDetail{detail}, s.inventoryDocsByUser[user.ID]...)
-	s.linkInventoryDocumentToFinance(user.ID, detail)
+	if status == "posted" {
+		s.linkInventoryDocumentToFinance(user.ID, detail)
+	}
 	return detail, nil
 }
 
@@ -489,6 +502,215 @@ func (s *MemoryStore) GetInventoryDocument(user auth.User, documentID string) (I
 		}
 	}
 	return InventoryDocumentDetail{}, ErrValidation
+}
+
+func (s *MemoryStore) UpdateInventoryDocument(user auth.User, documentID string, input CreateInventoryDocumentInput) (InventoryDocumentDetail, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	documents := s.inventoryDocsByUser[user.ID]
+	documentIndex := -1
+	for index := range documents {
+		if documents[index].Summary.ID == documentID {
+			documentIndex = index
+			break
+		}
+	}
+	if documentIndex < 0 {
+		return InventoryDocumentDetail{}, ErrValidation
+	}
+	if documents[documentIndex].Summary.Status != "draft" {
+		return InventoryDocumentDetail{}, fmt.Errorf("%w: only draft inventory documents can be edited", ErrValidation)
+	}
+
+	normalized := NormalizeInventoryDocumentInput(input)
+	documentNo := normalized.DocumentNo
+	if documentNo == "" {
+		documentNo = documents[documentIndex].Summary.DocumentNo
+	}
+	documentDate := normalized.DocumentDate
+	if documentDate == "" {
+		documentDate = documents[documentIndex].Summary.DocumentDate
+	}
+	warehouseName := defaultIfEmpty(normalized.WarehouseName, "Основной склад")
+	clientName := ""
+	if normalized.ClientID != "" {
+		for _, client := range s.clientsByUser[user.ID] {
+			if client.ID == normalized.ClientID {
+				clientName = client.Name
+				break
+			}
+		}
+		if clientName == "" {
+			return InventoryDocumentDetail{}, ErrValidation
+		}
+	}
+
+	lines := make([]InventoryDocumentLine, 0, len(normalized.Lines))
+	totalQuantity := 0
+	totalAmount := 0
+	for _, line := range normalized.Lines {
+		unitPrice := line.UnitPrice
+		unitCost := line.UnitCost
+		if line.ServiceID != "" {
+			lineTotal := line.Quantity * unitPrice
+			totalQuantity += line.Quantity
+			totalAmount += lineTotal
+			lines = append(lines, InventoryDocumentLine{
+				ServiceID: line.ServiceID,
+				ItemName:  "Услуга",
+				ItemType:  "service",
+				Quantity:  line.Quantity,
+				UnitPrice: unitPrice,
+				UnitCost:  unitCost,
+				LineTotal: lineTotal,
+				Note:      line.Note,
+			})
+			continue
+		}
+
+		var product Product
+		found := false
+		for _, item := range s.productsByUser[user.ID] {
+			if item.ID == line.ProductID {
+				product = item
+				found = true
+				break
+			}
+		}
+		if !found {
+			return InventoryDocumentDetail{}, ErrValidation
+		}
+		if unitPrice == 0 {
+			unitPrice = product.Price
+		}
+		if unitCost == 0 {
+			unitCost = product.Cost
+		}
+		lineTotal := line.Quantity * unitPrice
+		totalQuantity += line.Quantity
+		totalAmount += lineTotal
+		lines = append(lines, InventoryDocumentLine{
+			ProductID: line.ProductID,
+			ItemName:  product.Name,
+			ItemType:  "product",
+			SKU:       product.SKU,
+			Quantity:  line.Quantity,
+			UnitPrice: unitPrice,
+			UnitCost:  unitCost,
+			LineTotal: lineTotal,
+			Note:      line.Note,
+		})
+	}
+
+	updated := InventoryDocumentDetail{
+		Summary: InventoryDocumentSummary{
+			ID:               documentID,
+			DocumentNo:       documentNo,
+			DocumentType:     normalized.DocumentType,
+			Status:           "draft",
+			DocumentDate:     documentDate,
+			ClientID:         normalized.ClientID,
+			EmployeeID:       normalized.EmployeeID,
+			ClientName:       clientName,
+			WarehouseName:    warehouseName,
+			RelatedWarehouse: normalized.RelatedWarehouseName,
+			ProductLines:     len(lines),
+			TotalQuantity:    totalQuantity,
+			TotalAmount:      totalAmount,
+			Note:             normalized.Note,
+		},
+		Lines: lines,
+	}
+	documents[documentIndex] = updated
+	s.inventoryDocsByUser[user.ID] = documents
+	return updated, nil
+}
+
+func (s *MemoryStore) PostInventoryDocument(user auth.User, documentID string) (InventoryDocumentDetail, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	documents := s.inventoryDocsByUser[user.ID]
+	documentIndex := -1
+	for index := range documents {
+		if documents[index].Summary.ID == documentID {
+			documentIndex = index
+			break
+		}
+	}
+	if documentIndex < 0 {
+		return InventoryDocumentDetail{}, ErrValidation
+	}
+	detail := documents[documentIndex]
+	if detail.Summary.Status != "draft" {
+		return InventoryDocumentDetail{}, fmt.Errorf("%w: only draft inventory documents can be posted", ErrValidation)
+	}
+
+	products := s.productsByUser[user.ID]
+	for _, line := range detail.Lines {
+		if line.ProductID == "" {
+			continue
+		}
+		index := -1
+		for productIndex := range products {
+			if products[productIndex].ID == line.ProductID {
+				index = productIndex
+				break
+			}
+		}
+		if index < 0 {
+			return InventoryDocumentDetail{}, ErrValidation
+		}
+		product := &products[index]
+		switch detail.Summary.DocumentType {
+		case "purchase_receipt", "adjustment":
+			product.Quantity += line.Quantity
+			product.Movements = append([]StockMovement{{
+				Date:     detail.Summary.DocumentDate,
+				Document: detail.Summary.DocumentNo,
+				Quantity: line.Quantity,
+				Balance:  product.Quantity,
+			}}, product.Movements...)
+		case "write_off", "sale_issue", "transfer":
+			if product.Quantity < line.Quantity {
+				return InventoryDocumentDetail{}, ErrValidation
+			}
+			product.Quantity -= line.Quantity
+			product.Movements = append([]StockMovement{{
+				Date:     detail.Summary.DocumentDate,
+				Document: detail.Summary.DocumentNo,
+				Quantity: -line.Quantity,
+				Balance:  product.Quantity,
+			}}, product.Movements...)
+		}
+		product.Status = productStatus(product.Quantity, product.MinQuantity)
+	}
+
+	detail.Summary.Status = "posted"
+	documents[documentIndex] = detail
+	s.productsByUser[user.ID] = products
+	s.inventoryDocsByUser[user.ID] = documents
+	s.linkInventoryDocumentToFinance(user.ID, detail)
+	return detail, nil
+}
+
+func (s *MemoryStore) DeleteInventoryDocument(user auth.User, documentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	documents := s.inventoryDocsByUser[user.ID]
+	for index := range documents {
+		if documents[index].Summary.ID != documentID {
+			continue
+		}
+		if documents[index].Summary.Status != "draft" {
+			return fmt.Errorf("%w: only draft inventory documents can be deleted", ErrValidation)
+		}
+		s.inventoryDocsByUser[user.ID] = append(documents[:index], documents[index+1:]...)
+		return nil
+	}
+	return ErrValidation
 }
 
 func (s *MemoryStore) linkInventoryDocumentToFinance(userID string, detail InventoryDocumentDetail) {

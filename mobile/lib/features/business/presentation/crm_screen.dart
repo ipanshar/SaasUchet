@@ -1126,25 +1126,7 @@ class _CrmScreenState extends State<_CrmScreen> {
     try {
       await widget.businessGateway.createInventoryDocument(
         accessToken: widget.accessToken,
-        payload: {
-          'document_type': result.documentType,
-          'client_id': result.clientId,
-          'warehouse_name': result.warehouseName,
-          'related_warehouse_name': result.relatedWarehouseName,
-          'note': result.note,
-          'lines': result.lines
-              .map(
-                (line) => {
-                  'product_id': line.productId,
-                  'service_id': line.serviceId,
-                  'quantity': line.quantity,
-                  'unit_price': line.unitPrice,
-                  'unit_cost': line.unitCost,
-                  'note': line.note,
-                },
-              )
-              .toList(growable: false),
-        },
+        payload: _inventoryDocumentPayloadFromForm(result),
       );
       await widget.onClientsChanged();
       if (!mounted) {
@@ -1153,9 +1135,13 @@ class _CrmScreenState extends State<_CrmScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            result.documentType == 'sale_issue'
-                ? 'Продажа создана'
-                : 'Закуп создан',
+            result.action == _InventoryDocumentFormAction.post
+                ? result.documentType == 'sale_issue'
+                    ? 'Продажа проведена'
+                    : 'Закуп проведен'
+                : result.documentType == 'sale_issue'
+                    ? 'Черновик продажи сохранен'
+                    : 'Черновик закупа сохранен',
           ),
         ),
       );

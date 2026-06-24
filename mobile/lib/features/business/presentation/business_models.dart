@@ -409,6 +409,7 @@ class _InventoryDocument {
     required this.status,
     required this.documentDate,
     required this.clientId,
+    required this.employeeId,
     required this.clientName,
     required this.warehouseName,
     required this.relatedWarehouseName,
@@ -424,6 +425,7 @@ class _InventoryDocument {
   final String status;
   final String documentDate;
   final String clientId;
+  final String employeeId;
   final String clientName;
   final String warehouseName;
   final String relatedWarehouseName;
@@ -431,6 +433,30 @@ class _InventoryDocument {
   final int totalQuantity;
   final int totalAmount;
   final String note;
+
+  String get documentTypeLabel => _documentTypeLabel(documentType);
+
+  String get statusLabel {
+    switch (status) {
+      case 'posted':
+        return 'Проведен';
+      case 'cancelled':
+        return 'Отменен';
+      default:
+        return 'Черновик';
+    }
+  }
+
+  StatusKind get statusKind {
+    switch (status) {
+      case 'posted':
+        return StatusKind.success;
+      case 'cancelled':
+        return StatusKind.error;
+      default:
+        return StatusKind.neutral;
+    }
+  }
 }
 
 class _MoneyDocument {
@@ -463,6 +489,9 @@ class _MoneyDocument {
 
 class _InventoryDocumentLine {
   const _InventoryDocumentLine({
+    required this.productId,
+    required this.serviceId,
+    required this.itemType,
     required this.productName,
     required this.sku,
     required this.barcode,
@@ -473,6 +502,9 @@ class _InventoryDocumentLine {
     required this.note,
   });
 
+  final String productId;
+  final String serviceId;
+  final String itemType;
   final String productName;
   final String sku;
   final String barcode;
@@ -1083,6 +1115,7 @@ _InventoryDocument _inventoryDocumentFromJson(Map<String, dynamic> json) =>
       status: json['status'] as String? ?? '',
       documentDate: json['document_date'] as String? ?? '',
       clientId: json['client_id'] as String? ?? '',
+      employeeId: json['employee_id'] as String? ?? '',
       clientName: json['client_name'] as String? ?? '',
       warehouseName: json['warehouse_name'] as String? ?? '',
       relatedWarehouseName: json['related_warehouse_name'] as String? ?? '',
@@ -1111,6 +1144,9 @@ _InventoryDocumentLine _inventoryDocumentLineFromJson(
   Map<String, dynamic> json,
 ) =>
     _InventoryDocumentLine(
+      productId: json['product_id'] as String? ?? '',
+      serviceId: json['service_id'] as String? ?? '',
+      itemType: json['item_type'] as String? ?? 'product',
       productName: json['product_name'] as String? ?? '',
       sku: json['sku'] as String? ?? '',
       barcode: json['barcode'] as String? ?? '',

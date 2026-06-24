@@ -430,32 +430,19 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
     try {
       await widget.businessGateway.createInventoryDocument(
         accessToken: widget.accessToken,
-        payload: {
-          'document_type': result.documentType,
-          'client_id': result.clientId,
-          'employee_id': result.employeeId,
-          'warehouse_name': result.warehouseName,
-          'related_warehouse_name': result.relatedWarehouseName,
-          'note': result.note,
-          'lines': result.lines
-              .map(
-                (line) => {
-                  'product_id': line.productId,
-                  'service_id': line.serviceId,
-                  'quantity': line.quantity,
-                  'unit_price': line.unitPrice,
-                  'unit_cost': line.unitCost,
-                  'note': line.note,
-                },
-              )
-              .toList(growable: false),
-        },
+        payload: _inventoryDocumentPayloadFromForm(result),
       );
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${widget.title}: документ создан')),
+        SnackBar(
+          content: Text(
+            result.action == _InventoryDocumentFormAction.post
+                ? '${widget.title}: документ проведен'
+                : '${widget.title}: черновик сохранен',
+          ),
+        ),
       );
       await _load();
     } catch (error) {
@@ -469,19 +456,24 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
   }
 
   Future<void> _openDocumentDetail(_InventoryDocument document) async {
-    await Navigator.of(context).push<void>(
+    final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => _DocumentDetailScreen(
           accessToken: widget.accessToken,
           businessGateway: widget.businessGateway,
           companyId: widget.companyId,
+          products: widget.products,
           clients: widget.clients,
+          employees: _employees,
           document: document,
           accentColor: widget.accentColor,
           counterpartyLabel: widget.counterpartyLabel,
         ),
       ),
     );
+    if (changed == true) {
+      await _load();
+    }
   }
 
   @override
@@ -752,7 +744,9 @@ class _DocumentDetailScreen extends StatefulWidget {
     required this.accessToken,
     required this.businessGateway,
     required this.companyId,
+    required this.products,
     required this.clients,
+    required this.employees,
     required this.document,
     required this.accentColor,
     required this.counterpartyLabel,
@@ -761,7 +755,9 @@ class _DocumentDetailScreen extends StatefulWidget {
   final String accessToken;
   final BusinessGateway businessGateway;
   final String companyId;
+  final List<_Product> products;
   final List<_Client> clients;
+  final List<_Employee> employees;
   final _InventoryDocument document;
   final Color accentColor;
   final String counterpartyLabel;
@@ -775,6 +771,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   String? _loadError;
   _InventoryDocumentDetail? _detail;
   bool _isPreparingPrintedForm = false;
+  bool _isMutating = false;
 
   @override
   void initState() {
@@ -853,6 +850,130 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     } finally {
       if (mounted) {
         setState(() => _isPreparingPrintedForm = false);
+      }
+    }
+  }
+
+  Future<void> _editDraft() async {
+    final detail = _detail;
+    if (detail == null || _isMutating) {
+      return;
+    }
+    final result = await showModalBottomSheet<_CreateInventoryDocumentFormData>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CreateInventoryDocumentSheet(
+        accessToken: widget.accessToken,
+        businessGateway: widget.businessGateway,
+        products: widget.products,
+        clients: widget.clients,
+        employees: widget.employees,
+        initialDetail: detail,
+        lockDocumentType: true,
+      ),
+    );
+    if (result == null) {
+      return;
+    }
+
+    await _runMutation(() async {
+      await widget.businessGateway.updateInventoryDocument(
+        accessToken: widget.accessToken,
+        documentId: detail.summary.id,
+        payload: _inventoryDocumentPayloadFromForm(result, status: 'draft'),
+      );
+      if (result.action == _InventoryDocumentFormAction.post) {
+        await widget.businessGateway.postInventoryDocument(
+          accessToken: widget.accessToken,
+          documentId: detail.summary.id,
+        );
+        if (!mounted) {
+          return;
+        }
+        Navigator.of(context).pop(true);
+        return;
+      }
+      await _load();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Черновик обновлен')),
+      );
+    });
+  }
+
+  Future<void> _postDraft() async {
+    final detail = _detail;
+    if (detail == null || _isMutating) {
+      return;
+    }
+    await _runMutation(() async {
+      await widget.businessGateway.postInventoryDocument(
+        accessToken: widget.accessToken,
+        documentId: detail.summary.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(true);
+    });
+  }
+
+  Future<void> _deleteDraft() async {
+    final detail = _detail;
+    if (detail == null || _isMutating) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить черновик?'),
+        content: Text(
+          'Документ ${detail.summary.documentNo} будет удален без проведения.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    await _runMutation(() async {
+      await widget.businessGateway.deleteInventoryDocument(
+        accessToken: widget.accessToken,
+        documentId: detail.summary.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(true);
+    });
+  }
+
+  Future<void> _runMutation(Future<void> Function() operation) async {
+    setState(() => _isMutating = true);
+    try {
+      await operation();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
       }
     }
   }
@@ -943,6 +1064,35 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
           ],
         ),
         const SizedBox(height: 16),
+        if (summary.status == 'draft') ...[
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _isMutating ? null : _editDraft,
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Редактировать черновик'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _isMutating ? null : _postDraft,
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('Провести документ'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: _isMutating ? null : _deleteDraft,
+              icon: const Icon(Icons.delete_outline_rounded),
+              label: const Text('Удалить черновик'),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         _BusinessCard(
           child: Row(
             children: [

@@ -565,6 +565,79 @@ class BusinessApiClient extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> updateInventoryDocument({
+    required String accessToken,
+    required String documentId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .put(
+          ApiConfig.businessInventoryDocumentUri(documentId),
+          headers: _headers(accessToken),
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) {
+      throw _buildApiException(response);
+    }
+
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
+  }
+
+  @override
+  Future<Map<String, dynamic>> postInventoryDocument({
+    required String accessToken,
+    required String documentId,
+  }) async {
+    final response = await _client
+        .post(
+          ApiConfig.businessInventoryDocumentPostUri(documentId),
+          headers: _headers(accessToken),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) {
+      throw _buildApiException(response);
+    }
+
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
+  }
+
+  @override
+  Future<void> deleteInventoryDocument({
+    required String accessToken,
+    required String documentId,
+  }) async {
+    final response = await _client
+        .delete(
+          ApiConfig.businessInventoryDocumentUri(documentId),
+          headers: _headers(accessToken),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 204) {
+      throw _buildApiException(response);
+    }
+  }
+
+  @override
   Future<Map<String, dynamic>> updateProduct({
     required String accessToken,
     required String productId,

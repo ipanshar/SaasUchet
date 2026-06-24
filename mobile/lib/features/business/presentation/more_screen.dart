@@ -1652,19 +1652,36 @@ class _MoreScreenState extends State<_MoreScreen> {
   }
 
   Future<void> _openInventoryDocumentDetail(_InventoryDocument document) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    List<_Employee> employees = const [];
+    if (document.documentType == 'sale_issue') {
+      try {
+        final rows = await widget.businessGateway.fetchEmployees(
+          accessToken: widget.session.accessToken,
+        );
+        employees = rows.map(_employeeFromJson).toList(growable: false);
+      } catch (_) {
+        employees = const [];
+      }
+    }
+
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
         builder: (context) => _DocumentDetailScreen(
           accessToken: widget.session.accessToken,
           businessGateway: widget.businessGateway,
           companyId: widget.activeCompany?.id ?? '',
           clients: widget.overview.clients,
+          products: widget.overview.products,
+          employees: employees,
           document: document,
           accentColor: const Color(0xFF00A86B),
           counterpartyLabel: 'Контрагент',
         ),
       ),
     );
+    if (changed == true && mounted) {
+      await _loadDocuments();
+    }
   }
 
   Future<void> _openMoneyDocumentDetail(_MoneyDocument document) async {

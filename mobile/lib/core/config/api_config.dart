@@ -50,6 +50,10 @@ class ApiConfig {
   static Uri businessInventoryDocumentUri(String documentId) =>
       Uri.parse('$baseUrl/api/v1/business/inventory-documents/$documentId');
 
+  static Uri businessInventoryDocumentPostUri(String documentId) => Uri.parse(
+        '$baseUrl/api/v1/business/inventory-documents/$documentId/post',
+      );
+
   static Uri businessWarehouseStockUri(String warehouseId) =>
       Uri.parse('$baseUrl/api/v1/business/warehouses/$warehouseId/stock');
 
