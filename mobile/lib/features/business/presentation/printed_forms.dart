@@ -19,6 +19,24 @@ String _printedFormDate(String isoDate) {
   return '$day.$month.${date.year}';
 }
 
+/// Денежная сумма для печатной формы — без знака ₸: шрифт PT Sans,
+/// встроенный для кириллицы, не содержит глиф тенге (U+20B8), он рисуется
+/// как «битый» прямоугольник. Использует тот же формат разрядов, что и
+/// [formatMoney], но с текстовым «тг» вместо символа.
+String _formatMoneyForPdf(int value) {
+  final sign = value < 0 ? '-' : '';
+  final digits = value.abs().toString();
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    final reverseIndex = digits.length - i;
+    buffer.write(digits[i]);
+    if (reverseIndex > 1 && reverseIndex % 3 == 1) {
+      buffer.write(',');
+    }
+  }
+  return '$sign${buffer.toString()} тг';
+}
+
 String? _counterpartyIdLabel(_Client? client) {
   if (client == null) {
     return null;
@@ -219,8 +237,8 @@ Future<Uint8List> _buildInventoryDocumentPrintedForm({
                   ? line.productName
                   : '${line.productName} (${line.sku})',
               '${line.quantity}',
-              formatMoney(line.unitPrice),
-              formatMoney(line.lineTotal),
+              _formatMoneyForPdf(line.unitPrice),
+              _formatMoneyForPdf(line.lineTotal),
             ];
           }),
         ),
@@ -228,7 +246,7 @@ Future<Uint8List> _buildInventoryDocumentPrintedForm({
         pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
-            'Итого: ${formatMoney(summary.totalAmount)}',
+            'Итого: ${_formatMoneyForPdf(summary.totalAmount)}',
             style: pw.TextStyle(font: boldFont, fontSize: 13),
           ),
         ),
@@ -253,7 +271,7 @@ Future<Uint8List> _buildInventoryDocumentPrintedForm({
           pw.SizedBox(height: 10),
           pw.Text('Статус оплаты: $paymentStatusLabel', style: regularStyle),
           pw.Text(
-            'Оплачено: ${formatMoney(primaryPayment?.paidAmount ?? 0)}',
+            'Оплачено: ${_formatMoneyForPdf(primaryPayment?.paidAmount ?? 0)}',
             style: regularStyle,
           ),
           pw.Text('Платёжные документы: $paymentNumbers', style: regularStyle),
