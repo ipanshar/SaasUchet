@@ -474,13 +474,15 @@ class _MoreScreenState extends State<_MoreScreen> {
               ),
               child: Row(
                 children: [
-                  _CircleInitials(
-                    text: company.name,
+                  _CompanyAvatar(
+                    name: company.name,
+                    logoUrl: detail?.logoUrl ?? active?.logoUrl,
+                    accessToken: widget.session.accessToken,
                     size: 80,
                     foregroundColor: Colors.white,
                     backgroundColor: const Color(0x33FFFFFF),
                     icon: Icons.business_rounded,
-                    useIcon: true,
+                    useIconFallback: true,
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -661,13 +663,15 @@ class _MoreScreenState extends State<_MoreScreen> {
                 ),
                 child: Row(
                   children: [
-                    _CircleInitials(
-                      text: company.name,
+                    _CompanyAvatar(
+                      name: company.name,
+                      logoUrl: active?.logoUrl,
+                      accessToken: widget.session.accessToken,
                       size: 64,
                       foregroundColor: Colors.white,
                       backgroundColor: const Color(0x33FFFFFF),
                       icon: Icons.business_rounded,
-                      useIcon: true,
+                      useIconFallback: true,
                     ),
                     const SizedBox(width: 14),
                     Expanded(

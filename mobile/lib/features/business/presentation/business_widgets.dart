@@ -1128,6 +1128,72 @@ class _CircleInitials extends StatelessWidget {
   }
 }
 
+class _CompanyAvatar extends StatelessWidget {
+  const _CompanyAvatar({
+    required this.name,
+    required this.accessToken,
+    required this.size,
+    required this.foregroundColor,
+    required this.backgroundColor,
+    this.logoUrl,
+    this.icon,
+    this.useIconFallback = false,
+  });
+
+  final String name;
+  final String accessToken;
+  final double size;
+  final Color foregroundColor;
+  final Color backgroundColor;
+  final String? logoUrl;
+  final IconData? icon;
+  final bool useIconFallback;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedUrl = _resolvedApiUrl(logoUrl);
+    if (resolvedUrl == null) {
+      return _CircleInitials(
+        text: name,
+        size: size,
+        foregroundColor: foregroundColor,
+        backgroundColor: backgroundColor,
+        icon: icon,
+        useIcon: useIconFallback,
+      );
+    }
+
+    return ClipOval(
+      child: Image.network(
+        resolvedUrl,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        headers: {'Authorization': 'Bearer $accessToken'},
+        errorBuilder: (_, __, ___) => _CircleInitials(
+          text: name,
+          size: size,
+          foregroundColor: foregroundColor,
+          backgroundColor: backgroundColor,
+          icon: icon,
+          useIcon: useIconFallback,
+        ),
+      ),
+    );
+  }
+}
+
+String? _resolvedApiUrl(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) {
+    return null;
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  return '${ApiConfig.baseUrl}$trimmed';
+}
+
 class _FinanceHeroMetric extends StatelessWidget {
   const _FinanceHeroMetric({
     required this.icon,

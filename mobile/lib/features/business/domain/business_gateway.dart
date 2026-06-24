@@ -52,6 +52,13 @@ abstract class BusinessGateway {
     required Map<String, dynamic> payload,
   });
 
+  Future<Map<String, dynamic>> uploadCompanyLogo({
+    required String accessToken,
+    required String companyId,
+    required List<int> bytes,
+    required String filename,
+  });
+
   Future<Map<String, dynamic>> fetchOverview({
     required String accessToken,
   });

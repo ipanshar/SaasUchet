@@ -61,26 +61,34 @@ type Store interface {
 	SetDefaultCompany(user auth.User, companyID string) error
 	GetCompany(user auth.User, companyID string) (CompanyDetail, error)
 	UpdateCompany(user auth.User, companyID string, input UpdateCompanyInput) (CompanyDetail, error)
+	GetCompanyLogo(user auth.User, companyID string) ([]byte, error)
+	UpdateCompanyLogo(user auth.User, companyID string, logoPNG []byte) (CompanyDetail, error)
 }
 
 type MemoryStore struct {
-	mu                  sync.RWMutex
-	clientsByUser       map[string][]Client
-	warehousesByUser    map[string][]Warehouse
-	productsByUser      map[string][]Product
-	inventoryDocsByUser map[string][]InventoryDocumentDetail
-	financeByUser       map[string]Finance
-	membersByCompany    map[string][]CompanyMember
+	mu                   sync.RWMutex
+	clientsByUser        map[string][]Client
+	warehousesByUser     map[string][]Warehouse
+	productsByUser       map[string][]Product
+	inventoryDocsByUser  map[string][]InventoryDocumentDetail
+	financeByUser        map[string]Finance
+	membersByCompany     map[string][]CompanyMember
+	companyDetailsByID   map[string]CompanyDetail
+	companyLogosByID     map[string][]byte
+	companyLogoTimesByID map[string]time.Time
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		clientsByUser:       make(map[string][]Client),
-		warehousesByUser:    make(map[string][]Warehouse),
-		productsByUser:      make(map[string][]Product),
-		inventoryDocsByUser: make(map[string][]InventoryDocumentDetail),
-		financeByUser:       make(map[string]Finance),
-		membersByCompany:    make(map[string][]CompanyMember),
+		clientsByUser:        make(map[string][]Client),
+		warehousesByUser:     make(map[string][]Warehouse),
+		productsByUser:       make(map[string][]Product),
+		inventoryDocsByUser:  make(map[string][]InventoryDocumentDetail),
+		financeByUser:        make(map[string]Finance),
+		membersByCompany:     make(map[string][]CompanyMember),
+		companyDetailsByID:   make(map[string]CompanyDetail),
+		companyLogosByID:     make(map[string][]byte),
+		companyLogoTimesByID: make(map[string]time.Time),
 	}
 }
 
@@ -1056,25 +1064,35 @@ func (s *MemoryStore) PayPayrollPeriod(_ auth.User, periodID string, _ PayPayrol
 }
 
 func (s *MemoryStore) ListUserCompanies(user auth.User) ([]CompanyMembership, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if len(user.Companies) == 0 {
-		return []CompanyMembership{{
+		company := CompanyMembership{
 			ID:        "cmp_default",
 			Name:      `ТОО "Мой Бизнес"`,
 			Country:   "KZ",
 			Role:      "owner",
 			IsDefault: true,
-		}}, nil
+		}
+		if updatedAt, ok := s.companyLogoTimesByID[company.ID]; ok {
+			company.LogoURL = companyLogoURL(company.ID, updatedAt)
+		}
+		return []CompanyMembership{company}, nil
 	}
 	companies := make([]CompanyMembership, 0, len(user.Companies))
 	for index, company := range user.Companies {
-		companies = append(companies, CompanyMembership{
+		item := CompanyMembership{
 			ID:        fmt.Sprintf("cmp_%d", index),
 			Name:      company.Name,
 			Country:   company.Country,
 			IIN:       company.IIN,
 			Role:      "owner",
 			IsDefault: index == 0,
-		})
+		}
+		if updatedAt, ok := s.companyLogoTimesByID[item.ID]; ok {
+			item.LogoURL = companyLogoURL(item.ID, updatedAt)
+		}
+		companies = append(companies, item)
 	}
 	return companies, nil
 }
@@ -1220,7 +1238,19 @@ func (s *MemoryStore) GetCompany(user auth.User, companyID string) (CompanyDetai
 	if actorRole, ok := memoryActorRole(members, user.ID); ok {
 		role = actorRole
 	}
-	return CompanyDetail{ID: companyID, Name: "Тестовая компания", Country: "KZ", Role: role}, nil
+	detail, ok := s.companyDetailsByID[companyID]
+	if !ok {
+		detail = CompanyDetail{
+			ID:      companyID,
+			Name:    "Тестовая компания",
+			Country: "KZ",
+		}
+	}
+	detail.Role = role
+	if updatedAt, ok := s.companyLogoTimesByID[companyID]; ok {
+		detail.LogoURL = companyLogoURL(companyID, updatedAt)
+	}
+	return detail, nil
 }
 
 func (s *MemoryStore) UpdateCompany(_ auth.User, companyID string, input UpdateCompanyInput) (CompanyDetail, error) {
@@ -1228,7 +1258,7 @@ func (s *MemoryStore) UpdateCompany(_ auth.User, companyID string, input UpdateC
 	if err := ValidateUpdateCompanyInput(normalized); err != nil {
 		return CompanyDetail{}, err
 	}
-	return CompanyDetail{
+	detail := CompanyDetail{
 		ID:          companyID,
 		Name:        normalized.Name,
 		Country:     normalized.Country,
@@ -1241,7 +1271,44 @@ func (s *MemoryStore) UpdateCompany(_ auth.User, companyID string, input UpdateC
 		BankAccount: normalized.BankAccount,
 		BankBik:     normalized.BankBik,
 		Role:        "owner",
-	}, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if updatedAt, ok := s.companyLogoTimesByID[companyID]; ok {
+		detail.LogoURL = companyLogoURL(companyID, updatedAt)
+	}
+	s.companyDetailsByID[companyID] = detail
+	return detail, nil
+}
+
+func (s *MemoryStore) GetCompanyLogo(_ auth.User, companyID string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	data, ok := s.companyLogosByID[companyID]
+	if !ok || len(data) == 0 {
+		return nil, fmt.Errorf("%w: company logo not found", ErrValidation)
+	}
+	return append([]byte(nil), data...), nil
+}
+
+func (s *MemoryStore) UpdateCompanyLogo(_ auth.User, companyID string, logoPNG []byte) (CompanyDetail, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.companyLogosByID[companyID] = append([]byte(nil), logoPNG...)
+	updatedAt := time.Now().UTC()
+	s.companyLogoTimesByID[companyID] = updatedAt
+	detail := s.companyDetailsByID[companyID]
+	if detail.ID == "" {
+		detail = CompanyDetail{
+			ID:      companyID,
+			Name:    "Тестовая компания",
+			Country: "KZ",
+			Role:    "owner",
+		}
+	}
+	detail.LogoURL = companyLogoURL(companyID, updatedAt)
+	s.companyDetailsByID[companyID] = detail
+	return detail, nil
 }
 
 func buildMemoryCashFlows(income int, expense int) []CashFlow {

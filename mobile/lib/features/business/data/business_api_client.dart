@@ -246,6 +246,43 @@ class BusinessApiClient extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> uploadCompanyLogo({
+    required String accessToken,
+    required String companyId,
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    final request = http.MultipartRequest(
+      'PUT',
+      ApiConfig.companyLogoUri(companyId),
+    )
+      ..headers.addAll(_headers(accessToken, json: false))
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: filename,
+        ),
+      );
+
+    final streamed = await request.send().timeout(const Duration(seconds: 8));
+    final response = await http.Response.fromStream(streamed);
+
+    if (response.statusCode != 200) {
+      throw _buildApiException(response);
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'Unexpected response.',
+        statusCode: 500,
+      );
+    }
+    return decoded;
+  }
+
+  @override
   Future<Map<String, dynamic>> fetchOverview({
     required String accessToken,
   }) async {

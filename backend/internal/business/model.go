@@ -1317,6 +1317,7 @@ type CompanyMembership struct {
 	Name      string `json:"name"`
 	Country   string `json:"country"`
 	IIN       string `json:"iin,omitempty"`
+	LogoURL   string `json:"logo_url"`
 	Role      string `json:"role"`
 	IsDefault bool   `json:"is_default"`
 }
@@ -1394,6 +1395,7 @@ type CompanyDetail struct {
 	BankName       string `json:"bank_name,omitempty"`
 	BankAccount    string `json:"bank_account,omitempty"`
 	BankBik        string `json:"bank_bik,omitempty"`
+	LogoURL        string `json:"logo_url"`
 	IsVatPayer     bool   `json:"is_vat_payer"`
 	Role           string `json:"role"`
 	IsDefault      bool   `json:"is_default"`

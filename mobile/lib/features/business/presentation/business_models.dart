@@ -40,6 +40,7 @@ class _Company {
     required this.iin,
     required this.role,
     required this.isDefault,
+    this.logoUrl,
     this.legalForm,
     this.email,
     this.phone,
@@ -57,6 +58,7 @@ class _Company {
   final String iin;
   final String role;
   final bool isDefault;
+  final String? logoUrl;
   final String? legalForm;
   final String? email;
   final String? phone;
@@ -97,6 +99,7 @@ _Company _companyFromJson(Map<String, dynamic> json) {
     iin: json['iin'] as String? ?? '',
     role: json['role'] as String? ?? 'staff',
     isDefault: json['is_default'] as bool? ?? false,
+    logoUrl: json['logo_url'] as String?,
   );
 }
 
@@ -108,6 +111,7 @@ _Company _companyDetailFromJson(Map<String, dynamic> json) {
     iin: json['iin'] as String? ?? '',
     role: json['role'] as String? ?? 'staff',
     isDefault: json['is_default'] as bool? ?? false,
+    logoUrl: json['logo_url'] as String?,
     legalForm: json['legal_form'] as String?,
     email: json['email'] as String?,
     phone: json['phone'] as String?,

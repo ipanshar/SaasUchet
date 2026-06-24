@@ -30,6 +30,19 @@ class _DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final dashboard = overview.dashboard;
     final roleLabel = _dashboardRoleLabel(overview.activeRole);
+    final currentCompany = companies.firstWhere(
+      (company) => company.id == activeCompanyId,
+      orElse: () => companies.isNotEmpty
+          ? companies.first
+          : _Company(
+              id: '',
+              name: overview.companyName,
+              country: 'KZ',
+              iin: '',
+              role: overview.activeRole,
+              isDefault: false,
+            ),
+    );
 
     return SafeArea(
       bottom: false,
@@ -43,8 +56,10 @@ class _DashboardScreen extends StatelessWidget {
               title: overview.companyName,
               subtitle: roleLabel,
               onTitleTap: () => _showCompanySwitcher(context),
-              trailing: _CircleInitials(
-                text: overview.initials,
+              trailing: _CompanyAvatar(
+                name: currentCompany.name,
+                logoUrl: currentCompany.logoUrl,
+                accessToken: session.accessToken,
                 size: 52,
                 foregroundColor: Colors.white,
                 backgroundColor: const Color(0x33FFFFFF),
@@ -184,6 +199,17 @@ class _DashboardScreen extends StatelessWidget {
                                     color: isActive
                                         ? const Color(0xFF00A86B)
                                         : const Color(0xFFCBD5E1),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  _CompanyAvatar(
+                                    name: company.name,
+                                    logoUrl: company.logoUrl,
+                                    accessToken: session.accessToken,
+                                    size: 42,
+                                    foregroundColor: const Color(0xFF00A86B),
+                                    backgroundColor: const Color(0x1400A86B),
+                                    icon: Icons.business_rounded,
+                                    useIconFallback: true,
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(

@@ -1,4 +1,9 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:saas_uchet_mobile/core/config/api_config.dart';
 import 'package:saas_uchet_mobile/features/business/domain/business_gateway.dart';
 
 class CompanyEditorScreen extends StatefulWidget {
@@ -21,6 +26,15 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
   static const _primaryColor = Color(0xFF00A86B);
   static const _bg = Color(0xFFF7FAF8);
   static const _textPrimary = Color(0xFF0F172A);
+  static const _maxLogoBytes = 2 * 1024 * 1024;
+  static const _allowedLogoExtensions = [
+    'ico',
+    'png',
+    'jpg',
+    'jpeg',
+    'svg',
+    'swg',
+  ];
 
   final _formKey = GlobalKey<FormState>();
 
@@ -41,10 +55,14 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
 
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isLogoUploading = false;
   bool _isMembersLoading = false;
   bool _canViewMembers = false;
   bool _canManageMembers = false;
+  bool _didChange = false;
   String? _error;
+  String? _logoError;
+  String? _logoUrl;
   List<_CompanyMemberVm> _members = const [];
 
   @override
@@ -91,6 +109,7 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
         _bankNameCtrl.text = data['bank_name'] as String? ?? '';
         _bankAccountCtrl.text = data['bank_account'] as String? ?? '';
         _bankBikCtrl.text = data['bank_bik'] as String? ?? '';
+        _logoUrl = data['logo_url'] as String?;
         _companyRole = data['role'] as String? ?? 'staff';
         _canViewMembers = _companyRole == 'owner' || _companyRole == 'admin';
         _canManageMembers = _canViewMembers;
@@ -130,6 +149,7 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
         },
       );
       if (!mounted) return;
+      _didChange = true;
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
@@ -141,6 +161,123 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _pickAndUploadLogo() async {
+    setState(() => _logoError = null);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: _allowedLogoExtensions,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) {
+        return;
+      }
+
+      final file = result.files.single;
+      final filename = file.name.trim();
+      final extension = _logoExtension(filename);
+      if (!_allowedLogoExtensions.contains(extension)) {
+        setState(() {
+          _logoError = 'Поддерживаются только ICO, PNG, JPG и SVG.';
+        });
+        return;
+      }
+
+      final bytes = file.bytes;
+      if (bytes == null || bytes.isEmpty) {
+        setState(() {
+          _logoError = 'Не удалось прочитать выбранный файл.';
+        });
+        return;
+      }
+      if (bytes.length > _maxLogoBytes) {
+        setState(() {
+          _logoError = 'Логотип должен быть не больше 2 МБ.';
+        });
+        return;
+      }
+
+      if (extension == 'png' || extension == 'jpg' || extension == 'jpeg') {
+        final validationError = await _validateRasterLogo(bytes);
+        if (validationError != null) {
+          setState(() => _logoError = validationError);
+          return;
+        }
+      }
+
+      setState(() => _isLogoUploading = true);
+      final detail = await widget.businessGateway.uploadCompanyLogo(
+        accessToken: widget.accessToken,
+        companyId: widget.companyId,
+        bytes: bytes,
+        filename: filename,
+      );
+      if (!mounted) return;
+      setState(() {
+        _logoUrl = detail['logo_url'] as String?;
+        _logoError = null;
+        _isLogoUploading = false;
+        _didChange = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Логотип обновлен')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLogoUploading = false;
+        _logoError = e.toString();
+      });
+    }
+  }
+
+  Future<String?> _validateRasterLogo(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      try {
+        final frame = await codec.getNextFrame();
+        final image = frame.image;
+        try {
+          final width = image.width;
+          final height = image.height;
+          if (width != height) {
+            return 'Логотип должен быть квадратным.';
+          }
+          if (width < 100 || height < 100) {
+            return 'Минимальный размер логотипа 100x100 px.';
+          }
+          if (width > 600 || height > 600) {
+            return 'Максимальный размер логотипа 600x600 px.';
+          }
+        } finally {
+          image.dispose();
+        }
+      } finally {
+        codec.dispose();
+      }
+      return null;
+    } catch (_) {
+      return 'Не удалось прочитать размеры изображения.';
+    }
+  }
+
+  String _logoExtension(String filename) {
+    final dot = filename.lastIndexOf('.');
+    if (dot < 0 || dot == filename.length - 1) {
+      return '';
+    }
+    return filename.substring(dot + 1).toLowerCase();
+  }
+
+  void _closeEditor() {
+    Navigator.of(context).pop(_didChange);
+  }
+
+  Future<bool> _handleWillPop() async {
+    _closeEditor();
+    return false;
   }
 
   Future<void> _loadMembers() async {
@@ -362,155 +499,314 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _bg,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: const Text(
-          'Реквизиты компании',
-          style: TextStyle(
-            color: _textPrimary,
-            fontWeight: FontWeight.w700,
-            fontSize: 17,
+    return WillPopScope(
+      onWillPop: _handleWillPop,
+      child: Scaffold(
+        backgroundColor: _bg,
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+            onPressed: _closeEditor,
           ),
-        ),
-        actions: [
-          if (!_isLoading)
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: TextButton(
-                onPressed: _isSaving ? null : _save,
-                child: _isSaving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: _primaryColor),
-                      )
-                    : const Text(
-                        'Сохранить',
-                        style: TextStyle(
-                          color: _primaryColor,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
-                        ),
-                      ),
-              ),
+          title: const Text(
+            'Реквизиты компании',
+            style: TextStyle(
+              color: _textPrimary,
+              fontWeight: FontWeight.w700,
+              fontSize: 17,
             ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: _primaryColor))
-          : _error != null
-              ? _ErrorView(
-                  message: _error!,
-                  onRetry: () {
-                    setState(() {
-                      _error = null;
-                      _isLoading = true;
-                    });
-                    _loadCompany();
-                  },
-                )
-              : Form(
-                  key: _formKey,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _EditorCard(
-                        title: 'Основные данные',
-                        children: [
-                          _Field(
-                            label: 'Название компании',
-                            controller: _nameCtrl,
-                            required: true,
+          ),
+          actions: [
+            if (!_isLoading)
+              Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: TextButton(
+                  onPressed: _isSaving ? null : _save,
+                  child: _isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _primaryColor,
                           ),
-                          _Field(
-                            label: 'Организационная форма',
-                            hint: 'ТОО, АО, ИП...',
-                            controller: _legalFormCtrl,
+                        )
+                      : const Text(
+                          'Сохранить',
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
                           ),
-                          _CountryDropdown(
-                            value: _country,
-                            onChanged: (v) => setState(() => _country = v!),
-                          ),
-                          _Field(
-                            label: 'БИН / ИИН',
-                            controller: _iinCtrl,
-                            keyboardType: TextInputType.number,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _EditorCard(
-                        title: 'Контакты',
-                        children: [
-                          _Field(
-                            label: 'Email',
-                            controller: _emailCtrl,
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          _Field(
-                            label: 'Телефон',
-                            controller: _phoneCtrl,
-                            keyboardType: TextInputType.phone,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _EditorCard(
-                        title: 'Адрес',
-                        children: [
-                          _Field(
-                            label: 'Адрес',
-                            controller: _addressCtrl,
-                          ),
-                          _Field(
-                            label: 'Город',
-                            controller: _cityCtrl,
-                          ),
-                          _Field(
-                            label: 'Область / регион',
-                            controller: _regionCtrl,
-                          ),
-                          _Field(
-                            label: 'Почтовый индекс',
-                            controller: _postalCtrl,
-                            keyboardType: TextInputType.number,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _EditorCard(
-                        title: 'Банковские реквизиты',
-                        children: [
-                          _Field(
-                            label: 'Название банка',
-                            controller: _bankNameCtrl,
-                          ),
-                          _Field(
-                            label: 'ИИК (номер счёта)',
-                            controller: _bankAccountCtrl,
-                            keyboardType: TextInputType.number,
-                          ),
-                          _Field(
-                            label: 'БИК банка',
-                            controller: _bankBikCtrl,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 32),
-                    ],
-                  ),
+                        ),
                 ),
+              ),
+          ],
+        ),
+        body: _isLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: _primaryColor),
+              )
+            : _error != null
+                ? _ErrorView(
+                    message: _error!,
+                    onRetry: () {
+                      setState(() {
+                        _error = null;
+                        _isLoading = true;
+                      });
+                      _loadCompany();
+                    },
+                  )
+                : Form(
+                    key: _formKey,
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        _EditorCard(
+                          title: 'Логотип компании',
+                          children: [
+                            Row(
+                              children: [
+                                _LogoPreview(
+                                  name: _nameCtrl.text.trim().isEmpty
+                                      ? 'Компания'
+                                      : _nameCtrl.text.trim(),
+                                  logoUrl: _logoUrl,
+                                  accessToken: widget.accessToken,
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      FilledButton.icon(
+                                        onPressed: _isLogoUploading
+                                            ? null
+                                            : _pickAndUploadLogo,
+                                        icon: _isLogoUploading
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Colors.white,
+                                                ),
+                                              )
+                                            : const Icon(Icons.upload_rounded),
+                                        label: Text(
+                                          _isLogoUploading
+                                              ? 'Загрузка...'
+                                              : 'Загрузить логотип',
+                                        ),
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: _primaryColor,
+                                          foregroundColor: Colors.white,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 14,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      const Text(
+                                        'ICO, PNG, JPG, SVG · до 2 МБ · квадрат 100–600 px',
+                                        style: TextStyle(
+                                          color: Color(0xFF64748B),
+                                          fontSize: 13,
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                      if (_logoError != null) ...[
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          _logoError!,
+                                          style: const TextStyle(
+                                            color: Color(0xFFDC2626),
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _EditorCard(
+                          title: 'Основные данные',
+                          children: [
+                            _Field(
+                              label: 'Название компании',
+                              controller: _nameCtrl,
+                              required: true,
+                            ),
+                            _Field(
+                              label: 'Организационная форма',
+                              hint: 'ТОО, АО, ИП...',
+                              controller: _legalFormCtrl,
+                            ),
+                            _CountryDropdown(
+                              value: _country,
+                              onChanged: (v) => setState(() => _country = v!),
+                            ),
+                            _Field(
+                              label: 'БИН / ИИН',
+                              controller: _iinCtrl,
+                              keyboardType: TextInputType.number,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _EditorCard(
+                          title: 'Контакты',
+                          children: [
+                            _Field(
+                              label: 'Email',
+                              controller: _emailCtrl,
+                              keyboardType: TextInputType.emailAddress,
+                            ),
+                            _Field(
+                              label: 'Телефон',
+                              controller: _phoneCtrl,
+                              keyboardType: TextInputType.phone,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _EditorCard(
+                          title: 'Адрес',
+                          children: [
+                            _Field(
+                              label: 'Адрес',
+                              controller: _addressCtrl,
+                            ),
+                            _Field(
+                              label: 'Город',
+                              controller: _cityCtrl,
+                            ),
+                            _Field(
+                              label: 'Область / регион',
+                              controller: _regionCtrl,
+                            ),
+                            _Field(
+                              label: 'Почтовый индекс',
+                              controller: _postalCtrl,
+                              keyboardType: TextInputType.number,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _EditorCard(
+                          title: 'Банковские реквизиты',
+                          children: [
+                            _Field(
+                              label: 'Название банка',
+                              controller: _bankNameCtrl,
+                            ),
+                            _Field(
+                              label: 'ИИК (номер счёта)',
+                              controller: _bankAccountCtrl,
+                              keyboardType: TextInputType.number,
+                            ),
+                            _Field(
+                              label: 'БИК банка',
+                              controller: _bankBikCtrl,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 32),
+                      ],
+                    ),
+                  ),
+      ),
     );
   }
+}
+
+class _LogoPreview extends StatelessWidget {
+  const _LogoPreview({
+    required this.name,
+    required this.accessToken,
+    this.logoUrl,
+  });
+
+  final String name;
+  final String accessToken;
+  final String? logoUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedUrl = _resolveLogoUrl(logoUrl);
+    final fallback = Container(
+      width: 84,
+      height: 84,
+      decoration: BoxDecoration(
+        color: const Color(0x1400A86B),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        _companyInitials(name),
+        style: const TextStyle(
+          color: Color(0xFF00A86B),
+          fontWeight: FontWeight.w800,
+          fontSize: 28,
+        ),
+      ),
+    );
+    if (resolvedUrl == null) {
+      return fallback;
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Image.network(
+        resolvedUrl,
+        width: 84,
+        height: 84,
+        fit: BoxFit.cover,
+        headers: {'Authorization': 'Bearer $accessToken'},
+        errorBuilder: (_, __, ___) => fallback,
+      ),
+    );
+  }
+}
+
+String? _resolveLogoUrl(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) {
+    return null;
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  return '${ApiConfig.baseUrl}$trimmed';
+}
+
+String _companyInitials(String value) {
+  final parts = value
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
+  if (parts.isEmpty) {
+    return 'KZ';
+  }
+  final initials =
+      parts.take(2).map((part) => part.substring(0, 1)).join().toUpperCase();
+  return initials.isEmpty ? 'KZ' : initials;
 }
 
 class _EditorCard extends StatelessWidget {

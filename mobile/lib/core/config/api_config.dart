@@ -118,4 +118,7 @@ class ApiConfig {
 
   static Uri companyByIdUri(String companyId) =>
       Uri.parse('$baseUrl/api/v1/companies/$companyId');
+
+  static Uri companyLogoUri(String companyId) =>
+      Uri.parse('$baseUrl/api/v1/companies/$companyId/logo');
 }

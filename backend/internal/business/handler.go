@@ -3,8 +3,10 @@ package business
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/auth"
@@ -1119,6 +1121,66 @@ func (h Handler) CompanyByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			detail, err := h.store.UpdateCompany(user, companyID, input)
+			if err != nil {
+				if errors.Is(err, ErrValidation) {
+					response.Error(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				response.Error(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			response.JSON(w, http.StatusOK, detail)
+		default:
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	case "logo":
+		if !h.requireCompanyMembership(w, user, companyID) {
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			logoPNG, err := h.store.GetCompanyLogo(user, companyID)
+			if err != nil {
+				if errors.Is(err, ErrValidation) {
+					response.Error(w, http.StatusNotFound, "logo not found")
+					return
+				}
+				response.Error(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("Cache-Control", "private, max-age=300")
+			_, _ = w.Write(logoPNG)
+		case http.MethodPut:
+			if !h.requireCompanyPermission(w, user, companyID, permCompanySettingsWrite) {
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxCompanyLogoBytes+(256<<10))
+			if err := r.ParseMultipartForm(maxCompanyLogoBytes + (256 << 10)); err != nil {
+				response.Error(w, http.StatusBadRequest, "не удалось прочитать файл логотипа")
+				return
+			}
+			file, fileHeader, err := r.FormFile("file")
+			if err != nil {
+				response.Error(w, http.StatusBadRequest, "файл логотипа обязателен")
+				return
+			}
+			defer file.Close()
+			if fileHeader.Size > maxCompanyLogoBytes {
+				response.Error(w, http.StatusBadRequest, "логотип должен быть не больше 2 МБ")
+				return
+			}
+			rawLogo, err := io.ReadAll(file)
+			if err != nil {
+				response.Error(w, http.StatusBadRequest, "не удалось прочитать файл логотипа")
+				return
+			}
+			logoPNG, err := normalizeCompanyLogo(filepath.Base(fileHeader.Filename), rawLogo)
+			if err != nil {
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			detail, err := h.store.UpdateCompanyLogo(user, companyID, logoPNG)
 			if err != nil {
 				if errors.Is(err, ErrValidation) {
 					response.Error(w, http.StatusBadRequest, err.Error())

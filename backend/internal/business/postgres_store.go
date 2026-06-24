@@ -2583,6 +2583,7 @@ func (s *PostgresStore) ListUserCompanies(user auth.User) ([]CompanyMembership, 
 		    c.name,
 		    c.country_code,
 		    COALESCE(c.tax_identifier, ''),
+		    c.logo_updated_at,
 		    cm.role,
 		    cm.is_default_company
 		 FROM company_memberships cm
@@ -2599,15 +2600,20 @@ func (s *PostgresStore) ListUserCompanies(user auth.User) ([]CompanyMembership, 
 	companies := make([]CompanyMembership, 0)
 	for rows.Next() {
 		var company CompanyMembership
+		var logoUpdatedAt sql.NullTime
 		if err := rows.Scan(
 			&company.ID,
 			&company.Name,
 			&company.Country,
 			&company.IIN,
+			&logoUpdatedAt,
 			&company.Role,
 			&company.IsDefault,
 		); err != nil {
 			return nil, err
+		}
+		if logoUpdatedAt.Valid {
+			company.LogoURL = companyLogoURL(company.ID, logoUpdatedAt.Time)
 		}
 		companies = append(companies, company)
 	}
@@ -3014,6 +3020,7 @@ func (s *PostgresStore) GetCompany(user auth.User, companyID string) (CompanyDet
 	defer cancel()
 
 	var detail CompanyDetail
+	var logoUpdatedAt sql.NullTime
 	err := s.db.QueryRowContext(
 		ctx,
 		`SELECT
@@ -3032,6 +3039,7 @@ func (s *PostgresStore) GetCompany(user auth.User, companyID string) (CompanyDet
 		    COALESCE(c.bank_name, ''),
 		    COALESCE(c.bank_account, ''),
 		    COALESCE(c.bank_bik, ''),
+		    c.logo_updated_at,
 		    c.is_vat_payer,
 		    cm.role,
 		    cm.is_default_company
@@ -3057,6 +3065,7 @@ func (s *PostgresStore) GetCompany(user auth.User, companyID string) (CompanyDet
 		&detail.BankName,
 		&detail.BankAccount,
 		&detail.BankBik,
+		&logoUpdatedAt,
 		&detail.IsVatPayer,
 		&detail.Role,
 		&detail.IsDefault,
@@ -3066,6 +3075,9 @@ func (s *PostgresStore) GetCompany(user auth.User, companyID string) (CompanyDet
 			return CompanyDetail{}, fmt.Errorf("%w: company not found or no access", ErrValidation)
 		}
 		return CompanyDetail{}, err
+	}
+	if logoUpdatedAt.Valid {
+		detail.LogoURL = companyLogoURL(detail.ID, logoUpdatedAt.Time)
 	}
 	return detail, nil
 }
@@ -3109,7 +3121,7 @@ func (s *PostgresStore) UpdateCompany(user auth.User, companyID string, input Up
 	}()
 
 	var pgErr *pgconn.PgError
-	_, err = tx.ExecContext(
+	result, err := tx.ExecContext(
 		ctx,
 		`UPDATE companies SET
 		    name              = $3,
@@ -3127,9 +3139,8 @@ func (s *PostgresStore) UpdateCompany(user auth.User, companyID string, input Up
 		    bank_bik          = NULLIF($15, ''),
 		    is_vat_payer      = $16,
 		    updated_at        = NOW()
-		 WHERE id = $1::uuid AND owner_user_id = $2`,
+		 WHERE id = $1::uuid`,
 		companyID,
-		user.ID,
 		normalized.Name,
 		normalized.LegalForm,
 		normalized.Country,
@@ -3151,6 +3162,13 @@ func (s *PostgresStore) UpdateCompany(user auth.User, companyID string, input Up
 		}
 		return CompanyDetail{}, err
 	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return CompanyDetail{}, err
+	}
+	if rowsAffected == 0 {
+		return CompanyDetail{}, fmt.Errorf("%w: company not found", ErrValidation)
+	}
 
 	if err = s.syncOwnedCompaniesSnapshot(ctx, tx, user.ID); err != nil {
 		return CompanyDetail{}, err
@@ -3158,6 +3176,69 @@ func (s *PostgresStore) UpdateCompany(user auth.User, companyID string, input Up
 
 	if err = tx.Commit(); err != nil {
 		return CompanyDetail{}, err
+	}
+
+	return s.GetCompany(user, companyID)
+}
+
+func (s *PostgresStore) GetCompanyLogo(user auth.User, companyID string) ([]byte, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	var logo []byte
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT c.logo_png
+		 FROM companies c
+		 JOIN company_memberships cm
+		   ON cm.company_id = c.id AND cm.user_id = $1
+		 WHERE c.id = $2::uuid AND c.archived_at IS NULL`,
+		user.ID,
+		companyID,
+	).Scan(&logo)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: company not found or no access", ErrValidation)
+		}
+		return nil, err
+	}
+	if len(logo) == 0 {
+		return nil, fmt.Errorf("%w: company logo not found", ErrValidation)
+	}
+	return logo, nil
+}
+
+func (s *PostgresStore) UpdateCompanyLogo(user auth.User, companyID string, logoPNG []byte) (CompanyDetail, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	actorRole, err := s.actorRoleForCompany(ctx, user.ID, companyID)
+	if err != nil {
+		return CompanyDetail{}, err
+	}
+	if actorRole != "owner" && actorRole != "admin" {
+		return CompanyDetail{}, fmt.Errorf("%w: only owners and admins can edit company details", ErrValidation)
+	}
+
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE companies SET
+		    logo_png        = $2,
+		    logo_updated_at = NOW(),
+		    updated_at      = NOW()
+		 WHERE id = $1::uuid`,
+		companyID,
+		logoPNG,
+	)
+	if err != nil {
+		return CompanyDetail{}, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return CompanyDetail{}, err
+	}
+	if rowsAffected == 0 {
+		return CompanyDetail{}, fmt.Errorf("%w: company not found", ErrValidation)
 	}
 
 	return s.GetCompany(user, companyID)

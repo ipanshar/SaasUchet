@@ -466,6 +466,7 @@ class _BusinessShellState extends State<BusinessShell> {
       ),
     );
     if (changed == true) {
+      await _loadCompanies();
       await _loadOverview();
     }
   }
