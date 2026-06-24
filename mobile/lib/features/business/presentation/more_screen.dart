@@ -1664,6 +1664,10 @@ class _MoreScreenState extends State<_MoreScreen> {
       }
     }
 
+    if (!mounted) return;
+    final canWrite = widget.overview.hasPermission('warehouse.write') ||
+        (document.documentType == 'sale_issue' &&
+            widget.overview.hasPermission('sales.write'));
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (context) => _DocumentDetailScreen(
@@ -1676,6 +1680,7 @@ class _MoreScreenState extends State<_MoreScreen> {
           document: document,
           accentColor: const Color(0xFF00A86B),
           counterpartyLabel: 'Контрагент',
+          canWrite: canWrite,
         ),
       ),
     );
@@ -2305,7 +2310,7 @@ const _moreFaqItems = [
     id: 'trade',
     title: 'Как оформить закупку или продажу?',
     answer:
-        'Создайте документ в разделе Продажи, Закупки или Документы, выберите контрагента, склад и позиции. Цена подставится из справочника, после сохранения обновятся остатки и финансовые движения.',
+        'Создайте документ в разделе Продажи, Закупки или Документы, выберите контрагента, склад и позиции. Цена подставится из справочника. После проведения документа обновятся остатки на складе и появится долг по контрагенту. Деньги двигаются отдельно — когда вы проведете оплату по документу.',
   ),
   _MoreFaqItem(
     id: 'users',

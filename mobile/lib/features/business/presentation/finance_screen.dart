@@ -6,12 +6,14 @@ class _FinanceScreen extends StatefulWidget {
     required this.finance,
     required this.businessGateway,
     required this.onFinanceChanged,
+    this.canWrite = true,
   });
 
   final String accessToken;
   final _FinanceOverview finance;
   final BusinessGateway businessGateway;
   final Future<void> Function() onFinanceChanged;
+  final bool canWrite;
 
   @override
   State<_FinanceScreen> createState() => _FinanceScreenState();
@@ -139,13 +141,15 @@ class _FinanceScreenState extends State<_FinanceScreen> {
                               icon: const Icon(Icons.receipt_long_rounded),
                               label: const Text('Документы'),
                             ),
-                            const SizedBox(width: 8),
-                            OutlinedButton.icon(
-                              onPressed:
-                                  _isSubmitting ? null : _showAccountSheet,
-                              icon: const Icon(Icons.add_card_rounded),
-                              label: const Text('Счет'),
-                            ),
+                            if (widget.canWrite) ...[
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                onPressed:
+                                    _isSubmitting ? null : _showAccountSheet,
+                                icon: const Icon(Icons.add_card_rounded),
+                                label: const Text('Счет'),
+                              ),
+                            ],
                           ],
                         ),
                         const SizedBox(height: 14),
@@ -217,25 +221,27 @@ class _FinanceScreenState extends State<_FinanceScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton(
-                          onPressed:
-                              _isSubmitting ? null : _showMoneyOperationSheet,
-                          child: const Text('Операция'),
+                  if (widget.canWrite) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton(
+                            onPressed:
+                                _isSubmitting ? null : _showMoneyOperationSheet,
+                            child: const Text('Операция'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _isSubmitting ? null : _showTransferSheet,
-                          child: const Text('Перевод'),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSubmitting ? null : _showTransferSheet,
+                            child: const Text('Перевод'),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   _BusinessCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -482,6 +488,7 @@ class _FinanceScreenState extends State<_FinanceScreen> {
           onSettled: widget.onFinanceChanged,
           documents:
               documents.map(_moneyDocumentFromJson).toList(growable: false),
+          canWrite: widget.canWrite,
         ),
       );
     } catch (error) {
@@ -926,6 +933,7 @@ class _MoneyDocumentsSheet extends StatefulWidget {
     required this.accounts,
     required this.onSettled,
     required this.documents,
+    this.canWrite = true,
   });
 
   final String accessToken;
@@ -933,6 +941,7 @@ class _MoneyDocumentsSheet extends StatefulWidget {
   final List<_BankAccount> accounts;
   final Future<void> Function() onSettled;
   final List<_MoneyDocument> documents;
+  final bool canWrite;
 
   @override
   State<_MoneyDocumentsSheet> createState() => _MoneyDocumentsSheetState();
@@ -1141,6 +1150,7 @@ class _MoneyDocumentsSheetState extends State<_MoneyDocumentsSheet> {
           accounts: widget.accounts,
           detail: detail,
           onSettled: widget.onSettled,
+          canWrite: widget.canWrite,
         ),
       );
       if (wasSettled == true && mounted) {
@@ -1165,6 +1175,7 @@ class _MoneyDocumentDetailSheet extends StatefulWidget {
     required this.detail,
     required this.onSettled,
     this.openSettleOnOpen = false,
+    this.canWrite = true,
   });
 
   final String accessToken;
@@ -1173,6 +1184,7 @@ class _MoneyDocumentDetailSheet extends StatefulWidget {
   final _MoneyDocumentDetail detail;
   final Future<void> Function() onSettled;
   final bool openSettleOnOpen;
+  final bool canWrite;
 
   @override
   State<_MoneyDocumentDetailSheet> createState() =>
@@ -1184,6 +1196,7 @@ class _MoneyDocumentDetailSheetState extends State<_MoneyDocumentDetailSheet> {
   bool _didAutoOpenSettle = false;
 
   bool get _canSettle =>
+      widget.canWrite &&
       (widget.detail.summary.status == 'draft' ||
           widget.detail.summary.status == 'partial') &&
       (widget.detail.summary.documentType == 'sale_receivable' ||

@@ -759,6 +759,7 @@ Set<String> _defaultPermissionsForRole(String role) {
         'crm.write',
         'catalog.read',
         'warehouse.read',
+        'sales.write',
       };
     default:
       return const {};

@@ -1320,9 +1320,18 @@ func ValidateInventoryDocumentInput(input CreateInventoryDocumentInput) error {
 	if (input.DocumentType == "sale_issue" || input.DocumentType == "purchase_receipt") && strings.TrimSpace(input.ClientID) == "" {
 		return fmt.Errorf("%w: client_id is required for sale and purchase documents", ErrValidation)
 	}
+	productsOnly := input.DocumentType == "transfer" || input.DocumentType == "write_off" || input.DocumentType == "adjustment"
 	for index, line := range input.Lines {
-		if strings.TrimSpace(line.ProductID) == "" && strings.TrimSpace(line.ServiceID) == "" {
+		hasProduct := strings.TrimSpace(line.ProductID) != ""
+		hasService := strings.TrimSpace(line.ServiceID) != ""
+		if !hasProduct && !hasService {
 			return fmt.Errorf("%w: lines[%d].product_id or service_id is required", ErrValidation, index)
+		}
+		if hasProduct && hasService {
+			return fmt.Errorf("%w: lines[%d] must reference either a product or a service, not both", ErrValidation, index)
+		}
+		if productsOnly && hasService {
+			return fmt.Errorf("%w: lines[%d] services are not allowed for %s documents", ErrValidation, index, input.DocumentType)
 		}
 		if line.Quantity <= 0 {
 			return fmt.Errorf("%w: lines[%d].quantity must be greater than zero", ErrValidation, index)

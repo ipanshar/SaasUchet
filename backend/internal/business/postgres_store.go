@@ -1199,16 +1199,20 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 		if strings.TrimSpace(inputLine.ServiceID) != "" {
 			// Service line — no inventory movement
 			var svcName string
+			var svcAllowedToSell bool
 			if err = tx.QueryRowContext(
 				ctx,
-				`SELECT name FROM services WHERE id = $1::uuid AND company_id = $2::uuid AND archived_at IS NULL`,
+				`SELECT name, allowed_to_sell FROM services WHERE id = $1::uuid AND company_id = $2::uuid AND archived_at IS NULL`,
 				inputLine.ServiceID,
 				companyID,
-			).Scan(&svcName); err != nil {
+			).Scan(&svcName, &svcAllowedToSell); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return InventoryDocumentDetail{}, fmt.Errorf("%w: service not found", ErrValidation)
 				}
 				return InventoryDocumentDetail{}, err
+			}
+			if normalized.DocumentType == "sale_issue" && !svcAllowedToSell {
+				return InventoryDocumentDetail{}, fmt.Errorf("%w: service %q is not allowed to sell", ErrValidation, svcName)
 			}
 			if err = tx.QueryRowContext(
 				ctx,
@@ -1248,6 +1252,9 @@ func (s *PostgresStore) CreateInventoryDocument(user auth.User, input CreateInve
 					return InventoryDocumentDetail{}, fmt.Errorf("%w: product not found", ErrValidation)
 				}
 				return InventoryDocumentDetail{}, productErr
+			}
+			if normalized.DocumentType == "sale_issue" && !product.AllowedToSell {
+				return InventoryDocumentDetail{}, fmt.Errorf("%w: product %q is not allowed to sell", ErrValidation, product.Name)
 			}
 			if unitPrice == 0 {
 				unitPrice = product.Price
@@ -1438,7 +1445,7 @@ func (s *PostgresStore) UpdateInventoryDocument(user auth.User, documentID strin
 		return InventoryDocumentDetail{}, err
 	}
 
-	if _, _, _, err = s.replaceInventoryDocumentDraftLines(ctx, tx, companyID, documentID, normalized.Lines); err != nil {
+	if _, _, _, err = s.replaceInventoryDocumentDraftLines(ctx, tx, companyID, documentID, normalized.DocumentType, normalized.Lines); err != nil {
 		return InventoryDocumentDetail{}, err
 	}
 
@@ -1901,7 +1908,7 @@ func (s *PostgresStore) GetInventoryDocument(user auth.User, documentID string) 
 	return detail, paymentRows.Err()
 }
 
-func (s *PostgresStore) replaceInventoryDocumentDraftLines(ctx context.Context, tx *sql.Tx, companyID string, documentID string, lines []CreateInventoryDocumentLineInput) ([]InventoryDocumentLine, int, int, error) {
+func (s *PostgresStore) replaceInventoryDocumentDraftLines(ctx context.Context, tx *sql.Tx, companyID string, documentID string, documentType string, lines []CreateInventoryDocumentLineInput) ([]InventoryDocumentLine, int, int, error) {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM inventory_document_lines WHERE document_id = $1::uuid`, documentID); err != nil {
 		return nil, 0, 0, err
 	}
@@ -1916,18 +1923,22 @@ func (s *PostgresStore) replaceInventoryDocumentDraftLines(ctx context.Context, 
 
 		if strings.TrimSpace(inputLine.ServiceID) != "" {
 			var serviceName string
+			var serviceAllowedToSell bool
 			if err := tx.QueryRowContext(
 				ctx,
-				`SELECT name
+				`SELECT name, allowed_to_sell
 				 FROM services
 				 WHERE id = $1::uuid AND company_id = $2::uuid AND archived_at IS NULL`,
 				inputLine.ServiceID,
 				companyID,
-			).Scan(&serviceName); err != nil {
+			).Scan(&serviceName, &serviceAllowedToSell); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return nil, 0, 0, fmt.Errorf("%w: service not found", ErrValidation)
 				}
 				return nil, 0, 0, err
+			}
+			if documentType == "sale_issue" && !serviceAllowedToSell {
+				return nil, 0, 0, fmt.Errorf("%w: service %q is not allowed to sell", ErrValidation, serviceName)
 			}
 			if _, err := tx.ExecContext(
 				ctx,
@@ -1967,6 +1978,9 @@ func (s *PostgresStore) replaceInventoryDocumentDraftLines(ctx context.Context, 
 				return nil, 0, 0, fmt.Errorf("%w: product not found", ErrValidation)
 			}
 			return nil, 0, 0, err
+		}
+		if documentType == "sale_issue" && !product.AllowedToSell {
+			return nil, 0, 0, fmt.Errorf("%w: product %q is not allowed to sell", ErrValidation, product.Name)
 		}
 		if unitPrice == 0 {
 			unitPrice = product.Price
@@ -3809,12 +3823,13 @@ func (s *PostgresStore) findProductByID(ctx context.Context, companyID string, p
 		    p.min_quantity,
 		    p.sale_price,
 		    p.cost_price,
-		    COALESCE(p.barcode, '')
+		    COALESCE(p.barcode, ''),
+		    COALESCE(p.allowed_to_sell, TRUE)
 		 FROM products p
 		 LEFT JOIN product_categories pc ON pc.id = p.category_id
 		 LEFT JOIN inventory_balances ib ON ib.product_id = p.id AND ib.company_id = p.company_id
 		 WHERE p.id = $1::uuid AND p.company_id = $2::uuid AND p.archived_at IS NULL
-		 GROUP BY p.id, p.name, p.sku, pc.name, p.min_quantity, p.sale_price, p.cost_price, p.barcode`,
+		 GROUP BY p.id, p.name, p.sku, pc.name, p.min_quantity, p.sale_price, p.cost_price, p.barcode, p.allowed_to_sell`,
 		productID,
 		companyID,
 	).Scan(
@@ -3827,6 +3842,7 @@ func (s *PostgresStore) findProductByID(ctx context.Context, companyID string, p
 		&price,
 		&cost,
 		&product.Barcode,
+		&product.AllowedToSell,
 	)
 	if err != nil {
 		return Product{}, err

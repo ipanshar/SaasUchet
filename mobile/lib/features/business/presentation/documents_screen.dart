@@ -96,6 +96,7 @@ class _DocumentsListScreen extends StatefulWidget {
     required this.counterpartyLabel,
     required this.products,
     required this.clients,
+    this.canWrite = true,
   });
 
   final String accessToken;
@@ -107,6 +108,9 @@ class _DocumentsListScreen extends StatefulWidget {
   final String counterpartyLabel;
   final List<_Product> products;
   final List<_Client> clients;
+
+  /// Whether the current role may create/edit/post/delete these documents.
+  final bool canWrite;
 
   @override
   State<_DocumentsListScreen> createState() => _DocumentsListScreenState();
@@ -468,6 +472,7 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
           document: document,
           accentColor: widget.accentColor,
           counterpartyLabel: widget.counterpartyLabel,
+          canWrite: widget.canWrite,
         ),
       ),
     );
@@ -552,20 +557,21 @@ class _DocumentsListScreenState extends State<_DocumentsListScreen> {
           child: Stack(
             children: [
               Positioned.fill(child: _buildBody()),
-              Positioned(
-                right: 16,
-                bottom: 90,
-                child: FloatingActionButton(
-                  heroTag: '${widget.documentType}_create_document',
-                  backgroundColor: const Color(0xFF00A86B),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+              if (widget.canWrite)
+                Positioned(
+                  right: 16,
+                  bottom: 90,
+                  child: FloatingActionButton(
+                    heroTag: '${widget.documentType}_create_document',
+                    backgroundColor: const Color(0xFF00A86B),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    onPressed: _showCreateDocument,
+                    child: const Icon(Icons.add_rounded),
                   ),
-                  onPressed: _showCreateDocument,
-                  child: const Icon(Icons.add_rounded),
                 ),
-              ),
             ],
           ),
         ),
@@ -750,6 +756,7 @@ class _DocumentDetailScreen extends StatefulWidget {
     required this.document,
     required this.accentColor,
     required this.counterpartyLabel,
+    this.canWrite = true,
   });
 
   final String accessToken;
@@ -761,6 +768,9 @@ class _DocumentDetailScreen extends StatefulWidget {
   final _InventoryDocument document;
   final Color accentColor;
   final String counterpartyLabel;
+
+  /// Whether the current role may edit/post/delete this document.
+  final bool canWrite;
 
   @override
   State<_DocumentDetailScreen> createState() => _DocumentDetailScreenState();
@@ -1064,7 +1074,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        if (summary.status == 'draft') ...[
+        if (summary.status == 'draft' && widget.canWrite) ...[
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(

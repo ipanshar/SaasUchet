@@ -434,16 +434,12 @@ func (h Handler) InventoryDocuments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	permission := permWarehouseRead
-	if r.Method != http.MethodGet {
-		permission = permWarehouseWrite
-	}
-	if !h.requireActiveCompanyPermission(w, user, permission) {
-		return
-	}
 
 	switch r.Method {
 	case http.MethodGet:
+		if !h.requireActiveCompanyPermission(w, user, permWarehouseRead) {
+			return
+		}
 		documentType := strings.TrimSpace(r.URL.Query().Get("type"))
 		search := strings.TrimSpace(r.URL.Query().Get("search"))
 		documents, err := h.store.ListInventoryDocuments(user, documentType, search)
@@ -463,6 +459,9 @@ func (h Handler) InventoryDocuments(w http.ResponseWriter, r *http.Request) {
 		}
 
 		input = NormalizeInventoryDocumentInput(input)
+		if !h.requireInventoryDocumentWrite(w, user, input.DocumentType) {
+			return
+		}
 		if err := ValidateInventoryDocumentInput(input); err != nil {
 			response.Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -512,7 +511,12 @@ func (h Handler) InventoryDocumentByID(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if !h.requireActiveCompanyPermission(w, user, permWarehouseWrite) {
+		existing, err := h.store.GetInventoryDocument(user, documentID)
+		if err != nil {
+			response.Error(w, http.StatusNotFound, "document not found")
+			return
+		}
+		if !h.requireInventoryDocumentWrite(w, user, existing.Summary.DocumentType) {
 			return
 		}
 		document, err := h.store.PostInventoryDocument(user, documentID)
@@ -540,15 +544,15 @@ func (h Handler) InventoryDocumentByID(w http.ResponseWriter, r *http.Request) {
 		}
 		response.JSON(w, http.StatusOK, document)
 	case http.MethodPut:
-		if !h.requireActiveCompanyPermission(w, user, permWarehouseWrite) {
-			return
-		}
 		var input CreateInventoryDocumentInput
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			response.Error(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 		input = NormalizeInventoryDocumentInput(input)
+		if !h.requireInventoryDocumentWrite(w, user, input.DocumentType) {
+			return
+		}
 		if err := ValidateInventoryDocumentInput(input); err != nil {
 			response.Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -560,7 +564,12 @@ func (h Handler) InventoryDocumentByID(w http.ResponseWriter, r *http.Request) {
 		}
 		response.JSON(w, http.StatusOK, document)
 	case http.MethodDelete:
-		if !h.requireActiveCompanyPermission(w, user, permWarehouseWrite) {
+		existing, err := h.store.GetInventoryDocument(user, documentID)
+		if err != nil {
+			response.Error(w, http.StatusNotFound, "document not found")
+			return
+		}
+		if !h.requireInventoryDocumentWrite(w, user, existing.Summary.DocumentType) {
 			return
 		}
 		if err := h.store.DeleteInventoryDocument(user, documentID); err != nil {
@@ -1392,6 +1401,26 @@ func (h Handler) requireActiveCompanyPermission(w http.ResponseWriter, user auth
 		if hasPermission(membership.Role, permission) {
 			return true
 		}
+	}
+	response.Error(w, http.StatusForbidden, "forbidden")
+	return false
+}
+
+// requireInventoryDocumentWrite checks that the active user may write an
+// inventory document of the given type. It lets the sales role manage only
+// sale_issue documents while warehouse/owner/admin manage everything.
+func (h Handler) requireInventoryDocumentWrite(w http.ResponseWriter, user auth.User, documentType string) bool {
+	membership, ok, err := h.resolveUserCompanyMembership(user, strings.TrimSpace(user.ActiveCompanyID))
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return false
+	}
+	if !ok {
+		response.Error(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+	if canWriteInventoryDocument(membership.Role, documentType) {
+		return true
 	}
 	response.Error(w, http.StatusForbidden, "forbidden")
 	return false

@@ -8,6 +8,7 @@ class _CrmScreen extends StatefulWidget {
     required this.accounts,
     required this.businessGateway,
     required this.onClientsChanged,
+    this.canWrite = true,
   });
 
   final String accessToken;
@@ -16,6 +17,7 @@ class _CrmScreen extends StatefulWidget {
   final List<_BankAccount> accounts;
   final BusinessGateway businessGateway;
   final Future<void> Function() onClientsChanged;
+  final bool canWrite;
 
   @override
   State<_CrmScreen> createState() => _CrmScreenState();
@@ -87,26 +89,27 @@ class _CrmScreenState extends State<_CrmScreen> {
               ? _buildClientDetail(selectedClient)
               : _buildClientList(clients, vipCount, debtorCount),
         ),
-        Positioned(
-          right: 16,
-          bottom: 90,
-          child: selectedClient != null
-              ? _FabMenu(
-                  expanded: _isCrmFabExpanded,
-                  actions: _clientFabActions,
-                  onToggle: () => setState(
-                    () => _isCrmFabExpanded = !_isCrmFabExpanded,
+        if (widget.canWrite)
+          Positioned(
+            right: 16,
+            bottom: 90,
+            child: selectedClient != null
+                ? _FabMenu(
+                    expanded: _isCrmFabExpanded,
+                    actions: _clientFabActions,
+                    onToggle: () => setState(
+                      () => _isCrmFabExpanded = !_isCrmFabExpanded,
+                    ),
+                    onActionSelected: _handleClientFabAction,
+                  )
+                : FloatingActionButton(
+                    heroTag: 'crm_add_client',
+                    backgroundColor: const Color(0xFF00A86B),
+                    onPressed: _isSubmitting ? null : () => _showClientSheet(),
+                    child: const Icon(Icons.person_add_alt_1_rounded,
+                        color: Colors.white),
                   ),
-                  onActionSelected: _handleClientFabAction,
-                )
-              : FloatingActionButton(
-                  heroTag: 'crm_add_client',
-                  backgroundColor: const Color(0xFF00A86B),
-                  onPressed: _isSubmitting ? null : () => _showClientSheet(),
-                  child: const Icon(Icons.person_add_alt_1_rounded,
-                      color: Colors.white),
-                ),
-        ),
+          ),
       ],
     );
   }

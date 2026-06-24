@@ -9,11 +9,13 @@ class _SalaryScreen extends StatefulWidget {
     required this.accessToken,
     required this.businessGateway,
     required this.accounts,
+    this.canWrite = true,
   });
 
   final String accessToken;
   final BusinessGateway businessGateway;
   final List<_BankAccount> accounts;
+  final bool canWrite;
 
   @override
   State<_SalaryScreen> createState() => _SalaryScreenState();
@@ -160,16 +162,17 @@ class _SalaryScreenState extends State<_SalaryScreen>
             ],
           ),
         ),
-        Positioned(
-          right: 16,
-          bottom: 90,
-          child: _FabMenu(
-            expanded: _isFabExpanded,
-            actions: fabActions,
-            onToggle: () => setState(() => _isFabExpanded = !_isFabExpanded),
-            onActionSelected: _handleFabAction,
+        if (widget.canWrite)
+          Positioned(
+            right: 16,
+            bottom: 90,
+            child: _FabMenu(
+              expanded: _isFabExpanded,
+              actions: fabActions,
+              onToggle: () => setState(() => _isFabExpanded = !_isFabExpanded),
+              onActionSelected: _handleFabAction,
+            ),
           ),
-        ),
       ],
     );
   }

@@ -6,12 +6,14 @@ class _CatalogScreen extends StatefulWidget {
     required this.products,
     required this.businessGateway,
     required this.onProductsChanged,
+    this.canWrite = true,
   });
 
   final String accessToken;
   final List<_Product> products;
   final BusinessGateway businessGateway;
   final Future<void> Function() onProductsChanged;
+  final bool canWrite;
 
   @override
   State<_CatalogScreen> createState() => _CatalogScreenState();
@@ -67,11 +69,13 @@ class _CatalogScreenState extends State<_CatalogScreen>
                   products: widget.products,
                   businessGateway: widget.businessGateway,
                   onProductsChanged: widget.onProductsChanged,
+                  canWrite: widget.canWrite,
                 ),
                 _CatalogServicesTab(
                   accessToken: widget.accessToken,
                   products: widget.products,
                   businessGateway: widget.businessGateway,
+                  canWrite: widget.canWrite,
                 ),
               ],
             ),
@@ -90,12 +94,14 @@ class _CatalogProductsTab extends StatelessWidget {
     required this.products,
     required this.businessGateway,
     required this.onProductsChanged,
+    this.canWrite = true,
   });
 
   final String accessToken;
   final List<_Product> products;
   final BusinessGateway businessGateway;
   final Future<void> Function() onProductsChanged;
+  final bool canWrite;
 
   Map<String, dynamic> _toPayload(_CreateProductFormData r) => {
         'name': r.name,
@@ -192,20 +198,22 @@ class _CatalogProductsTab extends StatelessWidget {
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) => _CatalogProductTile(
                   product: products[i],
+                  canWrite: canWrite,
                   onEdit: () => _openEditProduct(context, products[i]),
                   onDelete: () => _deleteProduct(context, products[i]),
                 ),
               ),
-        Positioned(
-          right: 16,
-          bottom: 90,
-          child: FloatingActionButton(
-            heroTag: 'catalog_product_fab',
-            backgroundColor: const Color(0xFF00A86B),
-            onPressed: () => _openCreateProduct(context),
-            child: const Icon(Icons.add, color: Colors.white),
+        if (canWrite)
+          Positioned(
+            right: 16,
+            bottom: 90,
+            child: FloatingActionButton(
+              heroTag: 'catalog_product_fab',
+              backgroundColor: const Color(0xFF00A86B),
+              onPressed: () => _openCreateProduct(context),
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -216,11 +224,13 @@ class _CatalogProductTile extends StatelessWidget {
     required this.product,
     required this.onEdit,
     required this.onDelete,
+    this.canWrite = true,
   });
 
   final _Product product;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final bool canWrite;
 
   @override
   Widget build(BuildContext context) {
@@ -300,27 +310,30 @@ class _CatalogProductTile extends StatelessWidget {
                   color: Color(0xFF00A86B),
                 ),
               ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined, size: 18),
-                    color: const Color(0xFF3B82F6),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    onPressed: onEdit,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                    color: const Color(0xFFEF4444),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    onPressed: onDelete,
-                  ),
-                ],
-              ),
+              if (canWrite)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      color: const Color(0xFF3B82F6),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 32, minHeight: 32),
+                      onPressed: onEdit,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                      color: const Color(0xFFEF4444),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 32, minHeight: 32),
+                      onPressed: onDelete,
+                    ),
+                  ],
+                ),
             ],
           ),
         ],
@@ -336,11 +349,13 @@ class _CatalogServicesTab extends StatefulWidget {
     required this.accessToken,
     required this.products,
     required this.businessGateway,
+    this.canWrite = true,
   });
 
   final String accessToken;
   final List<_Product> products;
   final BusinessGateway businessGateway;
+  final bool canWrite;
 
   @override
   State<_CatalogServicesTab> createState() => _CatalogServicesTabState();
@@ -484,20 +499,22 @@ class _CatalogServicesTabState extends State<_CatalogServicesTab> {
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) => _ServiceTile(
                   service: _services[i],
+                  canWrite: widget.canWrite,
                   onEdit: () => _openEditService(_services[i]),
                   onDelete: () => _deleteService(_services[i]),
                 ),
               ),
-        Positioned(
-          right: 16,
-          bottom: 90,
-          child: FloatingActionButton(
-            heroTag: 'catalog_service_fab',
-            backgroundColor: const Color(0xFF00A86B),
-            onPressed: _openCreateService,
-            child: const Icon(Icons.add, color: Colors.white),
+        if (widget.canWrite)
+          Positioned(
+            right: 16,
+            bottom: 90,
+            child: FloatingActionButton(
+              heroTag: 'catalog_service_fab',
+              backgroundColor: const Color(0xFF00A86B),
+              onPressed: _openCreateService,
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -508,11 +525,13 @@ class _ServiceTile extends StatelessWidget {
     required this.service,
     required this.onEdit,
     required this.onDelete,
+    this.canWrite = true,
   });
 
   final _Service service;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final bool canWrite;
 
   @override
   Widget build(BuildContext context) {
@@ -589,17 +608,19 @@ class _ServiceTile extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 20),
-                color: const Color(0xFF3B82F6),
-                onPressed: onEdit,
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline_rounded, size: 20),
-                color: const Color(0xFFEF4444),
-                onPressed: onDelete,
-              ),
+              if (canWrite) ...[
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                  color: const Color(0xFF3B82F6),
+                  onPressed: onEdit,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                  color: const Color(0xFFEF4444),
+                  onPressed: onDelete,
+                ),
+              ],
             ],
           ),
           if (service.materials.isNotEmpty) ...[

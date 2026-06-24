@@ -11,6 +11,7 @@ const (
 	permCRMWrite             = "crm.write"
 	permWarehouseRead        = "warehouse.read"
 	permWarehouseWrite       = "warehouse.write"
+	permSalesWrite           = "sales.write"
 	permFinanceRead          = "finance.read"
 	permFinanceWrite         = "finance.write"
 	permCatalogRead          = "catalog.read"
@@ -30,6 +31,7 @@ var allBusinessPermissions = []string{
 	permCRMWrite,
 	permWarehouseRead,
 	permWarehouseWrite,
+	permSalesWrite,
 	permFinanceRead,
 	permFinanceWrite,
 	permCatalogRead,
@@ -62,11 +64,25 @@ func hasPermission(role string, permission string) bool {
 		}
 	case "sales":
 		switch permission {
-		case permCRMRead, permCRMWrite, permCatalogRead, permWarehouseRead:
+		case permCRMRead, permCRMWrite, permCatalogRead, permWarehouseRead, permSalesWrite:
 			return true
 		}
 	case "staff":
 		return false
+	}
+	return false
+}
+
+// canWriteInventoryDocument decides whether a role may create/edit/post/delete
+// an inventory document of the given type. Roles with full warehouse.write may
+// touch every document type; a role that only has sales.write (e.g. sales) is
+// limited to sale_issue documents.
+func canWriteInventoryDocument(role string, documentType string) bool {
+	if hasPermission(role, permWarehouseWrite) {
+		return true
+	}
+	if documentType == "sale_issue" && hasPermission(role, permSalesWrite) {
+		return true
 	}
 	return false
 }

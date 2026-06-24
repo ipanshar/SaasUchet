@@ -51,19 +51,14 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
   final _bankAccountCtrl = TextEditingController();
   final _bankBikCtrl = TextEditingController();
   String _country = 'KZ';
-  String _companyRole = 'owner';
 
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isLogoUploading = false;
-  bool _isMembersLoading = false;
-  bool _canViewMembers = false;
-  bool _canManageMembers = false;
   bool _didChange = false;
   String? _error;
   String? _logoError;
   String? _logoUrl;
-  List<_CompanyMemberVm> _members = const [];
 
   @override
   void initState() {
@@ -110,9 +105,6 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
         _bankAccountCtrl.text = data['bank_account'] as String? ?? '';
         _bankBikCtrl.text = data['bank_bik'] as String? ?? '';
         _logoUrl = data['logo_url'] as String?;
-        _companyRole = data['role'] as String? ?? 'staff';
-        _canViewMembers = _companyRole == 'owner' || _companyRole == 'admin';
-        _canManageMembers = _canViewMembers;
         _isLoading = false;
       });
     } catch (e) {
@@ -275,232 +267,14 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
     Navigator.of(context).pop(_didChange);
   }
 
-  Future<bool> _handleWillPop() async {
-    _closeEditor();
-    return false;
-  }
-
-  Future<void> _loadMembers() async {
-    setState(() => _isMembersLoading = true);
-    try {
-      final data = await widget.businessGateway.fetchCompanyMembers(
-        accessToken: widget.accessToken,
-        companyId: widget.companyId,
-      );
-      if (!mounted) return;
-      setState(() {
-        _members = data.map(_CompanyMemberVm.fromJson).toList(growable: false);
-        _isMembersLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isMembersLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString()),
-          backgroundColor: const Color(0xFFEF4444),
-        ),
-      );
-    }
-  }
-
-  Future<void> _showAddMemberDialog() async {
-    final phoneCtrl = TextEditingController();
-    var selectedRole = 'staff';
-    try {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            title: const Text('Добавить участника'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: phoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Телефон',
-                    hintText: '+7 777 123 45 67',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: selectedRole,
-                  items: _memberRoles
-                      .map(
-                        (role) => DropdownMenuItem<String>(
-                          value: role,
-                          child: Text(_roleLabel(role)),
-                        ),
-                      )
-                      .toList(growable: false),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setDialogState(() => selectedRole = value);
-                  },
-                  decoration: const InputDecoration(labelText: 'Роль'),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Отмена'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Добавить'),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (confirmed != true) return;
-      final data = await widget.businessGateway.addCompanyMember(
-        accessToken: widget.accessToken,
-        companyId: widget.companyId,
-        payload: {
-          'phone': phoneCtrl.text.trim(),
-          'role': selectedRole,
-        },
-      );
-      if (!mounted) return;
-      final next = _CompanyMemberVm.fromJson(data);
-      setState(() {
-        final index = _members.indexWhere((item) => item.userId == next.userId);
-        if (index >= 0) {
-          _members = [
-            ..._members.sublist(0, index),
-            next,
-            ..._members.sublist(index + 1),
-          ];
-        } else {
-          _members = [..._members, next];
-        }
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString()),
-          backgroundColor: const Color(0xFFEF4444),
-        ),
-      );
-    } finally {
-      phoneCtrl.dispose();
-    }
-  }
-
-  Future<void> _changeMemberRole(_CompanyMemberVm member) async {
-    var selectedRole = member.role;
-    try {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            title: Text('Роль: ${member.fullName}'),
-            content: DropdownButtonFormField<String>(
-              initialValue: selectedRole,
-              items: _memberRoles
-                  .map(
-                    (role) => DropdownMenuItem<String>(
-                      value: role,
-                      child: Text(_roleLabel(role)),
-                    ),
-                  )
-                  .toList(growable: false),
-              onChanged: (value) {
-                if (value == null) return;
-                setDialogState(() => selectedRole = value);
-              },
-              decoration: const InputDecoration(labelText: 'Роль'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Отмена'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Сохранить'),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (confirmed != true || selectedRole == member.role) return;
-      final data = await widget.businessGateway.updateCompanyMemberRole(
-        accessToken: widget.accessToken,
-        companyId: widget.companyId,
-        userId: member.userId,
-        payload: {'role': selectedRole},
-      );
-      if (!mounted) return;
-      final updated = _CompanyMemberVm.fromJson(data);
-      setState(() {
-        _members = _members
-            .map((item) => item.userId == updated.userId ? updated : item)
-            .toList(growable: false);
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString()),
-          backgroundColor: const Color(0xFFEF4444),
-        ),
-      );
-    }
-  }
-
-  Future<void> _removeMember(_CompanyMemberVm member) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Удалить участника?'),
-        content:
-            Text('Участник ${member.fullName} потеряет доступ к компании.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Удалить'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    try {
-      await widget.businessGateway.removeCompanyMember(
-        accessToken: widget.accessToken,
-        companyId: widget.companyId,
-        userId: member.userId,
-      );
-      if (!mounted) return;
-      setState(() {
-        _members = _members
-            .where((item) => item.userId != member.userId)
-            .toList(growable: false);
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString()),
-          backgroundColor: const Color(0xFFEF4444),
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _handleWillPop,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _closeEditor();
+      },
       child: Scaffold(
         backgroundColor: _bg,
         appBar: AppBar(
@@ -813,12 +587,10 @@ class _EditorCard extends StatelessWidget {
   const _EditorCard({
     required this.title,
     required this.children,
-    this.actions,
   });
 
   final String title;
   final List<Widget> children;
-  final List<Widget>? actions;
 
   @override
   Widget build(BuildContext context) {
@@ -833,21 +605,14 @@ class _EditorCard extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      color: Color(0xFF64748B),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-                if (actions != null) ...actions!,
-              ],
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Color(0xFF64748B),
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                letterSpacing: 0.5,
+              ),
             ),
           ),
           ...children,
@@ -1000,125 +765,3 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-const _memberRoles = [
-  'admin',
-  'manager',
-  'accountant',
-  'warehouse',
-  'sales',
-  'staff'
-];
-
-String _roleLabel(String role) {
-  switch (role) {
-    case 'admin':
-      return 'Администратор';
-    case 'manager':
-      return 'Менеджер';
-    case 'accountant':
-      return 'Бухгалтер';
-    case 'warehouse':
-      return 'Кладовщик';
-    case 'sales':
-      return 'Продажи';
-    case 'owner':
-      return 'Владелец';
-    default:
-      return 'Сотрудник';
-  }
-}
-
-class _CompanyMemberVm {
-  const _CompanyMemberVm({
-    required this.userId,
-    required this.fullName,
-    required this.phone,
-    required this.role,
-    required this.roleLabel,
-    required this.isOwner,
-    required this.isCurrentUser,
-  });
-
-  factory _CompanyMemberVm.fromJson(Map<String, dynamic> json) {
-    return _CompanyMemberVm(
-      userId: json['user_id'] as String? ?? '',
-      fullName: json['full_name'] as String? ?? '',
-      phone: json['phone'] as String? ?? '',
-      role: json['role'] as String? ?? 'staff',
-      roleLabel: json['role_label'] as String? ??
-          _roleLabel(json['role'] as String? ?? 'staff'),
-      isOwner: json['is_owner'] as bool? ?? false,
-      isCurrentUser: json['is_current_user'] as bool? ?? false,
-    );
-  }
-
-  final String userId;
-  final String fullName;
-  final String phone;
-  final String role;
-  final String roleLabel;
-  final bool isOwner;
-  final bool isCurrentUser;
-}
-
-class _MemberTile extends StatelessWidget {
-  const _MemberTile({
-    required this.member,
-    required this.canManage,
-    required this.onEdit,
-    required this.onRemove,
-  });
-
-  final _CompanyMemberVm member;
-  final bool canManage;
-  final VoidCallback onEdit;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-      leading: CircleAvatar(
-        backgroundColor: const Color(0xFFE6F7F0),
-        child: Text(
-          member.fullName.isEmpty
-              ? '?'
-              : member.fullName.trim().substring(0, 1).toUpperCase(),
-          style: const TextStyle(
-            color: Color(0xFF00A86B),
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-      title: Text(member.fullName.isEmpty ? member.phone : member.fullName),
-      subtitle: Text(
-        member.isCurrentUser
-            ? '${member.roleLabel} · это вы'
-            : '${member.roleLabel} · ${member.phone}',
-      ),
-      trailing: canManage
-          ? PopupMenuButton<String>(
-              onSelected: (value) {
-                if (value == 'edit') {
-                  onEdit();
-                } else if (value == 'remove') {
-                  onRemove();
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem<String>(
-                  value: 'edit',
-                  child: Text('Изменить роль'),
-                ),
-                PopupMenuItem<String>(
-                  value: 'remove',
-                  child: Text('Удалить'),
-                ),
-              ],
-            )
-          : member.isOwner
-              ? const Chip(label: Text('Владелец'))
-              : null,
-    );
-  }
-}

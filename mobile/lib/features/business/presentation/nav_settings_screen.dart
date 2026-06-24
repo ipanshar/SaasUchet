@@ -26,10 +26,8 @@ class _NavSettingsScreenState extends State<NavSettingsScreen> {
     BusinessTab.production,
     BusinessTab.sales,
     BusinessTab.purchases,
-    BusinessTab.services,
     BusinessTab.salary,
     BusinessTab.reports,
-    BusinessTab.taxes,
   ];
 
   late final List<BusinessTab> _availableTabs;

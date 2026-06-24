@@ -479,10 +479,44 @@ class _BusinessShellState extends State<BusinessShell> {
   List<_FabMenuAction> _fabActionsForCurrentTab() {
     switch (_activeTab) {
       case BusinessTab.warehouse:
-        return _warehouseFabActions;
+        return _filterFabActions(_warehouseFabActions, _overview);
       default:
-        return _defaultFabActions;
+        return _filterFabActions(_defaultFabActions, _overview);
     }
+  }
+
+  /// Removes FAB actions the active role has no write-permission for, so that
+  /// read-only roles never see create/operation shortcuts.
+  List<_FabMenuAction> _filterFabActions(
+    List<_FabMenuAction> actions,
+    _OverviewData? overview,
+  ) {
+    if (overview == null) {
+      return actions;
+    }
+    bool allowed(String id) {
+      switch (id) {
+        case 'sale':
+          return overview.hasPermission('warehouse.write') ||
+              overview.hasPermission('sales.write');
+        case 'purchase':
+        case 'warehouse_add':
+        case 'warehouse_operation':
+          return overview.hasPermission('warehouse.write');
+        case 'warehouse_documents':
+          return overview.hasPermission('warehouse.read');
+        case 'warehouse_product':
+          return overview.hasPermission('catalog.write');
+        case 'client':
+          return overview.hasPermission('crm.write');
+        case 'invoice':
+          return overview.hasPermission('finance.write');
+        default:
+          return true;
+      }
+    }
+
+    return actions.where((action) => allowed(action.id)).toList(growable: false);
   }
 
   String _currentCompanyRole() {
@@ -539,6 +573,7 @@ class _BusinessShellState extends State<BusinessShell> {
       case 'sales':
         return const [
           BusinessTab.crm,
+          BusinessTab.sales,
           BusinessTab.warehouse,
           BusinessTab.catalog,
         ];
@@ -614,8 +649,9 @@ class _BusinessShellState extends State<BusinessShell> {
             onOverviewChanged: onOverviewChanged,
             warehouseScreenKey: routeWarehouseKey,
           ),
-          fabActions:
-              tab == BusinessTab.warehouse ? _warehouseFabActions : const [],
+          fabActions: tab == BusinessTab.warehouse
+              ? _filterFabActions(_warehouseFabActions, overview)
+              : const [],
           onFabActionSelected: tab == BusinessTab.warehouse
               ? (action, warehouseState) async {
                   await _handleWarehouseFabAction(action, warehouseState);
@@ -699,6 +735,7 @@ class _BusinessShellState extends State<BusinessShell> {
           accounts: overview.finance.accounts,
           businessGateway: widget.businessGateway,
           onClientsChanged: refreshOverview,
+          canWrite: overview.hasPermission('crm.write'),
         );
       case BusinessTab.warehouse:
         return _WarehouseScreen(
@@ -715,6 +752,7 @@ class _BusinessShellState extends State<BusinessShell> {
           finance: overview.finance,
           businessGateway: widget.businessGateway,
           onFinanceChanged: refreshOverview,
+          canWrite: overview.hasPermission('finance.write'),
         );
       case BusinessTab.more:
         return _MoreScreen(
@@ -750,6 +788,8 @@ class _BusinessShellState extends State<BusinessShell> {
           companyId: _activeCompanyId ?? '',
           products: overview.products,
           clients: overview.clients,
+          canWrite: overview.hasPermission('warehouse.write') ||
+              overview.hasPermission('sales.write'),
         );
       case BusinessTab.purchases:
         return _PurchasesScreen(
@@ -758,6 +798,7 @@ class _BusinessShellState extends State<BusinessShell> {
           companyId: _activeCompanyId ?? '',
           products: overview.products,
           clients: overview.clients,
+          canWrite: overview.hasPermission('warehouse.write'),
         );
       case BusinessTab.services:
         return const _ServicesScreen();
@@ -767,12 +808,14 @@ class _BusinessShellState extends State<BusinessShell> {
           products: overview.products,
           businessGateway: widget.businessGateway,
           onProductsChanged: refreshOverview,
+          canWrite: overview.hasPermission('catalog.write'),
         );
       case BusinessTab.salary:
         return _SalaryScreen(
           accessToken: _session.accessToken,
           businessGateway: widget.businessGateway,
           accounts: overview.finance.accounts,
+          canWrite: overview.hasPermission('payroll.write'),
         );
       case BusinessTab.reports:
         return _ReportsScreen(
@@ -851,7 +894,7 @@ class _BusinessShellState extends State<BusinessShell> {
                   .map((tab) => _buildScreen(tab, overview))
                   .toList(),
             ),
-          if (showFab)
+          if (showFab && fabActions.isNotEmpty)
             Positioned(
               right: 16,
               bottom: 90,

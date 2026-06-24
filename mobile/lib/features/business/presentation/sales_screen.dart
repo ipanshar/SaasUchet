@@ -7,6 +7,7 @@ class _SalesScreen extends StatelessWidget {
     required this.companyId,
     required this.products,
     required this.clients,
+    this.canWrite = true,
   });
 
   final String accessToken;
@@ -14,6 +15,7 @@ class _SalesScreen extends StatelessWidget {
   final String companyId;
   final List<_Product> products;
   final List<_Client> clients;
+  final bool canWrite;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +29,7 @@ class _SalesScreen extends StatelessWidget {
       counterpartyLabel: 'Клиент',
       products: products,
       clients: clients,
+      canWrite: canWrite,
     );
   }
 }

@@ -484,6 +484,71 @@ class _FakeBusinessGateway extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> updateInventoryDocument({
+    required String accessToken,
+    required String documentId,
+    required Map<String, dynamic> payload,
+  }) async {
+    return {
+      'summary': {
+        'id': documentId,
+        'document_no': 'REC-1',
+        'document_type': payload['document_type'] ?? 'purchase_receipt',
+        'status': 'draft',
+        'document_date': '2026-06-04',
+        'warehouse_name': 'Основной склад',
+        'product_lines':
+            (payload['lines'] as List<dynamic>? ?? const []).length,
+        'total_quantity': 1,
+      },
+      'lines': payload['lines'] ?? const [],
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> postInventoryDocument({
+    required String accessToken,
+    required String documentId,
+  }) async {
+    return {
+      'summary': {
+        'id': documentId,
+        'document_no': 'REC-1',
+        'document_type': 'purchase_receipt',
+        'status': 'posted',
+        'document_date': '2026-06-04',
+        'warehouse_name': 'Основной склад',
+        'product_lines': 1,
+        'total_quantity': 1,
+      },
+      'lines': const [],
+    };
+  }
+
+  @override
+  Future<void> deleteInventoryDocument({
+    required String accessToken,
+    required String documentId,
+  }) async {}
+
+  @override
+  Future<Map<String, dynamic>> uploadCompanyLogo({
+    required String accessToken,
+    required String companyId,
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    return {
+      'id': companyId,
+      'name': 'ТОО Мой Бизнес',
+      'country': 'KZ',
+      'iin': '',
+      'role': 'owner',
+      'is_default': true,
+    };
+  }
+
+  @override
   Future<Map<String, dynamic>> updateProduct({
     required String accessToken,
     required String productId,
