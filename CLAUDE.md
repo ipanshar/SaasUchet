@@ -74,10 +74,17 @@ lib/
     │       ├── finance_screen.dart       # part of
     │       ├── more_screen.dart          # part of
     │       ├── catalog_screen.dart       # part of — Справочник (Товары + Услуги)
-    │       ├── production_screen.dart    # part of — заглушка
-    │       ├── sales_screen.dart         # part of — заглушка
-    │       ├── purchases_screen.dart     # part of — заглушка
-    │       ├── services_screen.dart      # part of — заглушка
+    │       ├── production_screen.dart    # part of — Производство (техкарты + заказы), реализован
+    │       ├── documents_screen.dart     # part of — Документы склада, реализован
+    │       ├── reports_screen.dart       # part of — Отчёты, реализован
+    │       ├── salary_screen.dart        # part of — Зарплата: справочник сотрудников
+    │       ├── salary_models.dart        # part of — модели сотрудников / ведомостей / ставок
+    │       ├── salary_payroll.dart       # part of — расчётная ведомость (payroll period)
+    │       ├── salary_settings.dart      # part of — настройки начислений (оклад / часовая / сдельная)
+    │       ├── sales_screen.dart         # part of — заглушка (~29 строк)
+    │       ├── purchases_screen.dart     # part of — заглушка (~29 строк)
+    │       ├── services_screen.dart      # part of — заглушка (~14 строк)
+    │       ├── taxes_screen.dart         # part of — заглушка (~14 строк)
     │       ├── onboarding_flow.dart      # part of
     │       ├── nav_settings_screen.dart  # Настройка вкладок навигации (standalone)
     │       ├── company_editor_screen.dart # Редактор компании (standalone) — открывается из _MoreScreen
@@ -118,6 +125,8 @@ lib/
 ### Навигация с настройкой
 
 `_activeTabs` в `_BusinessShellState` — это `List<BusinessTab>` (всегда начинается с `dashboard`, заканчивается `more`). Средние вкладки настраиваются пользователем и сохраняются в `SharedPreferences` (`nav_tabs`). `IndexedStack.index = _activeTabs.indexOf(_activeTab)` — не хардкоженый `.index`.
+
+`BusinessTab` (в `business_widgets.dart`) перечисляет все доступные экраны: `dashboard, crm, warehouse, finance, more, production, sales, purchases, services, catalog, salary, reports, taxes`. При добавлении нового экрана: добавить значение в enum, объявить `part` в `business_shell.dart`, добавить `case` в маршрутизацию экранов и в `label`/иконку.
 
 ### Flutter — соглашения
 
@@ -174,19 +183,20 @@ backend/
     │   ├── errors.go                    # Кастомные ошибки
     │   └── service_test.go
     ├── business/
-    │   ├── handler.go
+    │   ├── handler.go                   # Бизнес-хэндлеры (catalog, warehouse, finance, production…)
+    │   ├── payroll_handler.go           # Хэндлеры зарплаты (employees, periods, recipe-rates)
     │   ├── store.go
-    │   ├── postgres_store.go            # ~2390 строк, все бизнес-запросы
+    │   ├── postgres_store.go            # Основные бизнес-запросы (большой файл)
+    │   ├── payroll_postgres_store.go    # SQL зарплатного модуля
     │   ├── model.go
+    │   ├── payroll_model.go             # Модели + Normalize/Validate зарплаты
     │   ├── permissions.go               # RBAC: hasPermission(role, perm) — 6 ролей
     │   └── handler_test.go
     ├── config/config.go                 # Конфигурация через env
     ├── database/
     │   ├── postgres.go                  # Подключение + автоприменение схем
     │   └── schema/
-    │       ├── 001_auth.sql
-    │       ├── 002_business_core.sql
-    │       └── 003_catalog.sql          # products: product_type/allowed_to_sell; services + service_materials
+    │       ├── 001_auth.sql ... 009_production_inventory_links.sql  # см. раздел «Схема»
     ├── http/
     │   ├── router.go                    # Регистрация всех маршрутов
     │   └── middleware.go                # CORS, логирование, recovery
@@ -209,12 +219,12 @@ backend/
 |---|---|
 | `owner`, `admin` | всё |
 | `manager` | CRM R/W, Catalog R/W, Warehouse R, Finance R, Production R |
-| `accountant` | Finance R/W, CRM R |
+| `accountant` | Finance R/W, CRM R, Payroll R/W |
 | `warehouse` | Warehouse R/W, Catalog R |
 | `sales` | CRM R/W, Catalog R, Warehouse R |
 | `staff` | ничего |
 
-Доступные разрешения: `company.settings.*`, `company.members.*`, `crm.*`, `warehouse.*`, `finance.*`, `catalog.*`, `production.*`.
+Доступные разрешения: `company.settings.*`, `company.members.*`, `crm.*`, `warehouse.*`, `finance.*`, `catalog.*`, `production.*`, `payroll.*`.
 
 ### Go — соглашения
 
@@ -248,6 +258,9 @@ backend/
 - `004_warehouse_defaults.sql` — добавляет `is_default` в `warehouses`
 - `005_inventory_services.sql` — `inventory_document_lines.service_id` (услуги в документах склада)
 - `006_company_bank_details.sql` — добавляет `bank_name`, `bank_account`, `bank_bik` в `companies`
+- `007_payroll.sql` — `employees` (справочник сотрудников), `payroll_periods`, строки начислений
+- `008_payroll_rules.sql` — правила сдельной: `employees.sales_percent`/`sales_basis`, сумма за рецепт, участники производства
+- `009_production_inventory_links.sql` — связь `production_orders` со складскими документами (`production_out/in_document_id`, `completed_at`)
 
 ### Подключение (локально)
 
@@ -292,10 +305,15 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | GET/PUT/DELETE | `/production/recipes/{id}` | Техкарта — детали / обновление / удаление |
 | GET/POST | `/production/orders` | Производственные заказы |
 | GET/PUT/DELETE | `/production/orders/{id}` | Заказ — детали / обновление / удаление |
+| GET/POST | `/payroll/employees` | Сотрудники — список / создание |
+| GET/PUT/DELETE | `/payroll/employees/{id}` | Сотрудник — детали / обновление / удаление |
+| GET/POST | `/payroll/periods` | Расчётные ведомости — список / создание |
+| GET/PUT/DELETE | `/payroll/periods/{id}` | Ведомость — детали / расчёт / удаление |
+| GET | `/payroll/recipe-rates/{recipeId}` | Сдельные ставки по рецепту |
 | GET/POST | `/companies` | Компании пользователя — список / создание |
 | GET/PUT/DELETE | `/companies/{id}` | Компания — детали / обновление / удаление |
 
-Авторизация: `Authorization: Bearer <token>` для всех `/business/*`, `/catalog/*` и `/profile`.
+Авторизация: `Authorization: Bearer <token>` для всех `/business/*`, `/catalog/*`, `/production/*`, `/payroll/*` и `/profile`.
 
 ---
 
@@ -314,7 +332,11 @@ Docker: `docker compose up -d` (файл `compose.yaml` в корне)
 | Справочник — Товары (type/unit/allowed_to_sell) | Готово |
 | Справочник — Услуги (BOM: товары / подуслуги / внешние) | Готово |
 | Настройка вкладок навигации (SharedPreferences) | Готово |
-| Производство / Продажи / Закупки / Услуги | Заглушка |
+| Производство (техкарты + заказы, связь со складом) | Готово |
+| Документы склада (отдельный экран) | Готово |
+| Отчёты | Готово |
+| Зарплата (сотрудники, ведомости, сдельная / оклад / часовая) | Готово |
+| Продажи / Закупки / Услуги / Налоги | Заглушка |
 | Health-модуль | Заглушка |
 | Profile-фича (отдельная) | Заглушка |
 
@@ -369,7 +391,7 @@ flutter pub get               # После изменений pubspec.yaml
 2. **Не добавлять state management** в Flutter (BLoC, Riverpod, Provider) — пока `setState`
 3. **Не менять формат токена** — клиент и сервер ожидают Bearer session token
 4. **Не ломать существующие API** — мобильное приложение жёстко завязано на контракты
-5. **Новые SQL-схемы** — только через новый файл `007_*.sql` и далее, не редактировать существующие
+5. **Новые SQL-схемы** — только через новый файл `010_*.sql` и далее, не редактировать существующие
 6. **Кодогенерацию не вводить** без договорённости (`json_serializable`, `freezed` и т.д.)
 7. **Параллельный агент Codex** — возможны изменения от него; перед крупными рефакторингами проверять git log
 8. **Тесты не писать** — разработчик тестирует вручную; тестовые файлы не создавать и не запускать
