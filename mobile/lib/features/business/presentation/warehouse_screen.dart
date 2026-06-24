@@ -2174,14 +2174,26 @@ class _InventoryDocumentDetailSheet extends StatelessWidget {
                                   fontSize: 16,
                                 ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'SKU: ${line.sku}',
-                                style: const TextStyle(
-                                  color: Color(0xFF7B8794),
-                                  fontSize: 12,
+                              if (line.sku.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  'SKU: ${line.sku}',
+                                  style: const TextStyle(
+                                    color: Color(0xFF7B8794),
+                                    fontSize: 12,
+                                  ),
                                 ),
-                              ),
+                              ],
+                              if (line.barcode.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Штрихкод: ${line.barcode}',
+                                  style: const TextStyle(
+                                    color: Color(0xFF7B8794),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 10),
                               Row(
                                 children: [

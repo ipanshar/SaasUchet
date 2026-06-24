@@ -1038,6 +1038,16 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                         ),
                       ),
                     ],
+                    if (line.barcode.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Штрихкод: ${line.barcode}',
+                        style: const TextStyle(
+                          color: Color(0xFF7B8794),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     Row(
                       children: [

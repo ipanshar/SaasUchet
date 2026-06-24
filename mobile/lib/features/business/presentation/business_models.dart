@@ -465,6 +465,7 @@ class _InventoryDocumentLine {
   const _InventoryDocumentLine({
     required this.productName,
     required this.sku,
+    required this.barcode,
     required this.quantity,
     required this.unitPrice,
     required this.unitCost,
@@ -474,6 +475,7 @@ class _InventoryDocumentLine {
 
   final String productName;
   final String sku;
+  final String barcode;
   final int quantity;
   final int unitPrice;
   final int unitCost;
@@ -1111,6 +1113,7 @@ _InventoryDocumentLine _inventoryDocumentLineFromJson(
     _InventoryDocumentLine(
       productName: json['product_name'] as String? ?? '',
       sku: json['sku'] as String? ?? '',
+      barcode: json['barcode'] as String? ?? '',
       quantity: json['quantity'] as int? ?? 0,
       unitPrice: json['unit_price'] as int? ?? 0,
       unitCost: json['unit_cost'] as int? ?? 0,

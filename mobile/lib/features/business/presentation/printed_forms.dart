@@ -37,6 +37,17 @@ String _formatMoneyForPdf(int value) {
   return '$sign${buffer.toString()} тг';
 }
 
+String _printedLineLabel(_InventoryDocumentLine line) {
+  final parts = <String>[line.productName];
+  if (line.sku.isNotEmpty) {
+    parts.add('SKU: ${line.sku}');
+  }
+  if (line.barcode.isNotEmpty) {
+    parts.add('Штрихкод: ${line.barcode}');
+  }
+  return parts.join('\n');
+}
+
 String? _counterpartyIdLabel(_Client? client) {
   if (client == null) {
     return null;
@@ -233,9 +244,7 @@ Future<Uint8List> _buildInventoryDocumentPrintedForm({
             final line = detail.lines[index];
             return [
               '${index + 1}',
-              line.sku.isEmpty
-                  ? line.productName
-                  : '${line.productName} (${line.sku})',
+              _printedLineLabel(line),
               '${line.quantity}',
               _formatMoneyForPdf(line.unitPrice),
               _formatMoneyForPdf(line.lineTotal),

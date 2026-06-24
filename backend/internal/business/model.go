@@ -296,9 +296,10 @@ type InventoryDocumentSummary struct {
 }
 
 type InventoryDocumentLine struct {
-	ItemName  string `json:"item_name"`
+	ItemName  string `json:"product_name"`
 	ItemType  string `json:"item_type"` // product | service
 	SKU       string `json:"sku,omitempty"`
+	Barcode   string `json:"barcode,omitempty"`
 	Quantity  int    `json:"quantity"`
 	UnitPrice int    `json:"unit_price"`
 	UnitCost  int    `json:"unit_cost"`
