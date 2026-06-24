@@ -509,6 +509,42 @@ class _CrmScreenState extends State<_CrmScreen> {
                   ],
                 ),
               ),
+              if (_hasClientBankDetails(client)) ...[
+                const SizedBox(height: 16),
+                _BusinessCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Банковские реквизиты',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      if (client.bankName.isNotEmpty)
+                        _InfoTile(
+                          icon: Icons.account_balance_rounded,
+                          label: 'Название банка',
+                          value: client.bankName,
+                        ),
+                      if (client.bankAccount.isNotEmpty)
+                        _InfoTile(
+                          icon: Icons.credit_card_rounded,
+                          label: 'Номер счета',
+                          value: client.bankAccount,
+                        ),
+                      if (client.bankBik.isNotEmpty)
+                        _InfoTile(
+                          icon: Icons.confirmation_number_rounded,
+                          label: 'БИК',
+                          value: client.bankBik,
+                        ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               _BusinessCard(
                 child: Column(
@@ -852,6 +888,9 @@ class _CrmScreenState extends State<_CrmScreen> {
         'phone': result.phone,
         'email': result.email,
         'segment': result.segment,
+        'bank_name': result.bankName,
+        'bank_account': result.bankAccount,
+        'bank_bik': result.bankBik,
         'bin': result.bin,
         'iin': result.iin,
       };
@@ -1223,6 +1262,9 @@ class _CreateClientFormData {
     required this.phone,
     required this.email,
     required this.segment,
+    required this.bankName,
+    required this.bankAccount,
+    required this.bankBik,
     required this.bin,
     required this.iin,
   });
@@ -1232,6 +1274,9 @@ class _CreateClientFormData {
   final String phone;
   final String email;
   final String segment;
+  final String bankName;
+  final String bankAccount;
+  final String bankBik;
   final String bin;
   final String iin;
 }
@@ -1366,6 +1411,9 @@ class _CreateClientSheetState extends State<_CreateClientSheet> {
   final _contactController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
+  final _bankNameController = TextEditingController();
+  final _bankAccountController = TextEditingController();
+  final _bankBikController = TextEditingController();
   final _binController = TextEditingController();
   final _iinController = TextEditingController();
   String _segment = 'regular';
@@ -1382,6 +1430,9 @@ class _CreateClientSheetState extends State<_CreateClientSheet> {
     _contactController.text = client.contact;
     _phoneController.text = client.phone;
     _emailController.text = client.email;
+    _bankNameController.text = client.bankName;
+    _bankAccountController.text = client.bankAccount;
+    _bankBikController.text = client.bankBik;
     _binController.text = client.bin ?? '';
     _iinController.text = client.iin ?? '';
     _segment = _normalizedClientSegment(client.segment);
@@ -1393,6 +1444,9 @@ class _CreateClientSheetState extends State<_CreateClientSheet> {
     _contactController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
+    _bankNameController.dispose();
+    _bankAccountController.dispose();
+    _bankBikController.dispose();
     _binController.dispose();
     _iinController.dispose();
     super.dispose();
@@ -1460,6 +1514,21 @@ class _CreateClientSheetState extends State<_CreateClientSheet> {
                       controller: _emailController,
                       label: 'Email',
                       keyboardType: TextInputType.emailAddress,
+                    ),
+                    const SizedBox(height: 12),
+                    _ClientTextField(
+                      controller: _bankNameController,
+                      label: 'Название банка',
+                    ),
+                    const SizedBox(height: 12),
+                    _ClientTextField(
+                      controller: _bankAccountController,
+                      label: 'Номер счета',
+                    ),
+                    const SizedBox(height: 12),
+                    _ClientTextField(
+                      controller: _bankBikController,
+                      label: 'БИК',
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -1532,6 +1601,9 @@ class _CreateClientSheetState extends State<_CreateClientSheet> {
         phone: _phoneController.text.trim(),
         email: _emailController.text.trim(),
         segment: _segment,
+        bankName: _bankNameController.text.trim(),
+        bankAccount: _bankAccountController.text.trim(),
+        bankBik: _bankBikController.text.trim(),
         bin: _binController.text.trim(),
         iin: _iinController.text.trim(),
       ),
@@ -1605,4 +1677,10 @@ StatusKind _clientSegmentStatusKind(String? segment) {
     default:
       return StatusKind.neutral;
   }
+}
+
+bool _hasClientBankDetails(_Client client) {
+  return client.bankName.isNotEmpty ||
+      client.bankAccount.isNotEmpty ||
+      client.bankBik.isNotEmpty;
 }

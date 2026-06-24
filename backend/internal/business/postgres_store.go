@@ -40,6 +40,7 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
 		`SELECT id::text, name, COALESCE(contact_name, ''), COALESCE(phone, ''), COALESCE(email, ''), segment,
+		        COALESCE(bank_name, ''), COALESCE(bank_account, ''), COALESCE(bank_bik, ''),
 		        COALESCE(credit_limit, 0), COALESCE(bin, ''), COALESCE(iin, '')
 		 FROM clients
 		 WHERE company_id = $1 AND archived_at IS NULL
@@ -63,6 +64,9 @@ func (s *PostgresStore) ListClients(user auth.User) ([]Client, error) {
 			&client.Phone,
 			&client.Email,
 			&client.Segment,
+			&client.BankName,
+			&client.BankAccount,
+			&client.BankBik,
 			&creditLimit,
 			&client.BIN,
 			&client.IIN,
@@ -488,9 +492,9 @@ func (s *PostgresStore) SaveClients(user auth.User, clients []Client) error {
 		if _, err = tx.ExecContext(
 			ctx,
 			`INSERT INTO clients (
-			   id, company_id, client_kind, name, contact_name, phone, email, bin, iin, country_code, segment, status, credit_limit, created_at, updated_at
+			   id, company_id, client_kind, name, contact_name, phone, email, bin, iin, country_code, segment, bank_name, bank_account, bank_bik, status, credit_limit, created_at, updated_at
 			 ) VALUES (
-			   $1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), 'KZ', $10, 'active', $11, NOW(), NOW()
+			   $1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), 'KZ', $10, NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), 'active', $14, NOW(), NOW()
 			 )`,
 			client.ID,
 			companyID,
@@ -502,6 +506,9 @@ func (s *PostgresStore) SaveClients(user auth.User, clients []Client) error {
 			client.BIN,
 			client.IIN,
 			normalizeClientSegment(client.Segment),
+			client.BankName,
+			client.BankAccount,
+			client.BankBik,
 			client.Debt,
 		); err != nil {
 			return err

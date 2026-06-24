@@ -83,6 +83,9 @@ type Client struct {
 	Phone         string               `json:"phone"`
 	Email         string               `json:"email"`
 	Segment       string               `json:"segment"`
+	BankName      string               `json:"bank_name,omitempty"`
+	BankAccount   string               `json:"bank_account,omitempty"`
+	BankBik       string               `json:"bank_bik,omitempty"`
 	TotalSales    int                  `json:"total_sales"`
 	Debt          int                  `json:"debt"`
 	Receivable    int                  `json:"receivable"`
@@ -122,13 +125,16 @@ type ClientTimelineItem struct {
 }
 
 type CreateClientInput struct {
-	Name    string `json:"name"`
-	Contact string `json:"contact"`
-	Phone   string `json:"phone"`
-	Email   string `json:"email"`
-	Segment string `json:"segment"`
-	BIN     string `json:"bin,omitempty"`
-	IIN     string `json:"iin,omitempty"`
+	Name        string `json:"name"`
+	Contact     string `json:"contact"`
+	Phone       string `json:"phone"`
+	Email       string `json:"email"`
+	Segment     string `json:"segment"`
+	BankName    string `json:"bank_name,omitempty"`
+	BankAccount string `json:"bank_account,omitempty"`
+	BankBik     string `json:"bank_bik,omitempty"`
+	BIN         string `json:"bin,omitempty"`
+	IIN         string `json:"iin,omitempty"`
 }
 
 type Interaction struct {
@@ -1018,6 +1024,9 @@ func NormalizeClientInput(input CreateClientInput) CreateClientInput {
 	input.Phone = normalizePhone(input.Phone)
 	input.Email = strings.TrimSpace(strings.ToLower(input.Email))
 	input.Segment = strings.TrimSpace(input.Segment)
+	input.BankName = strings.TrimSpace(input.BankName)
+	input.BankAccount = strings.TrimSpace(input.BankAccount)
+	input.BankBik = strings.TrimSpace(strings.ToUpper(input.BankBik))
 	input.BIN = normalizeDigits(input.BIN)
 	input.IIN = normalizeDigits(input.IIN)
 
@@ -1065,6 +1074,9 @@ func NewClientFromInput(input CreateClientInput) Client {
 		Phone:         normalized.Phone,
 		Email:         normalized.Email,
 		Segment:       normalized.Segment,
+		BankName:      normalized.BankName,
+		BankAccount:   normalized.BankAccount,
+		BankBik:       normalized.BankBik,
 		BIN:           normalized.BIN,
 		IIN:           normalized.IIN,
 		TotalSales:    0,
@@ -1089,6 +1101,9 @@ func UpdatedClientFromInput(existing Client, input CreateClientInput) Client {
 	existing.Phone = normalized.Phone
 	existing.Email = normalized.Email
 	existing.Segment = normalized.Segment
+	existing.BankName = normalized.BankName
+	existing.BankAccount = normalized.BankAccount
+	existing.BankBik = normalized.BankBik
 	existing.BIN = normalized.BIN
 	existing.IIN = normalized.IIN
 	return existing

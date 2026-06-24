@@ -128,6 +128,9 @@ class _Client {
     required this.phone,
     required this.email,
     required this.segment,
+    required this.bankName,
+    required this.bankAccount,
+    required this.bankBik,
     required this.totalSales,
     required this.debt,
     required this.receivable,
@@ -152,6 +155,9 @@ class _Client {
   final String phone;
   final String email;
   final String segment;
+  final String bankName;
+  final String bankAccount;
+  final String bankBik;
   final int totalSales;
   final int debt;
   final int receivable;
@@ -906,6 +912,9 @@ _Client _clientFromJson(Map<String, dynamic> json) => _Client(
       phone: json['phone'] as String? ?? '',
       email: json['email'] as String? ?? '',
       segment: (json['segment'] as String? ?? 'regular').trim(),
+      bankName: json['bank_name'] as String? ?? '',
+      bankAccount: json['bank_account'] as String? ?? '',
+      bankBik: json['bank_bik'] as String? ?? '',
       totalSales: json['total_sales'] as int? ?? 0,
       debt: json['debt'] as int? ?? 0,
       receivable: json['receivable'] as int? ?? 0,
