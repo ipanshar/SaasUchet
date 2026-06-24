@@ -566,6 +566,8 @@ class _OverviewData {
   const _OverviewData({
     required this.companyName,
     required this.initials,
+    required this.activeRole,
+    required this.permissions,
     required this.dashboard,
     required this.recentActivities,
     required this.clients,
@@ -586,6 +588,8 @@ class _OverviewData {
               : 'ТОО "Мой Бизнес"'),
       initials:
           json['initials'] as String? ?? initialsOf(fallbackUser.fullName),
+      activeRole: json['active_role'] as String? ?? 'owner',
+      permissions: _permissionsFromJson(json),
       dashboard: _DashboardData.fromJson(
         json['dashboard'] as Map<String, dynamic>? ?? const {},
       ),
@@ -615,6 +619,8 @@ class _OverviewData {
 
   final String companyName;
   final String initials;
+  final String activeRole;
+  final Set<String> permissions;
   final _DashboardData dashboard;
   final List<_Activity> recentActivities;
   final List<_Client> clients;
@@ -622,6 +628,76 @@ class _OverviewData {
   final _FinanceOverview finance;
   final List<_StaffMember> staff;
   final int menuNotifications;
+
+  bool hasPermission(String permission) => permissions.contains(permission);
+}
+
+Set<String> _permissionsFromJson(Map<String, dynamic> json) {
+  final permissions = (json['permissions'] as List<dynamic>? ?? const [])
+      .whereType<String>()
+      .toSet();
+  if (permissions.isNotEmpty) {
+    return permissions;
+  }
+  return _defaultPermissionsForRole(json['active_role'] as String? ?? 'owner');
+}
+
+Set<String> _defaultPermissionsForRole(String role) {
+  switch (role) {
+    case 'owner':
+    case 'admin':
+      return {
+        'company.settings.read',
+        'company.settings.write',
+        'company.members.read',
+        'company.members.write',
+        'crm.read',
+        'crm.write',
+        'warehouse.read',
+        'warehouse.write',
+        'finance.read',
+        'finance.write',
+        'catalog.read',
+        'catalog.write',
+        'production.read',
+        'production.write',
+        'payroll.read',
+        'payroll.write',
+      };
+    case 'manager':
+      return {
+        'crm.read',
+        'crm.write',
+        'warehouse.read',
+        'finance.read',
+        'catalog.read',
+        'catalog.write',
+        'production.read',
+      };
+    case 'accountant':
+      return {
+        'finance.read',
+        'finance.write',
+        'crm.read',
+        'payroll.read',
+        'payroll.write',
+      };
+    case 'warehouse':
+      return {
+        'warehouse.read',
+        'warehouse.write',
+        'catalog.read',
+      };
+    case 'sales':
+      return {
+        'crm.read',
+        'crm.write',
+        'catalog.read',
+        'warehouse.read',
+      };
+    default:
+      return const {};
+  }
 }
 
 class _DashboardData {
@@ -630,6 +706,12 @@ class _DashboardData {
     required this.revenueChange,
     required this.kpis,
     required this.salesSeries,
+    required this.heroLabel,
+    required this.heroValue,
+    required this.heroChange,
+    required this.heroChangeTone,
+    required this.seriesTitle,
+    required this.highlights,
   });
 
   factory _DashboardData.fromJson(Map<String, dynamic> json) {
@@ -644,6 +726,17 @@ class _DashboardData {
           .whereType<Map<String, dynamic>>()
           .map(_chartPointFromJson)
           .toList(growable: false),
+      heroLabel: json['hero_label'] as String? ?? 'Общая выручка за месяц',
+      heroValue: json['hero_value'] as String? ??
+          (json['monthly_revenue'] as String? ?? '₸ 0'),
+      heroChange: json['hero_change'] as String? ??
+          '${json['revenue_change'] as String? ?? '+0%'} vs прошлый месяц',
+      heroChangeTone: json['hero_change_tone'] as String? ?? 'success',
+      seriesTitle: json['series_title'] as String? ?? 'График продаж',
+      highlights: (json['highlights'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_dashboardHighlightFromJson)
+          .toList(growable: false),
     );
   }
 
@@ -651,6 +744,12 @@ class _DashboardData {
   final String revenueChange;
   final List<_KpiData> kpis;
   final List<_ChartPoint> salesSeries;
+  final String heroLabel;
+  final String heroValue;
+  final String heroChange;
+  final String heroChangeTone;
+  final String seriesTitle;
+  final List<_DashboardHighlight> highlights;
 }
 
 class _KpiData {
@@ -679,6 +778,24 @@ class _ChartPoint {
 
   final String label;
   final double value;
+}
+
+class _DashboardHighlight {
+  const _DashboardHighlight({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+    required this.icon,
+    required this.tone,
+    required this.target,
+  });
+
+  final String title;
+  final String value;
+  final String subtitle;
+  final String icon;
+  final String tone;
+  final String target;
 }
 
 class _FinanceOverview {
@@ -756,6 +873,16 @@ _KpiData _kpiFromJson(Map<String, dynamic> json) => _KpiData(
 _ChartPoint _chartPointFromJson(Map<String, dynamic> json) => _ChartPoint(
       label: json['label'] as String? ?? '',
       value: (json['value'] as num?)?.toDouble() ?? 0,
+    );
+
+_DashboardHighlight _dashboardHighlightFromJson(Map<String, dynamic> json) =>
+    _DashboardHighlight(
+      title: json['title'] as String? ?? '',
+      value: json['value'] as String? ?? '',
+      subtitle: json['subtitle'] as String? ?? '',
+      icon: json['icon'] as String? ?? 'description',
+      tone: json['tone'] as String? ?? 'neutral',
+      target: json['target'] as String? ?? '',
     );
 
 _Activity _activityFromJson(Map<String, dynamic> json) {
@@ -1031,6 +1158,7 @@ Color toneColor(String tone) {
     case 'primary':
       return const Color(0xFF00A86B);
     case 'error':
+    case 'danger':
       return const Color(0xFFEF4444);
     default:
       return const Color(0xFF64748B);
@@ -1041,6 +1169,8 @@ IconData iconFor(String icon) {
   switch (icon) {
     case 'cart':
       return Icons.shopping_cart_rounded;
+    case 'purchase':
+      return Icons.shopping_cart_checkout_rounded;
     case 'receipt':
       return Icons.receipt_long_rounded;
     case 'group':
@@ -1049,6 +1179,18 @@ IconData iconFor(String icon) {
       return Icons.inventory_2_rounded;
     case 'payments':
       return Icons.payments_rounded;
+    case 'wallet':
+      return Icons.account_balance_wallet_rounded;
+    case 'payable':
+      return Icons.call_made_rounded;
+    case 'salary':
+      return Icons.badge_rounded;
+    case 'production':
+      return Icons.precision_manufacturing_rounded;
+    case 'warning':
+      return Icons.warning_amber_rounded;
+    case 'lock':
+      return Icons.lock_outline_rounded;
     case 'description':
       return Icons.description_rounded;
     default:
@@ -1063,7 +1205,8 @@ Color hexColor(String hex) {
 }
 
 String formatMoney(int value) {
-  final digits = value.toString();
+  final sign = value < 0 ? '-' : '';
+  final digits = value.abs().toString();
   final buffer = StringBuffer();
   for (var i = 0; i < digits.length; i++) {
     final reverseIndex = digits.length - i;
@@ -1072,7 +1215,7 @@ String formatMoney(int value) {
       buffer.write(',');
     }
   }
-  return '₸ ${buffer.toString()}';
+  return '$sign₸ ${buffer.toString()}';
 }
 
 String initialsOf(String value) {
@@ -1254,8 +1397,7 @@ _RecipeIngredient _recipeIngredientFromJson(Map<String, dynamic> j) =>
       quantity: (j['quantity'] as num?)?.toDouble() ?? 1.0,
     );
 
-_RecipeService _recipeServiceFromJson(Map<String, dynamic> j) =>
-    _RecipeService(
+_RecipeService _recipeServiceFromJson(Map<String, dynamic> j) => _RecipeService(
       id: j['id'] as String? ?? '',
       serviceId: j['service_id'] as String? ?? '',
       serviceName: j['service_name'] as String? ?? '',

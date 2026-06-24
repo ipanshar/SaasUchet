@@ -10,6 +10,8 @@ class _DashboardScreen extends StatelessWidget {
     required this.onSetDefaultCompany,
     required this.onCreateCompany,
     required this.onAddCompanyMember,
+    required this.onRefresh,
+    required this.onOpenBusinessTab,
   });
 
   final AuthSession session;
@@ -21,138 +23,108 @@ class _DashboardScreen extends StatelessWidget {
   final Future<void> Function(Map<String, dynamic> payload) onCreateCompany;
   final Future<void> Function(String companyId, Map<String, dynamic> payload)
       onAddCompanyMember;
+  final Future<void> Function() onRefresh;
+  final Future<void> Function(BusinessTab tab) onOpenBusinessTab;
 
   @override
   Widget build(BuildContext context) {
+    final dashboard = overview.dashboard;
+    final roleLabel = _dashboardRoleLabel(overview.activeRole);
+
     return SafeArea(
       bottom: false,
-      child: ListView(
-        padding: EdgeInsets.zero,
-        children: [
-          _GradientHeader(
-            title: overview.companyName,
-            subtitle: 'Добро пожаловать',
-            onTitleTap: () => _showCompanySwitcher(context),
-            trailing: _CircleInitials(
-              text: overview.initials,
-              size: 52,
-              foregroundColor: Colors.white,
-              backgroundColor: const Color(0x33FFFFFF),
+      child: RefreshIndicator(
+        onRefresh: onRefresh,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            _GradientHeader(
+              title: overview.companyName,
+              subtitle: roleLabel,
+              onTitleTap: () => _showCompanySwitcher(context),
+              trailing: _CircleInitials(
+                text: overview.initials,
+                size: 52,
+                foregroundColor: Colors.white,
+                backgroundColor: const Color(0x33FFFFFF),
+              ),
+              child: _DashboardHero(
+                label: dashboard.heroLabel,
+                value: dashboard.heroValue,
+                change: dashboard.heroChange,
+                changeTone: dashboard.heroChangeTone,
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Общая выручка за месяц',
-                  style: TextStyle(
-                    color: Color(0xCCFFFFFF),
-                    fontSize: 13,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+              child: Column(
+                children: [
+                  _DashboardKpiGrid(kpis: dashboard.kpis),
+                  const SizedBox(height: 16),
+                  _DashboardHighlightsGrid(
+                    highlights: dashboard.highlights,
+                    onSelected: _openHighlight,
                   ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  overview.dashboard.monthlyRevenue,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.w800,
+                  const SizedBox(height: 16),
+                  _DashboardCharts(
+                    overview: overview,
+                    onOpenBusinessTab: onOpenBusinessTab,
                   ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.arrow_upward_rounded,
-                      color: Color(0xFF9AE6B4),
-                      size: 18,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      overview.dashboard.revenueChange,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'vs прошлый месяц',
-                      style: TextStyle(color: Color(0xB3FFFFFF)),
-                    ),
-                  ],
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  _DashboardRoleSignals(
+                    overview: overview,
+                    onOpenBusinessTab: onOpenBusinessTab,
+                  ),
+                  const SizedBox(height: 16),
+                  _DashboardActivityCard(
+                    activities: overview.recentActivities,
+                  ),
+                ],
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-            child: Column(
-              children: [
-                Transform.translate(
-                  offset: const Offset(0, -18),
-                  child: GridView.count(
-                    crossAxisCount: 2,
-                    childAspectRatio: 1.28,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    children: overview.dashboard.kpis
-                        .map(
-                          (kpi) => _KpiCard(
-                            title: kpi.title,
-                            value: kpi.value,
-                            change: kpi.change,
-                            changeColor: toneColor(kpi.changeTone),
-                            icon: iconFor(kpi.icon),
-                            iconBackground: toneColor(kpi.iconTone),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-                _BusinessCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _SectionHeader(
-                        title: 'График продаж',
-                        actionLabel: 'Подробнее',
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 190,
-                        child:
-                            _SalesChart(points: overview.dashboard.salesSeries),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _BusinessCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _SectionHeader(title: 'Последние действия'),
-                      const SizedBox(height: 14),
-                      ...overview.recentActivities.map(
-                        (activity) => Padding(
-                          padding: const EdgeInsets.only(bottom: 14),
-                          child: _ActivityRow(activity: activity),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
+  Future<void> _openHighlight(_DashboardHighlight highlight) async {
+    final tab = _tabForTarget(highlight.target);
+    if (tab == null) {
+      return;
+    }
+    await onOpenBusinessTab(tab);
+  }
+
+  BusinessTab? _tabForTarget(String target) {
+    switch (target) {
+      case 'crm':
+        return BusinessTab.crm;
+      case 'warehouse':
+        return BusinessTab.warehouse;
+      case 'finance':
+        return BusinessTab.finance;
+      case 'catalog':
+        return BusinessTab.catalog;
+      case 'production':
+        return BusinessTab.production;
+      case 'sales':
+        return BusinessTab.warehouse;
+      case 'purchases':
+        return BusinessTab.purchases;
+      case 'salary':
+        return BusinessTab.salary;
+      case 'reports':
+        return BusinessTab.reports;
+      default:
+        return null;
+    }
+  }
+
   Future<void> _showCompanySwitcher(BuildContext context) async {
+    final canManageCompany =
+        overview.activeRole == 'owner' || overview.activeRole == 'admin';
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -264,31 +236,32 @@ class _DashboardScreen extends StatelessWidget {
                       ),
                     ),
                   const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(sheetContext).pop();
-                            _showCreateCompanySheet(context);
-                          },
-                          icon: const Icon(Icons.add_business_rounded),
-                          label: const Text('Компания'),
+                  if (canManageCompany)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(sheetContext).pop();
+                              _showCreateCompanySheet(context);
+                            },
+                            icon: const Icon(Icons.add_business_rounded),
+                            label: const Text('Компания'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            Navigator.of(sheetContext).pop();
-                            _showAddMemberSheet(context);
-                          },
-                          icon: const Icon(Icons.person_add_alt_1_rounded),
-                          label: const Text('Сотрудник'),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: () {
+                              Navigator.of(sheetContext).pop();
+                              _showAddMemberSheet(context);
+                            },
+                            icon: const Icon(Icons.person_add_alt_1_rounded),
+                            label: const Text('Сотрудник'),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -317,8 +290,8 @@ class _DashboardScreen extends StatelessWidget {
   }
 
   Future<void> _showAddMemberSheet(BuildContext context) async {
-    final targetId = activeCompanyId ??
-        (companies.isNotEmpty ? companies.first.id : null);
+    final targetId =
+        activeCompanyId ?? (companies.isNotEmpty ? companies.first.id : null);
     if (targetId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Сначала выберите компанию')),
@@ -340,6 +313,779 @@ class _DashboardScreen extends StatelessWidget {
         SnackBar(content: Text('$error')),
       );
     }
+  }
+}
+
+class _DashboardHero extends StatelessWidget {
+  const _DashboardHero({
+    required this.label,
+    required this.value,
+    required this.change,
+    required this.changeTone,
+  });
+
+  final String label;
+  final String value;
+  final String change;
+  final String changeTone;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = toneColor(changeTone);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xCCFFFFFF),
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 6),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.13),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_trendIcon(changeTone), color: tone, size: 17),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  change,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DashboardKpiGrid extends StatelessWidget {
+  const _DashboardKpiGrid({required this.kpis});
+
+  final List<_KpiData> kpis;
+
+  @override
+  Widget build(BuildContext context) {
+    if (kpis.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 760 ? 4 : 2;
+        return GridView.count(
+          crossAxisCount: columns,
+          childAspectRatio: constraints.maxWidth >= 760 ? 1.38 : 1.22,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          children: kpis
+              .map(
+                (kpi) => _KpiCard(
+                  title: kpi.title,
+                  value: kpi.value,
+                  change: kpi.change,
+                  changeColor: toneColor(kpi.changeTone),
+                  icon: iconFor(kpi.icon),
+                  iconBackground: toneColor(kpi.iconTone),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _DashboardHighlightsGrid extends StatelessWidget {
+  const _DashboardHighlightsGrid({
+    required this.highlights,
+    required this.onSelected,
+  });
+
+  final List<_DashboardHighlight> highlights;
+  final ValueChanged<_DashboardHighlight> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (highlights.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 760 ? 4 : 2;
+        return GridView.count(
+          crossAxisCount: columns,
+          childAspectRatio: constraints.maxWidth >= 760 ? 1.72 : 1.35,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          children: highlights
+              .map(
+                (highlight) => _DashboardHighlightCard(
+                  highlight: highlight,
+                  onTap: highlight.target.isEmpty
+                      ? null
+                      : () => onSelected(highlight),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _DashboardHighlightCard extends StatelessWidget {
+  const _DashboardHighlightCard({
+    required this.highlight,
+    this.onTap,
+  });
+
+  final _DashboardHighlight highlight;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+    final accent = toneColor(highlight.tone);
+    return _BusinessCard(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _TileIcon(
+                icon: iconFor(highlight.icon),
+                color: accent,
+                tone: tokens.tone(accent),
+              ),
+              const Spacer(),
+              if (onTap != null)
+                Icon(
+                  Icons.arrow_forward_rounded,
+                  color: tokens.mutedForeground,
+                  size: 18,
+                ),
+            ],
+          ),
+          const Spacer(),
+          Text(
+            highlight.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: tokens.mutedForeground,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              highlight.value,
+              style: TextStyle(
+                color: tokens.cardForeground,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            highlight.subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: tokens.mutedForeground,
+              fontSize: 11,
+              height: 1.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardCharts extends StatelessWidget {
+  const _DashboardCharts({
+    required this.overview,
+    required this.onOpenBusinessTab,
+  });
+
+  final _OverviewData overview;
+  final Future<void> Function(BusinessTab tab) onOpenBusinessTab;
+
+  @override
+  Widget build(BuildContext context) {
+    final chartCards = <Widget>[
+      _BusinessCard(
+        onTap: overview.hasPermission('warehouse.read')
+            ? () => onOpenBusinessTab(BusinessTab.warehouse)
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionHeader(
+              title: overview.dashboard.seriesTitle,
+              actionLabel:
+                  overview.hasPermission('warehouse.read') ? 'Открыть' : null,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 190,
+              child: _SalesChart(points: overview.dashboard.salesSeries),
+            ),
+          ],
+        ),
+      ),
+    ];
+
+    if (overview.hasPermission('finance.read')) {
+      chartCards.add(
+        _BusinessCard(
+          onTap: () => onOpenBusinessTab(BusinessTab.finance),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionHeader(
+                title: 'Структура расходов',
+                actionLabel: 'Финансы',
+              ),
+              const SizedBox(height: 12),
+              _ExpensesChart(categories: overview.finance.expenseCategories),
+            ],
+          ),
+        ),
+      );
+    } else if (overview.hasPermission('warehouse.read') ||
+        overview.hasPermission('catalog.read')) {
+      chartCards.add(
+        _BusinessCard(
+          onTap: () => onOpenBusinessTab(BusinessTab.warehouse),
+          child: _StockHealthPanel(products: overview.products),
+        ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 760 && chartCards.length > 1) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: chartCards[0]),
+              const SizedBox(width: 12),
+              Expanded(child: chartCards[1]),
+            ],
+          );
+        }
+        return Column(
+          children: [
+            for (var index = 0; index < chartCards.length; index++) ...[
+              if (index > 0) const SizedBox(height: 12),
+              chartCards[index],
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _StockHealthPanel extends StatelessWidget {
+  const _StockHealthPanel({required this.products});
+
+  final List<_Product> products;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = products.length;
+    final low =
+        products.where((p) => p.status == ProductStatus.lowStock).length;
+    final out =
+        products.where((p) => p.status == ProductStatus.outOfStock).length;
+    final healthy = math.max(0, total - low - out);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionHeader(title: 'Здоровье склада', actionLabel: 'Склад'),
+        const SizedBox(height: 18),
+        _StockHealthBar(
+          total: total,
+          healthy: healthy,
+          low: low,
+          out: out,
+        ),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(
+              child: _DashboardMiniStat(
+                label: 'В наличии',
+                value: '$healthy',
+                color: const Color(0xFF16A34A),
+              ),
+            ),
+            Expanded(
+              child: _DashboardMiniStat(
+                label: 'Низко',
+                value: '$low',
+                color: const Color(0xFFF59E0B),
+              ),
+            ),
+            Expanded(
+              child: _DashboardMiniStat(
+                label: 'Нет',
+                value: '$out',
+                color: const Color(0xFFEF4444),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _StockHealthBar extends StatelessWidget {
+  const _StockHealthBar({
+    required this.total,
+    required this.healthy,
+    required this.low,
+    required this.out,
+  });
+
+  final int total;
+  final int healthy;
+  final int low;
+  final int out;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(99),
+      child: SizedBox(
+        height: 16,
+        child: Row(
+          children: [
+            _StockBarSegment(
+              flex: math.max(1, healthy),
+              color: tokens.success,
+              visible: healthy > 0 || total == 0,
+            ),
+            _StockBarSegment(
+              flex: math.max(1, low),
+              color: tokens.warning,
+              visible: low > 0,
+            ),
+            _StockBarSegment(
+              flex: math.max(1, out),
+              color: tokens.destructive,
+              visible: out > 0,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StockBarSegment extends StatelessWidget {
+  const _StockBarSegment({
+    required this.flex,
+    required this.color,
+    required this.visible,
+  });
+
+  final int flex;
+  final Color color;
+  final bool visible;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!visible) {
+      return const SizedBox.shrink();
+    }
+    return Expanded(
+      flex: math.max(1, flex),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: color),
+        child: const SizedBox.expand(),
+      ),
+    );
+  }
+}
+
+class _DashboardMiniStat extends StatelessWidget {
+  const _DashboardMiniStat({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: tokens.mutedForeground,
+            fontSize: 12,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.w800,
+            fontSize: 20,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DashboardRoleSignals extends StatelessWidget {
+  const _DashboardRoleSignals({
+    required this.overview,
+    required this.onOpenBusinessTab,
+  });
+
+  final _OverviewData overview;
+  final Future<void> Function(BusinessTab tab) onOpenBusinessTab;
+
+  @override
+  Widget build(BuildContext context) {
+    final signals = _signalsForOverview();
+    return _BusinessCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionHeader(title: 'Фокус по роли'),
+          const SizedBox(height: 14),
+          ...signals.map(
+            (signal) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _DashboardSignalTile(
+                signal: signal,
+                onTap: signal.tab == null
+                    ? null
+                    : () => onOpenBusinessTab(signal.tab!),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<_DashboardSignal> _signalsForOverview() {
+    final receivable = overview.clients.fold<int>(
+      0,
+      (sum, client) => sum + client.receivable,
+    );
+    final lowStock = overview.products
+        .where((product) => product.status == ProductStatus.lowStock)
+        .length;
+    final outStock = overview.products
+        .where((product) => product.status == ProductStatus.outOfStock)
+        .length;
+    final netFlow = overview.finance.income - overview.finance.expense;
+    final role = overview.activeRole;
+
+    if (role == 'warehouse') {
+      return [
+        _DashboardSignal(
+          title: 'Проверить остатки',
+          subtitle: '$lowStock низкий остаток, $outStock нет в наличии',
+          icon: Icons.inventory_2_rounded,
+          color: toneColor(lowStock + outStock > 0 ? 'warning' : 'success'),
+          tab: BusinessTab.warehouse,
+        ),
+        _DashboardSignal(
+          title: 'Каталог товаров',
+          subtitle: '${overview.products.length} позиций доступно',
+          icon: Icons.menu_book_rounded,
+          color: toneColor('primary'),
+          tab: BusinessTab.catalog,
+        ),
+      ];
+    }
+    if (role == 'sales') {
+      return [
+        _DashboardSignal(
+          title: 'Клиенты в работе',
+          subtitle: '${overview.clients.length} карточек CRM',
+          icon: Icons.group_rounded,
+          color: toneColor('info'),
+          tab: BusinessTab.crm,
+        ),
+        _DashboardSignal(
+          title: 'Дебиторка клиентов',
+          subtitle: formatMoney(receivable),
+          icon: Icons.receipt_long_rounded,
+          color: toneColor(receivable > 0 ? 'warning' : 'success'),
+          tab: BusinessTab.crm,
+        ),
+      ];
+    }
+    if (role == 'accountant') {
+      return [
+        _DashboardSignal(
+          title: 'Денежный поток',
+          subtitle: _signedMoney(netFlow),
+          icon: Icons.swap_vert_rounded,
+          color: toneColor(netFlow >= 0 ? 'success' : 'error'),
+          tab: BusinessTab.finance,
+        ),
+        _DashboardSignal(
+          title: 'Зарплатные периоды',
+          subtitle: 'Открыть начисления и выплаты',
+          icon: Icons.badge_rounded,
+          color: toneColor('warning'),
+          tab: BusinessTab.salary,
+        ),
+      ];
+    }
+    if (overview.permissions.isEmpty) {
+      return [
+        _DashboardSignal(
+          title: 'Доступ ограничен',
+          subtitle: 'Администратор компании может выдать права',
+          icon: Icons.lock_outline_rounded,
+          color: toneColor('neutral'),
+        ),
+      ];
+    }
+    return [
+      if (overview.hasPermission('finance.read'))
+        _DashboardSignal(
+          title: 'Деньги и поток',
+          subtitle: '${formatMoney(overview.finance.totalBalance)} на счетах',
+          icon: Icons.account_balance_wallet_rounded,
+          color: toneColor(netFlow >= 0 ? 'success' : 'error'),
+          tab: BusinessTab.finance,
+        ),
+      if (overview.hasPermission('warehouse.read'))
+        _DashboardSignal(
+          title: 'Складские риски',
+          subtitle: '$lowStock низкий остаток, $outStock нет в наличии',
+          icon: Icons.warning_amber_rounded,
+          color: toneColor(lowStock + outStock > 0 ? 'warning' : 'success'),
+          tab: BusinessTab.warehouse,
+        ),
+      if (overview.hasPermission('crm.read'))
+        _DashboardSignal(
+          title: 'Клиенты и задолженность',
+          subtitle:
+              '${overview.clients.length} клиентов · ${formatMoney(receivable)}',
+          icon: Icons.group_rounded,
+          color: toneColor('info'),
+          tab: BusinessTab.crm,
+        ),
+    ];
+  }
+
+  String _signedMoney(int value) {
+    if (value == 0) return formatMoney(0);
+    final sign = value > 0 ? '+' : '';
+    return '$sign${formatMoney(value)}';
+  }
+}
+
+class _DashboardSignal {
+  const _DashboardSignal({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    this.tab,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+  final BusinessTab? tab;
+}
+
+class _DashboardSignalTile extends StatelessWidget {
+  const _DashboardSignalTile({
+    required this.signal,
+    this.onTap,
+  });
+
+  final _DashboardSignal signal;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            children: [
+              _TileIcon(
+                icon: signal.icon,
+                color: signal.color,
+                tone: tokens.tone(signal.color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      signal.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: tokens.cardForeground,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      signal.subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: tokens.mutedForeground,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (onTap != null)
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: tokens.mutedForeground,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardActivityCard extends StatelessWidget {
+  const _DashboardActivityCard({required this.activities});
+
+  final List<_Activity> activities;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.appThemeTokens;
+    return _BusinessCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionHeader(title: 'Последние операции'),
+          const SizedBox(height: 14),
+          if (activities.isEmpty)
+            Text(
+              'Операций пока нет',
+              style: TextStyle(
+                color: tokens.mutedForeground,
+                fontWeight: FontWeight.w700,
+              ),
+            )
+          else
+            ...activities.map(
+              (activity) => Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: _ActivityRow(activity: activity),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+String _dashboardRoleLabel(String role) {
+  switch (role) {
+    case 'owner':
+      return 'Владелец · полный обзор';
+    case 'admin':
+      return 'Администратор · полный обзор';
+    case 'manager':
+      return 'Менеджер · операционный обзор';
+    case 'accountant':
+      return 'Бухгалтер · финансы и зарплата';
+    case 'warehouse':
+      return 'Кладовщик · складская витрина';
+    case 'sales':
+      return 'Продажи · CRM и отгрузки';
+    default:
+      return 'Сотрудник · ограниченный доступ';
+  }
+}
+
+IconData _trendIcon(String tone) {
+  switch (tone) {
+    case 'success':
+      return Icons.arrow_upward_rounded;
+    case 'error':
+    case 'danger':
+      return Icons.arrow_downward_rounded;
+    case 'warning':
+      return Icons.priority_high_rounded;
+    default:
+      return Icons.insights_rounded;
   }
 }
 

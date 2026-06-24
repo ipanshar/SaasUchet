@@ -508,12 +508,16 @@ class _KpiCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  value,
-                  style: TextStyle(
-                    color: tokens.cardForeground,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      color: tokens.cardForeground,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -551,6 +555,17 @@ class _SalesChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.appThemeTokens;
     final values = points.map((point) => point.value).toList(growable: false);
+    if (points.isEmpty) {
+      return Center(
+        child: Text(
+          'Нет данных для графика',
+          style: TextStyle(
+            color: tokens.mutedForeground,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+    }
 
     return Column(
       children: [
@@ -600,6 +615,9 @@ class _LineChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (values.isEmpty) {
+      return;
+    }
     final paintGrid = Paint()
       ..color = gridColor
       ..strokeWidth = 1;
@@ -614,7 +632,9 @@ class _LineChartPainter extends CustomPainter {
     final valueRange = math.max(1, maxValue - minValue);
 
     Offset pointFor(int index) {
-      final x = size.width * index / (values.length - 1);
+      final x = values.length == 1
+          ? size.width / 2
+          : size.width * index / (values.length - 1);
       final normalized = (values[index] - minValue) / valueRange;
       final y = size.height - (normalized * (size.height - 12)) - 6;
       return Offset(x, y);
@@ -1163,6 +1183,21 @@ class _ExpensesChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.appThemeTokens;
+    if (categories.isEmpty ||
+        categories.every((category) => category.value <= 0)) {
+      return SizedBox(
+        height: 180,
+        child: Center(
+          child: Text(
+            'Нет расходов за период',
+            style: TextStyle(
+              color: tokens.mutedForeground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      );
+    }
 
     return Row(
       children: [
@@ -1244,6 +1279,9 @@ class _DonutChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final total = categories.fold<double>(0, (sum, item) => sum + item.value);
+    if (total <= 0) {
+      return;
+    }
     final rect = Rect.fromCircle(
       center: Offset(size.width / 2, size.height / 2),
       radius: math.min(size.width, size.height) / 2.5,

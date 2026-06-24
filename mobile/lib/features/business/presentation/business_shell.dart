@@ -682,6 +682,8 @@ class _BusinessShellState extends State<BusinessShell> {
           onSetDefaultCompany: _setDefaultCompany,
           onCreateCompany: _createCompany,
           onAddCompanyMember: _addCompanyMember,
+          onRefresh: refreshOverview,
+          onOpenBusinessTab: _openBusinessTab,
         );
       case BusinessTab.crm:
         return _CrmScreen(

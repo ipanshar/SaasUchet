@@ -34,34 +34,93 @@ func (h Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireActiveCompanyPermission(w, user) {
-		return
-	}
 
-	clients, err := h.loadClients(user)
+	membership, ok, err := h.resolveUserCompanyMembership(user, strings.TrimSpace(user.ActiveCompanyID))
 	if err != nil {
-		log.Printf("business overview loadClients failed user=%s: %v", user.ID, err)
 		response.Error(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-
-	products, err := h.store.ListProducts(user)
-	if err != nil {
-		log.Printf("business overview ListProducts failed user=%s: %v", user.ID, err)
-		response.Error(w, http.StatusInternalServerError, "internal server error")
+	if !ok {
+		response.Error(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	role := strings.TrimSpace(strings.ToLower(membership.Role))
+	permissions := permissionsForRole(role)
 
-	finance, err := h.store.GetFinance(user)
-	if err != nil {
-		log.Printf("business overview GetFinance failed user=%s: %v", user.ID, err)
-		response.Error(w, http.StatusInternalServerError, "internal server error")
-		return
+	var clients []Client
+	if hasPermission(role, permCRMRead) {
+		clients, err = h.loadClients(user)
+		if err != nil {
+			log.Printf("business overview loadClients failed user=%s: %v", user.ID, err)
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
 	}
 
-	companyName := h.resolveActiveCompanyName(user)
+	var products []Product
+	if hasPermission(role, permCatalogRead) || hasPermission(role, permWarehouseRead) {
+		products, err = h.store.ListProducts(user)
+		if err != nil {
+			log.Printf("business overview ListProducts failed user=%s: %v", user.ID, err)
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+	}
 
-	response.JSON(w, http.StatusOK, buildOverview(user, companyName, clients, products, finance))
+	var inventoryDocuments []InventoryDocumentSummary
+	if hasPermission(role, permWarehouseRead) {
+		inventoryDocuments, err = h.store.ListInventoryDocuments(user, "", "")
+		if err != nil {
+			log.Printf("business overview ListInventoryDocuments failed user=%s: %v", user.ID, err)
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+	}
+
+	var finance Finance
+	var moneyDocuments []MoneyDocumentSummary
+	if hasPermission(role, permFinanceRead) {
+		finance, err = h.store.GetFinance(user)
+		if err != nil {
+			log.Printf("business overview GetFinance failed user=%s: %v", user.ID, err)
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		moneyDocuments, err = h.store.ListMoneyDocuments(user, "", "")
+		if err != nil {
+			log.Printf("business overview ListMoneyDocuments failed user=%s: %v", user.ID, err)
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+	}
+
+	var payrollPeriods []PayrollPeriod
+	if hasPermission(role, permPayrollRead) {
+		payrollPeriods, err = h.store.ListPayrollPeriods(user)
+		if err != nil {
+			log.Printf("business overview ListPayrollPeriods failed user=%s: %v", user.ID, err)
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+	}
+
+	companyName := membership.Name
+	if strings.TrimSpace(companyName) == "" {
+		companyName = h.resolveActiveCompanyName(user)
+	}
+
+	response.JSON(w, http.StatusOK, buildOverview(overviewBuildInput{
+		User:               user,
+		CompanyName:        companyName,
+		ActiveRole:         role,
+		Permissions:        permissions,
+		Clients:            clients,
+		Products:           products,
+		Finance:            finance,
+		InventoryDocuments: inventoryDocuments,
+		MoneyDocuments:     moneyDocuments,
+		PayrollPeriods:     payrollPeriods,
+	}))
 }
 
 // resolveActiveCompanyName returns the name of the user's active company (or

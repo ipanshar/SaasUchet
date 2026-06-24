@@ -21,6 +21,8 @@ var (
 type Overview struct {
 	CompanyName       string        `json:"company_name"`
 	Initials          string        `json:"initials"`
+	ActiveRole        string        `json:"active_role"`
+	Permissions       []string      `json:"permissions"`
 	Dashboard         Dashboard     `json:"dashboard"`
 	RecentActivities  []Activity    `json:"recent_activities"`
 	Clients           []Client      `json:"clients"`
@@ -35,6 +37,12 @@ type Dashboard struct {
 	RevenueChange  string       `json:"revenue_change"`
 	KPIs           []KPI        `json:"kpis"`
 	SalesSeries    []ChartPoint `json:"sales_series"`
+	HeroLabel      string       `json:"hero_label"`
+	HeroValue      string       `json:"hero_value"`
+	HeroChange     string       `json:"hero_change"`
+	HeroChangeTone string       `json:"hero_change_tone"`
+	SeriesTitle    string       `json:"series_title"`
+	Highlights     []Highlight  `json:"highlights"`
 }
 
 type KPI struct {
@@ -57,6 +65,15 @@ type Activity struct {
 	Time   string `json:"time"`
 	Icon   string `json:"icon"`
 	Tone   string `json:"tone"`
+}
+
+type Highlight struct {
+	Title    string `json:"title"`
+	Value    string `json:"value"`
+	Subtitle string `json:"subtitle"`
+	Icon     string `json:"icon"`
+	Tone     string `json:"tone"`
+	Target   string `json:"target,omitempty"`
 }
 
 type Client struct {
@@ -388,52 +405,611 @@ type StaffMember struct {
 	Role string `json:"role"`
 }
 
-func buildOverview(user auth.User, companyName string, clients []Client, products []Product, finance Finance) Overview {
+type overviewBuildInput struct {
+	User               auth.User
+	CompanyName        string
+	ActiveRole         string
+	Permissions        []string
+	Clients            []Client
+	Products           []Product
+	Finance            Finance
+	InventoryDocuments []InventoryDocumentSummary
+	MoneyDocuments     []MoneyDocumentSummary
+	PayrollPeriods     []PayrollPeriod
+}
+
+func buildOverview(input overviewBuildInput) Overview {
+	user := input.User
+	companyName := input.CompanyName
 	if strings.TrimSpace(companyName) == "" {
 		companyName = `ТОО "Мой Бизнес"`
 		if len(user.Companies) > 0 {
 			companyName = user.Companies[0].Name
 		}
 	}
+	activeRole := strings.TrimSpace(strings.ToLower(input.ActiveRole))
+	if activeRole == "" {
+		activeRole = "staff"
+	}
+	permissions := append([]string(nil), input.Permissions...)
+	if permissions == nil {
+		permissions = permissionsForRole(activeRole)
+	}
+	input.ActiveRole = activeRole
+	input.Permissions = permissions
+	dashboard := buildRoleDashboard(input)
 
 	return Overview{
 		CompanyName:       companyName,
 		Initials:          initialsOf(companyName),
-		MenuNotifications: 5,
-		Dashboard: Dashboard{
-			MonthlyRevenue: "₸ 2,450,000",
-			RevenueChange:  "+12.5%",
-			KPIs: []KPI{
-				{Title: "Продажи за день", Value: "₸ 125,000", Change: "+8.2%", ChangeTone: "success", Icon: "cart", IconTone: "success"},
-				{Title: "Дебиторка", Value: "₸ 456,000", Change: "-3.1%", ChangeTone: "warning", Icon: "receipt", IconTone: "warning"},
-				{Title: "Клиенты", Value: "1,234", Change: "+45", ChangeTone: "success", Icon: "group", IconTone: "info"},
-				{Title: "Товары", Value: "5,678", Change: "56 новых", ChangeTone: "neutral", Icon: "inventory", IconTone: "primary"},
-			},
-			SalesSeries: []ChartPoint{
-				{Label: "1 июн", Value: 45},
-				{Label: "5 июн", Value: 52},
-				{Label: "10", Value: 48},
-				{Label: "15", Value: 61},
-				{Label: "20", Value: 55},
-				{Label: "25", Value: 67},
-				{Label: "Сегодня", Value: 73},
-			},
-		},
-		RecentActivities: []Activity{
-			{Title: `ТОО "Астана Трейд"`, Amount: "₸ 125,000", Time: "10 минут назад", Icon: "cart", Tone: "success"},
-			{Title: `ТОО "Поставщик+"`, Amount: "₸ 45,000", Time: "1 час назад", Icon: "inventory", Tone: "warning"},
-			{Title: `ИП Нурланов А.Б.`, Amount: "₸ 89,500", Time: "2 часа назад", Icon: "payments", Tone: "success"},
-			{Title: `ТОО "Алматы Опт"`, Amount: "₸ 156,000", Time: "3 часа назад", Icon: "description", Tone: "info"},
-		},
-		Clients:  clients,
-		Products: products,
-		Finance:  finance,
+		ActiveRole:        activeRole,
+		Permissions:       permissions,
+		MenuNotifications: overviewNotificationCount(input),
+		Dashboard:         dashboard,
+		RecentActivities:  buildRecentActivities(input),
+		Clients:           input.Clients,
+		Products:          input.Products,
+		Finance:           input.Finance,
 		Staff: []StaffMember{
-			{Name: user.FullName, Role: "Администратор"},
-			{Name: "Касымова Айгуль", Role: "Менеджер"},
-			{Name: "Ибрагимов Ерлан", Role: "Кладовщик"},
+			{Name: user.FullName, Role: companyRoleLabel(activeRole)},
 		},
 	}
+}
+
+func buildRoleDashboard(input overviewBuildInput) Dashboard {
+	now := time.Now()
+	permissions := permissionSet(input.Permissions)
+	canCRM := permissions[permCRMRead]
+	canWarehouse := permissions[permWarehouseRead]
+	canCatalog := permissions[permCatalogRead]
+	canFinance := permissions[permFinanceRead]
+	canPayroll := permissions[permPayrollRead]
+
+	currentMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	previousMonth := currentMonth.AddDate(0, -1, 0)
+	currentSales := sumInventoryForMonth(input.InventoryDocuments, "sale_issue", currentMonth)
+	previousSales := sumInventoryForMonth(input.InventoryDocuments, "sale_issue", previousMonth)
+	purchases := sumInventoryForMonth(input.InventoryDocuments, "purchase_receipt", currentMonth)
+	revenueChange, revenueTone := percentChange(currentSales, previousSales)
+	receivable := dashboardReceivable(input.Clients, input.MoneyDocuments)
+	payable := sumMoneyRemaining(input.MoneyDocuments, "purchase_payable")
+	totalProducts, lowStock, outOfStock := productStockSummary(input.Products)
+	payrollDue := payrollDueTotal(input.PayrollPeriods)
+	netFlow := input.Finance.Income - input.Finance.Expense
+
+	heroLabel := "Продажи за месяц"
+	heroValue := formatMoneyValue(currentSales)
+	heroChange := revenueChange + " к прошлому месяцу"
+	heroTone := revenueTone
+	switch input.ActiveRole {
+	case "accountant":
+		heroLabel = "Деньги на счетах"
+		heroValue = formatMoneyValue(input.Finance.TotalBalance)
+		heroChange = fmt.Sprintf("Поток %s", dashboardSignedMoneyValue(netFlow))
+		heroTone = toneForSignedValue(netFlow)
+	case "warehouse":
+		heroLabel = "Товаров на складе"
+		heroValue = withThousands(totalProducts)
+		heroChange = fmt.Sprintf("%d требуют внимания", lowStock+outOfStock)
+		heroTone = toneForRisk(lowStock + outOfStock)
+	case "sales":
+		heroLabel = "Продажи за месяц"
+		heroValue = formatMoneyValue(currentSales)
+		heroChange = fmt.Sprintf("%d клиентов в работе", len(input.Clients))
+		heroTone = "success"
+	case "staff":
+		heroLabel = "Доступ к компании"
+		heroValue = companyRoleLabel(input.ActiveRole)
+		heroChange = "Откройте доступные разделы ниже"
+		heroTone = "neutral"
+	}
+	if !canWarehouse && currentSales == 0 && input.ActiveRole != "warehouse" && input.ActiveRole != "staff" {
+		heroLabel = "Операционный обзор"
+		heroValue = companyRoleLabel(input.ActiveRole)
+		heroChange = "Данные показаны по доступным правам"
+		heroTone = "info"
+	}
+
+	kpis := make([]KPI, 0, 8)
+	if canWarehouse {
+		kpis = append(kpis, KPI{
+			Title:      "Продажи",
+			Value:      formatMoneyValue(currentSales),
+			Change:     revenueChange,
+			ChangeTone: revenueTone,
+			Icon:       "cart",
+			IconTone:   "success",
+		})
+		kpis = append(kpis, KPI{
+			Title:      "Закупки",
+			Value:      formatMoneyValue(purchases),
+			Change:     "за месяц",
+			ChangeTone: "info",
+			Icon:       "purchase",
+			IconTone:   "info",
+		})
+	}
+	if canFinance {
+		kpis = append(kpis, KPI{
+			Title:      "Деньги",
+			Value:      formatMoneyValue(input.Finance.TotalBalance),
+			Change:     dashboardSignedMoneyValue(netFlow),
+			ChangeTone: toneForSignedValue(netFlow),
+			Icon:       "wallet",
+			IconTone:   "primary",
+		})
+		kpis = append(kpis, KPI{
+			Title:      "Расходы",
+			Value:      formatMoneyValue(input.Finance.Expense),
+			Change:     "по операциям",
+			ChangeTone: "warning",
+			Icon:       "payments",
+			IconTone:   "warning",
+		})
+	}
+	if canCRM {
+		kpis = append(kpis, KPI{
+			Title:      "Клиенты",
+			Value:      withThousands(len(input.Clients)),
+			Change:     "активная база",
+			ChangeTone: "info",
+			Icon:       "group",
+			IconTone:   "info",
+		})
+		if receivable > 0 {
+			kpis = append(kpis, KPI{
+				Title:      "Дебиторка",
+				Value:      formatMoneyValue(receivable),
+				Change:     "к получению",
+				ChangeTone: "warning",
+				Icon:       "receipt",
+				IconTone:   "warning",
+			})
+		}
+	}
+	if canFinance && payable > 0 {
+		kpis = append(kpis, KPI{
+			Title:      "Кредиторка",
+			Value:      formatMoneyValue(payable),
+			Change:     "к оплате",
+			ChangeTone: "error",
+			Icon:       "payable",
+			IconTone:   "error",
+		})
+	}
+	if canCatalog || canWarehouse {
+		kpis = append(kpis, KPI{
+			Title:      "Товары",
+			Value:      withThousands(totalProducts),
+			Change:     fmt.Sprintf("%d низкий остаток", lowStock+outOfStock),
+			ChangeTone: toneForRisk(lowStock + outOfStock),
+			Icon:       "inventory",
+			IconTone:   "primary",
+		})
+	}
+	if canPayroll {
+		kpis = append(kpis, KPI{
+			Title:      "Зарплата",
+			Value:      formatMoneyValue(payrollDue),
+			Change:     "к выплате",
+			ChangeTone: toneForRisk(payrollDue),
+			Icon:       "salary",
+			IconTone:   "warning",
+		})
+	}
+	if len(kpis) == 0 {
+		kpis = append(kpis, KPI{
+			Title:      "Роль",
+			Value:      companyRoleLabel(input.ActiveRole),
+			Change:     "нет активных прав",
+			ChangeTone: "neutral",
+			Icon:       "lock",
+			IconTone:   "neutral",
+		})
+	}
+
+	return Dashboard{
+		MonthlyRevenue: formatMoneyValue(currentSales),
+		RevenueChange:  revenueChange,
+		KPIs:           kpis,
+		SalesSeries:    buildDailySalesSeries(input.InventoryDocuments, now),
+		HeroLabel:      heroLabel,
+		HeroValue:      heroValue,
+		HeroChange:     heroChange,
+		HeroChangeTone: heroTone,
+		SeriesTitle:    "Продажи за 7 дней",
+		Highlights:     buildHighlights(input, currentSales, receivable, payable, lowStock, outOfStock, payrollDue, netFlow),
+	}
+}
+
+func permissionSet(permissions []string) map[string]bool {
+	set := make(map[string]bool, len(permissions))
+	for _, permission := range permissions {
+		set[permission] = true
+	}
+	return set
+}
+
+func buildHighlights(
+	input overviewBuildInput,
+	currentSales int,
+	receivable int,
+	payable int,
+	lowStock int,
+	outOfStock int,
+	payrollDue int,
+	netFlow int,
+) []Highlight {
+	permissions := permissionSet(input.Permissions)
+	highlights := make([]Highlight, 0, 6)
+	if permissions[permCRMRead] {
+		highlights = append(highlights, Highlight{
+			Title:    "CRM",
+			Value:    withThousands(len(input.Clients)),
+			Subtitle: dashboardDebtSubtitle(receivable),
+			Icon:     "group",
+			Tone:     "info",
+			Target:   "crm",
+		})
+	}
+	if permissions[permWarehouseRead] {
+		highlights = append(highlights, Highlight{
+			Title:    "Продажи",
+			Value:    formatMoneyValue(currentSales),
+			Subtitle: "Документы отгрузки за месяц",
+			Icon:     "cart",
+			Tone:     "success",
+			Target:   "warehouse",
+		})
+		highlights = append(highlights, Highlight{
+			Title:    "Склад",
+			Value:    withThousands(len(input.Products)),
+			Subtitle: fmt.Sprintf("%d критичных позиций", lowStock+outOfStock),
+			Icon:     "inventory",
+			Tone:     toneForRisk(lowStock + outOfStock),
+			Target:   "warehouse",
+		})
+	}
+	if permissions[permFinanceRead] {
+		highlights = append(highlights, Highlight{
+			Title:    "Финансы",
+			Value:    formatMoneyValue(input.Finance.TotalBalance),
+			Subtitle: fmt.Sprintf("Поток %s", dashboardSignedMoneyValue(netFlow)),
+			Icon:     "wallet",
+			Tone:     toneForSignedValue(netFlow),
+			Target:   "finance",
+		})
+		if payable > 0 {
+			highlights = append(highlights, Highlight{
+				Title:    "Кредиторка",
+				Value:    formatMoneyValue(payable),
+				Subtitle: "Счета к оплате",
+				Icon:     "payable",
+				Tone:     "error",
+				Target:   "finance",
+			})
+		}
+	}
+	if permissions[permPayrollRead] {
+		highlights = append(highlights, Highlight{
+			Title:    "Зарплата",
+			Value:    formatMoneyValue(payrollDue),
+			Subtitle: "Открытые периоды",
+			Icon:     "salary",
+			Tone:     toneForRisk(payrollDue),
+			Target:   "salary",
+		})
+	}
+	if len(highlights) == 0 {
+		highlights = append(highlights, Highlight{
+			Title:    "Доступ",
+			Value:    companyRoleLabel(input.ActiveRole),
+			Subtitle: "Для этой роли нет операционных виджетов",
+			Icon:     "lock",
+			Tone:     "neutral",
+		})
+	}
+	return highlights
+}
+
+func buildRecentActivities(input overviewBuildInput) []Activity {
+	permissions := permissionSet(input.Permissions)
+	activities := make([]Activity, 0, 5)
+	if permissions[permWarehouseRead] {
+		for _, document := range input.InventoryDocuments {
+			if len(activities) >= 5 {
+				break
+			}
+			activities = append(activities, inventoryActivity(document))
+		}
+	}
+	if permissions[permFinanceRead] {
+		for _, transaction := range input.Finance.Transactions {
+			if len(activities) >= 5 {
+				break
+			}
+			activities = append(activities, transactionActivity(transaction))
+		}
+	}
+	if permissions[permCRMRead] {
+		for _, client := range input.Clients {
+			if len(activities) >= 5 {
+				break
+			}
+			if client.Receivable <= 0 && client.Payable <= 0 && client.SalesCount <= 0 {
+				continue
+			}
+			amount := formatMoneyValue(client.Receivable)
+			title := client.Name
+			tone := "warning"
+			if client.Receivable == 0 {
+				amount = formatMoneyValue(client.TotalSales)
+				tone = "info"
+			}
+			activities = append(activities, Activity{
+				Title:  title,
+				Amount: amount,
+				Time:   "CRM",
+				Icon:   "group",
+				Tone:   tone,
+			})
+		}
+	}
+	if len(activities) == 0 {
+		activities = append(activities, Activity{
+			Title:  "Операционный обзор готов",
+			Amount: companyRoleLabel(input.ActiveRole),
+			Time:   "сейчас",
+			Icon:   "description",
+			Tone:   "info",
+		})
+	}
+	return activities
+}
+
+func inventoryActivity(document InventoryDocumentSummary) Activity {
+	label, icon, tone := inventoryDocumentPresentation(document.DocumentType)
+	title := label
+	if document.ClientName != "" {
+		title = document.ClientName
+	}
+	amount := formatMoneyValue(document.TotalAmount)
+	if document.TotalAmount == 0 {
+		amount = fmt.Sprintf("%d шт", document.TotalQuantity)
+	}
+	return Activity{
+		Title:  title,
+		Amount: amount,
+		Time:   compactBusinessDate(document.DocumentDate),
+		Icon:   icon,
+		Tone:   tone,
+	}
+}
+
+func transactionActivity(transaction Transaction) Activity {
+	tone := "warning"
+	sign := "-"
+	if transaction.Type == "income" {
+		tone = "success"
+		sign = "+"
+	}
+	title := transaction.Description
+	if strings.TrimSpace(title) == "" {
+		title = transaction.Category
+	}
+	return Activity{
+		Title:  title,
+		Amount: fmt.Sprintf("%s%s", sign, formatMoneyValue(transaction.Amount)),
+		Time:   transaction.Date,
+		Icon:   "payments",
+		Tone:   tone,
+	}
+}
+
+func inventoryDocumentPresentation(documentType string) (string, string, string) {
+	switch documentType {
+	case "sale_issue":
+		return "Продажа", "cart", "success"
+	case "purchase_receipt":
+		return "Закупка", "purchase", "info"
+	case "write_off":
+		return "Списание", "warning", "warning"
+	case "transfer":
+		return "Перемещение", "inventory", "info"
+	case "production_in", "production_out":
+		return "Производство", "production", "primary"
+	default:
+		return "Документ", "description", "neutral"
+	}
+}
+
+func sumInventoryForMonth(documents []InventoryDocumentSummary, documentType string, month time.Time) int {
+	total := 0
+	for _, document := range documents {
+		if document.DocumentType != documentType {
+			continue
+		}
+		documentDate, ok := parseBusinessDate(document.DocumentDate)
+		if !ok || documentDate.Year() != month.Year() || documentDate.Month() != month.Month() {
+			continue
+		}
+		total += document.TotalAmount
+	}
+	return total
+}
+
+func buildDailySalesSeries(documents []InventoryDocumentSummary, now time.Time) []ChartPoint {
+	points := make([]ChartPoint, 0, 7)
+	for offset := 6; offset >= 0; offset-- {
+		day := now.AddDate(0, 0, -offset)
+		total := 0
+		for _, document := range documents {
+			if document.DocumentType != "sale_issue" {
+				continue
+			}
+			documentDate, ok := parseBusinessDate(document.DocumentDate)
+			if !ok || !sameBusinessDay(documentDate, day) {
+				continue
+			}
+			total += document.TotalAmount
+		}
+		label := fmt.Sprintf("%d.%02d", day.Day(), int(day.Month()))
+		if offset == 0 {
+			label = "Сегодня"
+		}
+		points = append(points, ChartPoint{
+			Label: label,
+			Value: float64(total),
+		})
+	}
+	return points
+}
+
+func parseBusinessDate(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{"2006-01-02", time.RFC3339, "2006-01-02 15:04:05"} {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func sameBusinessDay(left time.Time, right time.Time) bool {
+	return left.Year() == right.Year() &&
+		left.Month() == right.Month() &&
+		left.Day() == right.Day()
+}
+
+func compactBusinessDate(value string) string {
+	parsed, ok := parseBusinessDate(value)
+	if !ok {
+		return value
+	}
+	return parsed.Format("02.01.2006")
+}
+
+func percentChange(current int, previous int) (string, string) {
+	if current == 0 && previous == 0 {
+		return "0%", "neutral"
+	}
+	if previous == 0 {
+		return "+100%", "success"
+	}
+	change := (float64(current-previous) / float64(previous)) * 100
+	tone := "success"
+	if change < 0 {
+		tone = "error"
+	}
+	if change == 0 {
+		tone = "neutral"
+	}
+	return fmt.Sprintf("%+.1f%%", change), tone
+}
+
+func productStockSummary(products []Product) (int, int, int) {
+	lowStock := 0
+	outOfStock := 0
+	for _, product := range products {
+		switch product.Status {
+		case "out_of_stock":
+			outOfStock++
+		case "low_stock":
+			lowStock++
+		}
+	}
+	return len(products), lowStock, outOfStock
+}
+
+func dashboardReceivable(clients []Client, documents []MoneyDocumentSummary) int {
+	receivable := sumMoneyRemaining(documents, "sale_receivable")
+	if receivable > 0 {
+		return receivable
+	}
+	for _, client := range clients {
+		receivable += client.Receivable
+	}
+	return receivable
+}
+
+func sumMoneyRemaining(documents []MoneyDocumentSummary, documentType string) int {
+	total := 0
+	for _, document := range documents {
+		if document.DocumentType == documentType {
+			total += document.RemainingAmount
+		}
+	}
+	return total
+}
+
+func payrollDueTotal(periods []PayrollPeriod) int {
+	total := 0
+	for _, period := range periods {
+		if period.Status == "paid" || period.Status == "cancelled" {
+			continue
+		}
+		total += period.TotalNet
+	}
+	return total
+}
+
+func dashboardDebtSubtitle(receivable int) string {
+	if receivable <= 0 {
+		return "Без просроченных сигналов"
+	}
+	return fmt.Sprintf("Дебиторка %s", formatMoneyValue(receivable))
+}
+
+func dashboardSignedMoneyValue(value int) string {
+	if value > 0 {
+		return "+" + formatMoneyValue(value)
+	}
+	if value < 0 {
+		return "-" + formatMoneyValue(-value)
+	}
+	return formatMoneyValue(0)
+}
+
+func toneForSignedValue(value int) string {
+	if value < 0 {
+		return "error"
+	}
+	if value > 0 {
+		return "success"
+	}
+	return "neutral"
+}
+
+func toneForRisk(value int) string {
+	if value > 0 {
+		return "warning"
+	}
+	return "success"
+}
+
+func overviewNotificationCount(input overviewBuildInput) int {
+	permissions := permissionSet(input.Permissions)
+	count := 0
+	if permissions[permWarehouseRead] || permissions[permCatalogRead] {
+		_, lowStock, outOfStock := productStockSummary(input.Products)
+		count += lowStock + outOfStock
+	}
+	if permissions[permFinanceRead] {
+		if sumMoneyRemaining(input.MoneyDocuments, "sale_receivable") > 0 {
+			count++
+		}
+		if sumMoneyRemaining(input.MoneyDocuments, "purchase_payable") > 0 {
+			count++
+		}
+	}
+	if permissions[permPayrollRead] && payrollDueTotal(input.PayrollPeriods) > 0 {
+		count++
+	}
+	return count
 }
 
 func NormalizeClientInput(input CreateClientInput) CreateClientInput {

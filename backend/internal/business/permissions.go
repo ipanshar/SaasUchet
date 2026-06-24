@@ -21,6 +21,25 @@ const (
 	permPayrollWrite         = "payroll.write"
 )
 
+var allBusinessPermissions = []string{
+	permCompanySettingsRead,
+	permCompanySettingsWrite,
+	permCompanyMembersRead,
+	permCompanyMembersWrite,
+	permCRMRead,
+	permCRMWrite,
+	permWarehouseRead,
+	permWarehouseWrite,
+	permFinanceRead,
+	permFinanceWrite,
+	permCatalogRead,
+	permCatalogWrite,
+	permProductionRead,
+	permProductionWrite,
+	permPayrollRead,
+	permPayrollWrite,
+}
+
 func hasPermission(role string, permission string) bool {
 	switch strings.TrimSpace(strings.ToLower(role)) {
 	case "owner", "admin":
@@ -50,4 +69,14 @@ func hasPermission(role string, permission string) bool {
 		return false
 	}
 	return false
+}
+
+func permissionsForRole(role string) []string {
+	permissions := make([]string, 0, len(allBusinessPermissions))
+	for _, permission := range allBusinessPermissions {
+		if hasPermission(role, permission) {
+			permissions = append(permissions, permission)
+		}
+	}
+	return permissions
 }
