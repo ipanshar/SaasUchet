@@ -166,7 +166,7 @@ class _CompanyEditorScreenState extends State<CompanyEditorScreen> {
   Future<void> _pickAndUploadLogo() async {
     setState(() => _logoError = null);
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: _allowedLogoExtensions,
         withData: true,
