@@ -73,10 +73,10 @@ class _CrmScreenState extends State<_CrmScreen> {
         }
       });
 
-    final vipCount =
-        widget.clients.where((c) => c.segment == 'VIP').length;
-    final debtorCount =
-        widget.clients.where((c) => c.debt > 0).length;
+    final vipCount = widget.clients
+        .where((c) => _normalizedClientSegment(c.segment) == 'vip')
+        .length;
+    final debtorCount = widget.clients.where((c) => c.debt > 0).length;
     final selectedClient = _selectedClient;
 
     return Stack(
@@ -164,16 +164,14 @@ class _CrmScreenState extends State<_CrmScreen> {
                   label: 'Все',
                   active: !_showOnlyOverdue,
                   activeColor: const Color(0xFF00A86B),
-                  onPressed: () =>
-                      setState(() => _showOnlyOverdue = false),
+                  onPressed: () => setState(() => _showOnlyOverdue = false),
                 ),
                 const SizedBox(width: 8),
                 _FilterChipButton(
                   label: 'Просрочка',
                   active: _showOnlyOverdue,
                   activeColor: const Color(0xFFDC2626),
-                  onPressed: () =>
-                      setState(() => _showOnlyOverdue = true),
+                  onPressed: () => setState(() => _showOnlyOverdue = true),
                 ),
                 const SizedBox(width: 8),
                 _FilterChipButton(
@@ -188,8 +186,8 @@ class _CrmScreenState extends State<_CrmScreen> {
                   label: 'По дебиторке ↓',
                   active: _sortMode == _CrmSortMode.receivableDesc,
                   activeColor: const Color(0xFFD97706),
-                  onPressed: () => setState(
-                      () => _sortMode = _CrmSortMode.receivableDesc),
+                  onPressed: () =>
+                      setState(() => _sortMode = _CrmSortMode.receivableDesc),
                 ),
                 const SizedBox(width: 8),
                 _FilterChipButton(
@@ -274,7 +272,9 @@ class _CrmScreenState extends State<_CrmScreen> {
                   ),
                 ),
                 _StatusBadge(
-                  label: client.overdueAmount > 0 ? 'Просрочка' : client.segment,
+                  label: client.overdueAmount > 0
+                      ? 'Просрочка'
+                      : _clientSegmentLabel(client.segment),
                   kind: client.overdueAmount > 0
                       ? StatusKind.error
                       : client.debt > 0
@@ -309,8 +309,7 @@ class _CrmScreenState extends State<_CrmScreen> {
                 ),
                 if (client.receivable > 0 || client.payable > 0)
                   _LabelValue(
-                    label:
-                        client.receivable > 0 ? 'Дебиторка' : 'Кредиторка',
+                    label: client.receivable > 0 ? 'Дебиторка' : 'Кредиторка',
                     value: formatMoney(
                       client.receivable > 0
                           ? client.receivable
@@ -391,10 +390,8 @@ class _CrmScreenState extends State<_CrmScreen> {
               ),
               const SizedBox(width: 8),
               _StatusBadge(
-                label: client.segment,
-                kind: client.segment == 'VIP'
-                    ? StatusKind.warning
-                    : StatusKind.neutral,
+                label: _clientSegmentLabel(client.segment),
+                kind: _clientSegmentStatusKind(client.segment),
               ),
             ],
           ),
@@ -433,8 +430,8 @@ class _CrmScreenState extends State<_CrmScreen> {
                   children: [
                     const Text(
                       'Взаиморасчеты',
-                      style: TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700),
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 14),
                     Row(
@@ -490,8 +487,8 @@ class _CrmScreenState extends State<_CrmScreen> {
                   children: [
                     const Text(
                       'Контактная информация',
-                      style: TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700),
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 14),
                     _InfoTile(
@@ -519,8 +516,8 @@ class _CrmScreenState extends State<_CrmScreen> {
                   children: [
                     const Text(
                       'Открытые документы',
-                      style: TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700),
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 14),
                     if (client.openDocuments.isEmpty)
@@ -546,8 +543,7 @@ class _CrmScreenState extends State<_CrmScreen> {
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       children: [
@@ -579,8 +575,7 @@ class _CrmScreenState extends State<_CrmScreen> {
                                         Expanded(
                                           child: _LabelValue(
                                             label: 'Сумма',
-                                            value:
-                                                formatMoney(document.amount),
+                                            value: formatMoney(document.amount),
                                           ),
                                         ),
                                         Expanded(
@@ -595,8 +590,7 @@ class _CrmScreenState extends State<_CrmScreen> {
                                           label: 'Остаток',
                                           value: formatMoney(
                                               document.remainingAmount),
-                                          valueColor:
-                                              const Color(0xFFD97706),
+                                          valueColor: const Color(0xFFD97706),
                                           textAlign: TextAlign.right,
                                         ),
                                       ],
@@ -618,8 +612,8 @@ class _CrmScreenState extends State<_CrmScreen> {
                   children: [
                     const Text(
                       'Продажи и оплаты',
-                      style: TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700),
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 14),
                     if (client.timeline.isEmpty)
@@ -694,8 +688,8 @@ class _CrmScreenState extends State<_CrmScreen> {
                   children: [
                     const Text(
                       'История взаимодействий',
-                      style: TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700),
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 14),
                     ...client.interactions.map(
@@ -739,8 +733,7 @@ class _CrmScreenState extends State<_CrmScreen> {
                                   Text(
                                     item.note,
                                     style: const TextStyle(
-                                        color: Color(0xFF7B8794),
-                                        fontSize: 13),
+                                        color: Color(0xFF7B8794), fontSize: 13),
                                   ),
                                 ],
                               ),
@@ -1375,7 +1368,7 @@ class _CreateClientSheetState extends State<_CreateClientSheet> {
   final _emailController = TextEditingController();
   final _binController = TextEditingController();
   final _iinController = TextEditingController();
-  String _segment = 'Regular';
+  String _segment = 'regular';
 
   @override
   void initState() {
@@ -1391,7 +1384,7 @@ class _CreateClientSheetState extends State<_CreateClientSheet> {
     _emailController.text = client.email;
     _binController.text = client.bin ?? '';
     _iinController.text = client.iin ?? '';
-    _segment = client.segment;
+    _segment = _normalizedClientSegment(client.segment);
   }
 
   @override
@@ -1473,8 +1466,15 @@ class _CreateClientSheetState extends State<_CreateClientSheet> {
                       initialValue: _segment,
                       items: const [
                         DropdownMenuItem(
-                            value: 'Regular', child: Text('Regular')),
-                        DropdownMenuItem(value: 'VIP', child: Text('VIP')),
+                          value: 'regular',
+                          child: Text('Обычный'),
+                        ),
+                        DropdownMenuItem(value: 'vip', child: Text('VIP')),
+                        DropdownMenuItem(value: 'lead', child: Text('Лид')),
+                        DropdownMenuItem(
+                          value: 'blocked',
+                          child: Text('Заблокирован'),
+                        ),
                       ],
                       decoration: const InputDecoration(labelText: 'Сегмент'),
                       onChanged: (value) {
@@ -1567,5 +1567,42 @@ class _ClientTextField extends StatelessWidget {
       keyboardType: keyboardType,
       decoration: InputDecoration(labelText: label),
     );
+  }
+}
+
+String _normalizedClientSegment(String? segment) {
+  switch ((segment ?? '').trim().toLowerCase()) {
+    case 'vip':
+      return 'vip';
+    case 'lead':
+      return 'lead';
+    case 'blocked':
+      return 'blocked';
+    default:
+      return 'regular';
+  }
+}
+
+String _clientSegmentLabel(String? segment) {
+  switch (_normalizedClientSegment(segment)) {
+    case 'vip':
+      return 'VIP';
+    case 'lead':
+      return 'Лид';
+    case 'blocked':
+      return 'Заблокирован';
+    default:
+      return 'Обычный';
+  }
+}
+
+StatusKind _clientSegmentStatusKind(String? segment) {
+  switch (_normalizedClientSegment(segment)) {
+    case 'vip':
+      return StatusKind.warning;
+    case 'blocked':
+      return StatusKind.error;
+    default:
+      return StatusKind.neutral;
   }
 }

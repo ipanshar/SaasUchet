@@ -905,7 +905,7 @@ _Client _clientFromJson(Map<String, dynamic> json) => _Client(
       contact: json['contact'] as String? ?? '',
       phone: json['phone'] as String? ?? '',
       email: json['email'] as String? ?? '',
-      segment: json['segment'] as String? ?? 'Regular',
+      segment: (json['segment'] as String? ?? 'regular').trim(),
       totalSales: json['total_sales'] as int? ?? 0,
       debt: json['debt'] as int? ?? 0,
       receivable: json['receivable'] as int? ?? 0,
