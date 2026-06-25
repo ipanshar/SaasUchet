@@ -4755,7 +4755,7 @@ func nullUUID(value string) any {
 }
 
 func formatMoneyValue(value int) string {
-	return fmt.Sprintf("₸ %s", withThousands(value))
+	return fmt.Sprintf("%s ₸", withThousands(value))
 }
 
 func formatSignedMoneyValue(value int) string {
@@ -4763,7 +4763,7 @@ func formatSignedMoneyValue(value int) string {
 	if value > 0 {
 		sign = "+"
 	}
-	return fmt.Sprintf("%s₸ %s", sign, withThousands(absInt(value)))
+	return fmt.Sprintf("%s%s ₸", sign, withThousands(absInt(value)))
 }
 
 func withThousands(value int) string {

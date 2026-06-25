@@ -913,7 +913,7 @@ class _DashboardData {
 
   factory _DashboardData.fromJson(Map<String, dynamic> json) {
     return _DashboardData(
-      monthlyRevenue: json['monthly_revenue'] as String? ?? '₸ 0',
+      monthlyRevenue: json['monthly_revenue'] as String? ?? '0 ₸',
       revenueChange: json['revenue_change'] as String? ?? '+0%',
       kpis: (json['kpis'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
@@ -925,7 +925,7 @@ class _DashboardData {
           .toList(growable: false),
       heroLabel: json['hero_label'] as String? ?? 'Общая выручка за месяц',
       heroValue: json['hero_value'] as String? ??
-          (json['monthly_revenue'] as String? ?? '₸ 0'),
+          (json['monthly_revenue'] as String? ?? '0 ₸'),
       heroChange: json['hero_change'] as String? ??
           '${json['revenue_change'] as String? ?? '+0%'} vs прошлый месяц',
       heroChangeTone: json['hero_change_tone'] as String? ?? 'success',
@@ -1499,7 +1499,7 @@ String formatMoneyAmount(num value) {
   final fraction = absoluteCents % 100;
   final fractionText =
       fraction == 0 ? '' : ',${fraction.toString().padLeft(2, '0')}';
-  return '$sign₸ ${_formatMoneyDigits(whole)}$fractionText';
+  return '$sign${_formatMoneyDigits(whole)}$fractionText ₸';
 }
 
 String _formatMoneyDigits(int value) {
