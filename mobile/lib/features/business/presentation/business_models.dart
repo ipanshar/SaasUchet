@@ -407,6 +407,67 @@ class _FinancialSummary {
   final int salaryPaid;
 }
 
+class _StatementEntry {
+  const _StatementEntry({
+    required this.date,
+    required this.documentNo,
+    required this.kind,
+    required this.debit,
+    required this.credit,
+    required this.balance,
+  });
+
+  final String date;
+  final String documentNo;
+  final String kind;
+  final int debit;
+  final int credit;
+  final int balance;
+
+  String get kindLabel {
+    switch (kind) {
+      case 'sale_issue':
+        return 'Продажа';
+      case 'purchase_receipt':
+        return 'Закупка';
+      case 'return_in':
+        return 'Возврат от контрагента';
+      case 'return_out':
+        return 'Возврат контрагенту';
+      case 'payment_in':
+        return 'Оплата получена';
+      case 'payment_out':
+        return 'Оплата выдана';
+      default:
+        return kind;
+    }
+  }
+}
+
+class _CounterpartyStatement {
+  const _CounterpartyStatement({
+    required this.clientId,
+    required this.clientName,
+    required this.from,
+    required this.to,
+    required this.openingBalance,
+    required this.closingBalance,
+    required this.totalDebit,
+    required this.totalCredit,
+    required this.entries,
+  });
+
+  final String clientId;
+  final String clientName;
+  final String from;
+  final String to;
+  final int openingBalance;
+  final int closingBalance;
+  final int totalDebit;
+  final int totalCredit;
+  final List<_StatementEntry> entries;
+}
+
 class _WarehouseMovement {
   const _WarehouseMovement({
     required this.id,
@@ -1181,6 +1242,33 @@ _FinancialSummary _financialSummaryFromJson(Map<String, dynamic> json) =>
       salesTotal: json['sales_total'] as int? ?? 0,
       salaryAccrued: json['salary_accrued'] as int? ?? 0,
       salaryPaid: json['salary_paid'] as int? ?? 0,
+    );
+
+_StatementEntry _statementEntryFromJson(Map<String, dynamic> json) =>
+    _StatementEntry(
+      date: json['date'] as String? ?? '',
+      documentNo: json['document_no'] as String? ?? '',
+      kind: json['kind'] as String? ?? '',
+      debit: json['debit'] as int? ?? 0,
+      credit: json['credit'] as int? ?? 0,
+      balance: json['balance'] as int? ?? 0,
+    );
+
+_CounterpartyStatement _counterpartyStatementFromJson(
+        Map<String, dynamic> json) =>
+    _CounterpartyStatement(
+      clientId: json['client_id'] as String? ?? '',
+      clientName: json['client_name'] as String? ?? '',
+      from: json['from'] as String? ?? '',
+      to: json['to'] as String? ?? '',
+      openingBalance: json['opening_balance'] as int? ?? 0,
+      closingBalance: json['closing_balance'] as int? ?? 0,
+      totalDebit: json['total_debit'] as int? ?? 0,
+      totalCredit: json['total_credit'] as int? ?? 0,
+      entries: (json['entries'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_statementEntryFromJson)
+          .toList(growable: false),
     );
 
 _WarehouseMovement _warehouseMovementFromJson(Map<String, dynamic> json) =>

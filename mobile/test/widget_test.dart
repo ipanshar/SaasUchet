@@ -513,6 +513,26 @@ class _FakeBusinessGateway extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> fetchCounterpartyStatement({
+    required String accessToken,
+    required String clientId,
+    required String from,
+    required String to,
+  }) async {
+    return {
+      'client_id': clientId,
+      'client_name': 'Иван Петров',
+      'from': from,
+      'to': to,
+      'opening_balance': 0,
+      'closing_balance': 0,
+      'total_debit': 0,
+      'total_credit': 0,
+      'entries': <Map<String, dynamic>>[],
+    };
+  }
+
+  @override
   Future<Map<String, dynamic>> createInventoryDocument({
     required String accessToken,
     required Map<String, dynamic> payload,

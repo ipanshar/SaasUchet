@@ -249,6 +249,24 @@ class _ReportsScreenState extends State<_ReportsScreen> {
                 );
               },
             ),
+            const SizedBox(height: 10),
+            _ReportLinkCard(
+              icon: Icons.handshake_rounded,
+              title: 'Акт сверки с контрагентом',
+              subtitle: 'Все движения по контрагенту за период · PDF / Excel',
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => _CounterpartyReportScreen(
+                      accessToken: widget.accessToken,
+                      businessGateway: widget.businessGateway,
+                      companyName: widget.overview.companyName,
+                      clients: widget.overview.clients,
+                    ),
+                  ),
+                );
+              },
+            ),
             const SizedBox(height: 18),
             _ReportSection(
               title: 'Торговля',

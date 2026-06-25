@@ -41,6 +41,7 @@ part 'reports_screen.dart';
 part 'stock_report_screen.dart';
 part 'turnover_report_screen.dart';
 part 'financial_report_screen.dart';
+part 'counterparty_report_screen.dart';
 part 'taxes_screen.dart';
 part 'business_widgets.dart';
 part 'business_models.dart';

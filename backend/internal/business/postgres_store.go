@@ -796,6 +796,137 @@ func (s *PostgresStore) ListWarehouseTurnover(user auth.User, warehouseID string
 	return items, rows.Err()
 }
 
+func (s *PostgresStore) CounterpartyStatement(user auth.User, clientID string, from string, to string) (CounterpartyStatement, error) {
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	clientID = strings.TrimSpace(clientID)
+	if _, err := time.Parse("2006-01-02", from); err != nil {
+		return CounterpartyStatement{}, fmt.Errorf("%w: invalid from date", ErrValidation)
+	}
+	if _, err := time.Parse("2006-01-02", to); err != nil {
+		return CounterpartyStatement{}, fmt.Errorf("%w: invalid to date", ErrValidation)
+	}
+
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return CounterpartyStatement{}, err
+	}
+
+	statement := CounterpartyStatement{ClientID: clientID, From: from, To: to}
+
+	// Контрагент и проверка принадлежности компании.
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT name FROM clients WHERE id = $1::uuid AND company_id = $2::uuid`,
+		clientID,
+		companyID,
+	).Scan(&statement.ClientName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CounterpartyStatement{}, fmt.Errorf("%w: client not found", ErrValidation)
+		}
+		return CounterpartyStatement{}, err
+	}
+
+	// Сальдо на начало периода (знак: + контрагент должен нам, − мы должны).
+	var opening float64
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    COALESCE((SELECT SUM(CASE
+		                WHEN d.document_type IN ('sale_issue','return_out') THEN l.line_total
+		                WHEN d.document_type IN ('purchase_receipt','return_in') THEN -l.line_total
+		                ELSE 0 END)
+		       FROM inventory_documents d
+		       JOIN inventory_document_lines l ON l.document_id = d.id
+		       WHERE d.company_id = $1::uuid AND d.client_id = $2::uuid AND d.status = 'posted'
+		         AND d.document_date < $3::date), 0)
+		    +
+		    COALESCE((SELECT SUM(CASE
+		                WHEN movement_direction = 'expense' THEN amount
+		                WHEN movement_direction = 'income' THEN -amount
+		                ELSE 0 END)
+		       FROM money_movements
+		       WHERE company_id = $1::uuid AND client_id = $2::uuid
+		         AND movement_direction IN ('income','expense') AND happened_at < $3::date), 0)`,
+		companyID,
+		clientID,
+		from,
+	).Scan(&opening); err != nil {
+		return CounterpartyStatement{}, err
+	}
+	statement.OpeningBalance = int(opening)
+
+	// Движения за период (товарные + денежные), отсортированы по дате.
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT t.date, t.document_no, t.kind, t.delta FROM (
+		    SELECT d.document_date::text AS date, d.document_no AS document_no, d.document_type AS kind,
+		           CASE WHEN d.document_type IN ('sale_issue','return_out') THEN SUM(l.line_total)
+		                ELSE -SUM(l.line_total) END AS delta
+		     FROM inventory_documents d
+		     JOIN inventory_document_lines l ON l.document_id = d.id
+		     WHERE d.company_id = $1::uuid AND d.client_id = $2::uuid AND d.status = 'posted'
+		       AND d.document_type IN ('sale_issue','purchase_receipt','return_in','return_out')
+		       AND d.document_date >= $3::date AND d.document_date < ($4::date + INTERVAL '1 day')
+		     GROUP BY d.id, d.document_date, d.document_no, d.document_type
+		    UNION ALL
+		    SELECT mm.happened_at::date::text AS date, COALESCE(md.document_no,'') AS document_no,
+		           CASE WHEN mm.movement_direction = 'income' THEN 'payment_in' ELSE 'payment_out' END AS kind,
+		           CASE WHEN mm.movement_direction = 'expense' THEN mm.amount ELSE -mm.amount END AS delta
+		     FROM money_movements mm
+		     LEFT JOIN money_documents md ON md.id = mm.document_id
+		     WHERE mm.company_id = $1::uuid AND mm.client_id = $2::uuid
+		       AND mm.movement_direction IN ('income','expense')
+		       AND mm.happened_at >= $3::date AND mm.happened_at < ($4::date + INTERVAL '1 day')
+		 ) t
+		 ORDER BY t.date ASC`,
+		companyID,
+		clientID,
+		from,
+		to,
+	)
+	if err != nil {
+		return CounterpartyStatement{}, err
+	}
+	defer rows.Close()
+
+	balance := statement.OpeningBalance
+	entries := make([]CounterpartyStatementEntry, 0)
+	for rows.Next() {
+		var date, documentNo, kind string
+		var delta float64
+		if err := rows.Scan(&date, &documentNo, &kind, &delta); err != nil {
+			return CounterpartyStatement{}, err
+		}
+		entry := CounterpartyStatementEntry{
+			Date:       date,
+			DocumentNo: documentNo,
+			Kind:       kind,
+		}
+		d := int(delta)
+		if d >= 0 {
+			entry.Debit = d
+		} else {
+			entry.Credit = -d
+		}
+		statement.TotalDebit += entry.Debit
+		statement.TotalCredit += entry.Credit
+		balance += d
+		entry.Balance = balance
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return CounterpartyStatement{}, err
+	}
+
+	statement.Entries = entries
+	statement.ClosingBalance = balance
+	return statement, nil
+}
+
 func (s *PostgresStore) FinancialSummary(user auth.User, from string, to string) (FinancialSummary, error) {
 	from = strings.TrimSpace(from)
 	to = strings.TrimSpace(to)

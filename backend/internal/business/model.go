@@ -246,6 +246,27 @@ type WarehouseStockItem struct {
 	Status      string `json:"status"`
 }
 
+type CounterpartyStatementEntry struct {
+	Date       string `json:"date"`
+	DocumentNo string `json:"document_no"`
+	Kind       string `json:"kind"`
+	Debit      int    `json:"debit"`
+	Credit     int    `json:"credit"`
+	Balance    int    `json:"balance"`
+}
+
+type CounterpartyStatement struct {
+	ClientID       string                       `json:"client_id"`
+	ClientName     string                       `json:"client_name"`
+	From           string                       `json:"from"`
+	To             string                       `json:"to"`
+	OpeningBalance int                          `json:"opening_balance"`
+	ClosingBalance int                          `json:"closing_balance"`
+	TotalDebit     int                          `json:"total_debit"`
+	TotalCredit    int                          `json:"total_credit"`
+	Entries        []CounterpartyStatementEntry `json:"entries"`
+}
+
 type FinancialSummary struct {
 	From string `json:"from"`
 	To   string `json:"to"`

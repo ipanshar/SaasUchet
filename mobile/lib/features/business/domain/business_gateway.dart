@@ -118,6 +118,13 @@ abstract class BusinessGateway {
     required String to,
   });
 
+  Future<Map<String, dynamic>> fetchCounterpartyStatement({
+    required String accessToken,
+    required String clientId,
+    required String from,
+    required String to,
+  });
+
   Future<Map<String, dynamic>> createInventoryDocument({
     required String accessToken,
     required Map<String, dynamic> payload,

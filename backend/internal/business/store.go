@@ -18,6 +18,7 @@ type Store interface {
 	ListWarehouseMovements(user auth.User, warehouseID string, search string) ([]WarehouseMovement, error)
 	ListWarehouseTurnover(user auth.User, warehouseID string, from string, to string) ([]WarehouseTurnoverItem, error)
 	FinancialSummary(user auth.User, from string, to string) (FinancialSummary, error)
+	CounterpartyStatement(user auth.User, clientID string, from string, to string) (CounterpartyStatement, error)
 	ListProducts(user auth.User) ([]Product, error)
 	CreateProduct(user auth.User, input CreateProductInput) (Product, error)
 	UpdateProduct(user auth.User, productID string, input CreateProductInput) (Product, error)
@@ -238,6 +239,10 @@ func (s *MemoryStore) ListWarehouseTurnover(user auth.User, warehouseID string, 
 
 func (s *MemoryStore) FinancialSummary(user auth.User, from string, to string) (FinancialSummary, error) {
 	return FinancialSummary{From: from, To: to}, nil
+}
+
+func (s *MemoryStore) CounterpartyStatement(user auth.User, clientID string, from string, to string) (CounterpartyStatement, error) {
+	return CounterpartyStatement{ClientID: clientID, From: from, To: to, Entries: []CounterpartyStatementEntry{}}, nil
 }
 
 func (s *MemoryStore) ListProducts(user auth.User) ([]Product, error) {

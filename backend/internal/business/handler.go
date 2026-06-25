@@ -176,8 +176,38 @@ func (h Handler) ClientByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/clients/"))
-	if clientID == "" || strings.Contains(clientID, "/") {
+	path := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/business/clients/"))
+	parts := strings.Split(path, "/")
+	clientID := strings.TrimSpace(parts[0])
+	if clientID == "" {
+		response.Error(w, http.StatusNotFound, "client not found")
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "statement" {
+		if r.Method != http.MethodGet {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if !h.requireActiveCompanyPermission(w, user, permCRMRead) {
+			return
+		}
+		from := strings.TrimSpace(r.URL.Query().Get("from"))
+		to := strings.TrimSpace(r.URL.Query().Get("to"))
+		statement, err := h.store.CounterpartyStatement(user, clientID, from, to)
+		if err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusBadRequest, "invalid statement request")
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, statement)
+		return
+	}
+
+	if len(parts) != 1 {
 		response.Error(w, http.StatusNotFound, "client not found")
 		return
 	}
