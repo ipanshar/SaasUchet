@@ -234,6 +234,7 @@ func (s *PostgresStore) employeeStatementByID(ctx context.Context, companyID str
 	entries := make([]EmployeeStatementEntry, 0)
 	for rows.Next() {
 		var e EmployeeStatementEntry
+		var base, piece, bonus, overtime, vacation, deductions, gross, net float64
 		if err := rows.Scan(
 			&e.PeriodYear,
 			&e.PeriodMonth,
@@ -241,19 +242,27 @@ func (s *PostgresStore) employeeStatementByID(ctx context.Context, companyID str
 			&e.Status,
 			&e.DaysWorked,
 			&e.HoursWorked,
-			&e.BaseAmount,
-			&e.PieceAmount,
-			&e.BonusAmount,
-			&e.OvertimeAmount,
-			&e.VacationAmount,
-			&e.Deductions,
-			&e.GrossAmount,
-			&e.NetAmount,
+			&base,
+			&piece,
+			&bonus,
+			&overtime,
+			&vacation,
+			&deductions,
+			&gross,
+			&net,
 			&e.IsPaid,
 			&e.PaidAt,
 		); err != nil {
 			return EmployeeStatement{}, err
 		}
+		e.BaseAmount = int(base)
+		e.PieceAmount = int(piece)
+		e.BonusAmount = int(bonus)
+		e.OvertimeAmount = int(overtime)
+		e.VacationAmount = int(vacation)
+		e.Deductions = int(deductions)
+		e.GrossAmount = int(gross)
+		e.NetAmount = int(net)
 		statement.TotalBase += e.BaseAmount
 		statement.TotalPiece += e.PieceAmount
 		statement.TotalBonus += e.BonusAmount
