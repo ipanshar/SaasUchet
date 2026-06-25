@@ -407,6 +407,44 @@ class _FinancialSummary {
   final int salaryPaid;
 }
 
+class _CompanyBalanceWeek {
+  const _CompanyBalanceWeek({
+    required this.weekStart,
+    required this.weekEnd,
+    required this.netBalance,
+  });
+
+  final String weekStart;
+  final String weekEnd;
+  final int netBalance;
+}
+
+class _CompanyBalanceSummary {
+  const _CompanyBalanceSummary({
+    required this.asOf,
+    required this.assetsTotal,
+    required this.liabilitiesTotal,
+    required this.netBalance,
+    required this.cash,
+    required this.inventory,
+    required this.receivable,
+    required this.payable,
+    required this.salaryDue,
+    required this.weeks,
+  });
+
+  final String asOf;
+  final int assetsTotal;
+  final int liabilitiesTotal;
+  final int netBalance;
+  final int cash;
+  final int inventory;
+  final int receivable;
+  final int payable;
+  final int salaryDue;
+  final List<_CompanyBalanceWeek> weeks;
+}
+
 class _StatementEntry {
   const _StatementEntry({
     required this.date,
@@ -1287,6 +1325,31 @@ _FinancialSummary _financialSummaryFromJson(Map<String, dynamic> json) =>
       salesTotal: json['sales_total'] as int? ?? 0,
       salaryAccrued: json['salary_accrued'] as int? ?? 0,
       salaryPaid: json['salary_paid'] as int? ?? 0,
+    );
+
+_CompanyBalanceWeek _companyBalanceWeekFromJson(Map<String, dynamic> json) =>
+    _CompanyBalanceWeek(
+      weekStart: json['week_start'] as String? ?? '',
+      weekEnd: json['week_end'] as String? ?? '',
+      netBalance: json['net_balance'] as int? ?? 0,
+    );
+
+_CompanyBalanceSummary _companyBalanceSummaryFromJson(
+        Map<String, dynamic> json) =>
+    _CompanyBalanceSummary(
+      asOf: json['as_of'] as String? ?? '',
+      assetsTotal: json['assets_total'] as int? ?? 0,
+      liabilitiesTotal: json['liabilities_total'] as int? ?? 0,
+      netBalance: json['net_balance'] as int? ?? 0,
+      cash: json['cash'] as int? ?? 0,
+      inventory: json['inventory'] as int? ?? 0,
+      receivable: json['receivable'] as int? ?? 0,
+      payable: json['payable'] as int? ?? 0,
+      salaryDue: json['salary_due'] as int? ?? 0,
+      weeks: (json['weeks'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_companyBalanceWeekFromJson)
+          .toList(growable: false),
     );
 
 _StatementEntry _statementEntryFromJson(Map<String, dynamic> json) =>

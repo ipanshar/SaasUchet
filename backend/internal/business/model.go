@@ -294,6 +294,25 @@ type FinancialSummary struct {
 	SalaryPaid    int `json:"salary_paid"`
 }
 
+type CompanyBalanceWeek struct {
+	WeekStart  string `json:"week_start"`
+	WeekEnd    string `json:"week_end"`
+	NetBalance int    `json:"net_balance"`
+}
+
+type CompanyBalanceSummary struct {
+	AsOf             string               `json:"as_of"`
+	AssetsTotal      int                  `json:"assets_total"`
+	LiabilitiesTotal int                  `json:"liabilities_total"`
+	NetBalance       int                  `json:"net_balance"`
+	Cash             int                  `json:"cash"`
+	Inventory        int                  `json:"inventory"`
+	Receivable       int                  `json:"receivable"`
+	Payable          int                  `json:"payable"`
+	SalaryDue        int                  `json:"salary_due"`
+	Weeks            []CompanyBalanceWeek `json:"weeks"`
+}
+
 type WarehouseTurnoverItem struct {
 	ProductID   string `json:"product_id"`
 	ProductName string `json:"product_name"`

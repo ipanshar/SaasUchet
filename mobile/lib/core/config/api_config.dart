@@ -66,6 +66,9 @@ class ApiConfig {
   static Uri get businessFinancialSummaryUri =>
       Uri.parse('$baseUrl/api/v1/business/financial-summary');
 
+  static Uri get businessCompanyBalanceUri =>
+      Uri.parse('$baseUrl/api/v1/business/company-balance');
+
   static Uri businessClientStatementUri(String clientId) =>
       Uri.parse('$baseUrl/api/v1/business/clients/$clientId/statement');
 

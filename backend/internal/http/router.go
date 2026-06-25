@@ -50,6 +50,7 @@ func NewRouter(cfg config.Config, authHandler auth.Handler, businessHandler busi
 	mux.HandleFunc("/api/v1/business/money-documents", businessHandler.MoneyDocuments)
 	mux.HandleFunc("/api/v1/business/money-documents/", businessHandler.MoneyDocumentByID)
 	mux.HandleFunc("/api/v1/business/financial-summary", businessHandler.FinancialSummary)
+	mux.HandleFunc("/api/v1/business/company-balance", businessHandler.CompanyBalance)
 	mux.HandleFunc("/api/v1/catalog/services", businessHandler.Services)
 	mux.HandleFunc("/api/v1/catalog/services/", businessHandler.ServiceByID)
 	mux.HandleFunc("/api/v1/production/recipes", businessHandler.Recipes)

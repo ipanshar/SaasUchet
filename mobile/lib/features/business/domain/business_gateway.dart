@@ -118,6 +118,10 @@ abstract class BusinessGateway {
     required String to,
   });
 
+  Future<Map<String, dynamic>> fetchCompanyBalance({
+    required String accessToken,
+  });
+
   Future<Map<String, dynamic>> fetchCounterpartyStatement({
     required String accessToken,
     required String clientId,

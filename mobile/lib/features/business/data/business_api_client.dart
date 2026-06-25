@@ -536,6 +536,32 @@ class BusinessApiClient extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> fetchCompanyBalance({
+    required String accessToken,
+  }) async {
+    final response = await _client
+        .get(
+          ApiConfig.businessCompanyBalanceUri,
+          headers: _headers(accessToken),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) {
+      throw _buildApiException(response);
+    }
+
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
+  }
+
+  @override
   Future<Map<String, dynamic>> fetchCounterpartyStatement({
     required String accessToken,
     required String clientId,

@@ -1082,6 +1082,195 @@ func (s *PostgresStore) FinancialSummary(user auth.User, from string, to string)
 	return summary, nil
 }
 
+func (s *PostgresStore) CompanyBalance(user auth.User) (CompanyBalanceSummary, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return CompanyBalanceSummary{}, err
+	}
+
+	now := time.Now()
+	current, err := s.companyBalanceComponentsAt(ctx, companyID, now, now)
+	if err != nil {
+		return CompanyBalanceSummary{}, err
+	}
+
+	weeklyBalances := make([]int, 0, 8)
+	for _, window := range companyBalanceWeekWindows(now) {
+		components, err := s.companyBalanceComponentsAt(ctx, companyID, window.cutoffAt, window.endDate)
+		if err != nil {
+			return CompanyBalanceSummary{}, err
+		}
+		weeklyBalances = append(weeklyBalances, components.netBalance())
+	}
+
+	return CompanyBalanceSummary{
+		AsOf:             now.Format(time.RFC3339),
+		AssetsTotal:      current.assetsTotal(),
+		LiabilitiesTotal: current.liabilitiesTotal(),
+		NetBalance:       current.netBalance(),
+		Cash:             current.cash,
+		Inventory:        current.inventory,
+		Receivable:       current.receivable,
+		Payable:          current.payable,
+		SalaryDue:        current.salaryDue,
+		Weeks:            companyBalanceWeeks(now, weeklyBalances),
+	}, nil
+}
+
+type companyBalanceComponents struct {
+	cash       int
+	inventory  int
+	receivable int
+	payable    int
+	salaryDue  int
+}
+
+func (c companyBalanceComponents) assetsTotal() int {
+	return c.cash + c.inventory + c.receivable
+}
+
+func (c companyBalanceComponents) liabilitiesTotal() int {
+	return c.payable + c.salaryDue
+}
+
+func (c companyBalanceComponents) netBalance() int {
+	return c.assetsTotal() - c.liabilitiesTotal()
+}
+
+func (s *PostgresStore) companyBalanceComponentsAt(ctx context.Context, companyID string, cutoffAt time.Time, cutoffDate time.Time) (companyBalanceComponents, error) {
+	var cash, inventory, receivable, payable, salaryDue float64
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    (SELECT COALESCE(SUM(COALESCE(cab.balance_amount, ca.opening_balance)), 0)
+		       FROM cash_accounts ca
+		       LEFT JOIN cash_account_balances cab ON cab.account_id = ca.id
+		       WHERE ca.company_id = $1::uuid AND ca.archived_at IS NULL)
+		    - (SELECT COALESCE(SUM(mm.signed_amount), 0)
+		         FROM money_movements mm
+		         WHERE mm.company_id = $1::uuid AND mm.happened_at >= $2::timestamptz),
+		    (SELECT COALESCE(SUM(ib.quantity_on_hand * ib.average_cost), 0)
+		       FROM inventory_balances ib
+		       WHERE ib.company_id = $1::uuid)
+		    - (SELECT COALESCE(SUM(im.quantity_delta * im.unit_cost), 0)
+		         FROM inventory_movements im
+		         WHERE im.company_id = $1::uuid AND im.happened_at >= $2::timestamptz),
+		    (SELECT COALESCE(SUM(GREATEST(debt.total_amount - debt.paid_amount, 0)), 0)
+		       FROM (
+		         SELECT
+		           d.id,
+		           COALESCE((SELECT SUM(l.amount) FROM money_document_lines l WHERE l.document_id = d.id), 0) AS total_amount,
+		           COALESCE((SELECT SUM(mm.amount) FROM money_movements mm WHERE mm.document_id = d.id AND mm.happened_at < $2::timestamptz), 0) AS paid_amount
+		         FROM money_documents d
+		         WHERE d.company_id = $1::uuid
+		           AND d.document_type = 'sale_receivable'
+		           AND d.status <> 'cancelled'
+		           AND d.operation_date <= $3::date
+		       ) debt),
+		    (SELECT COALESCE(SUM(GREATEST(debt.total_amount - debt.paid_amount, 0)), 0)
+		       FROM (
+		         SELECT
+		           d.id,
+		           COALESCE((SELECT SUM(l.amount) FROM money_document_lines l WHERE l.document_id = d.id), 0) AS total_amount,
+		           COALESCE((SELECT SUM(mm.amount) FROM money_movements mm WHERE mm.document_id = d.id AND mm.happened_at < $2::timestamptz), 0) AS paid_amount
+		         FROM money_documents d
+		         WHERE d.company_id = $1::uuid
+		           AND d.document_type = 'purchase_payable'
+		           AND d.status <> 'cancelled'
+		           AND d.operation_date <= $3::date
+		       ) debt),
+		    (SELECT COALESCE(SUM(e.net_amount), 0)
+		       FROM payroll_entries e
+		       JOIN payroll_periods p ON p.id = e.period_id
+		       WHERE p.company_id = $1::uuid
+		         AND p.status <> 'cancelled'
+		         AND e.net_amount > 0
+		         AND make_date(p.period_year, p.period_month, 1) <= $3::date
+		         AND NOT EXISTS (
+		           SELECT 1
+		           FROM money_movements mm
+		           JOIN money_documents md ON md.id = mm.document_id
+		           WHERE md.id = e.money_document_id
+		             AND md.document_type = 'salary'
+		             AND md.status <> 'cancelled'
+		             AND mm.happened_at < $2::timestamptz
+		         ))`,
+		companyID,
+		cutoffAt,
+		cutoffDate.Format("2006-01-02"),
+	).Scan(&cash, &inventory, &receivable, &payable, &salaryDue); err != nil {
+		return companyBalanceComponents{}, err
+	}
+
+	return companyBalanceComponents{
+		cash:       int(math.Round(cash)),
+		inventory:  int(math.Round(inventory)),
+		receivable: int(math.Round(receivable)),
+		payable:    int(math.Round(payable)),
+		salaryDue:  int(math.Round(salaryDue)),
+	}, nil
+}
+
+type companyBalanceWeekWindow struct {
+	startDate time.Time
+	endDate   time.Time
+	cutoffAt  time.Time
+}
+
+func companyBalanceWeekWindows(now time.Time) []companyBalanceWeekWindow {
+	currentWeekStart := isoWeekStart(now)
+	windows := make([]companyBalanceWeekWindow, 0, 8)
+	for i := 0; i < 8; i++ {
+		start := currentWeekStart.AddDate(0, 0, -7*(7-i))
+		exclusiveEnd := start.AddDate(0, 0, 7)
+		end := start.AddDate(0, 0, 6)
+		cutoff := exclusiveEnd
+		if exclusiveEnd.After(now) {
+			end = dateOnly(now)
+			cutoff = now
+		}
+		windows = append(windows, companyBalanceWeekWindow{
+			startDate: start,
+			endDate:   end,
+			cutoffAt:  cutoff,
+		})
+	}
+	return windows
+}
+
+func companyBalanceWeeks(now time.Time, balances []int) []CompanyBalanceWeek {
+	windows := companyBalanceWeekWindows(now)
+	weeks := make([]CompanyBalanceWeek, 0, len(windows))
+	for index, window := range windows {
+		netBalance := 0
+		if index < len(balances) {
+			netBalance = balances[index]
+		}
+		weeks = append(weeks, CompanyBalanceWeek{
+			WeekStart:  window.startDate.Format("2006-01-02"),
+			WeekEnd:    window.endDate.Format("2006-01-02"),
+			NetBalance: netBalance,
+		})
+	}
+	return weeks
+}
+
+func isoWeekStart(value time.Time) time.Time {
+	day := dateOnly(value)
+	weekday := int(day.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	return day.AddDate(0, 0, 1-weekday)
+}
+
+func dateOnly(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
+}
+
 // debtTurnover возвращает (opening, accrued, paid) по денежным документам заданного
 // типа: opening = начислено_до − погашено_до, accrued/paid — обороты за период.
 func (s *PostgresStore) debtTurnover(ctx context.Context, companyID string, docType string, from string, to string) (int, int, int, error) {

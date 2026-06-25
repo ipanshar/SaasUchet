@@ -18,6 +18,7 @@ type Store interface {
 	ListWarehouseMovements(user auth.User, warehouseID string, search string) ([]WarehouseMovement, error)
 	ListWarehouseTurnover(user auth.User, warehouseID string, from string, to string) ([]WarehouseTurnoverItem, error)
 	FinancialSummary(user auth.User, from string, to string) (FinancialSummary, error)
+	CompanyBalance(user auth.User) (CompanyBalanceSummary, error)
 	CounterpartyStatement(user auth.User, clientID string, from string, to string) (CounterpartyStatement, error)
 	EmployeeStatement(user auth.User, employeeID string, from string, to string) (EmployeeStatement, error)
 	CurrentEmployeeStatement(user auth.User, from string, to string) (EmployeeStatement, error)
@@ -243,6 +244,14 @@ func (s *MemoryStore) ListWarehouseTurnover(user auth.User, warehouseID string, 
 
 func (s *MemoryStore) FinancialSummary(user auth.User, from string, to string) (FinancialSummary, error) {
 	return FinancialSummary{From: from, To: to}, nil
+}
+
+func (s *MemoryStore) CompanyBalance(user auth.User) (CompanyBalanceSummary, error) {
+	now := time.Now()
+	return CompanyBalanceSummary{
+		AsOf:  now.Format(time.RFC3339),
+		Weeks: companyBalanceWeeks(now, nil),
+	}, nil
 }
 
 func (s *MemoryStore) CounterpartyStatement(user auth.User, clientID string, from string, to string) (CounterpartyStatement, error) {
