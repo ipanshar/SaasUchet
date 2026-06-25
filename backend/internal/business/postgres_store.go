@@ -4773,7 +4773,7 @@ func withThousands(value int) string {
 		result = append(result, digits[index])
 		remaining := len(digits) - index - 1
 		if remaining > 0 && remaining%3 == 0 {
-			result = append(result, ',')
+			result = append(result, ' ')
 		}
 	}
 	return string(result)

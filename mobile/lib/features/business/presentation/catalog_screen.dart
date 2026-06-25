@@ -592,7 +592,7 @@ class _ServiceTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '₸ ${service.price.toStringAsFixed(0)}',
+                    formatMoneyAmount(service.price),
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       color: Color(0xFF00A86B),
@@ -600,7 +600,7 @@ class _ServiceTile extends StatelessWidget {
                   ),
                   if (service.estimatedCost > 0)
                     Text(
-                      'с/с ₸ ${service.estimatedCost.toStringAsFixed(0)}',
+                      'с/с ${formatMoneyAmount(service.estimatedCost)}',
                       style: const TextStyle(
                         fontSize: 11,
                         color: Color(0xFF94A3B8),
@@ -654,7 +654,7 @@ class _ServiceTile extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '×${m.quantity % 1 == 0 ? m.quantity.toInt() : m.quantity}  ₸${m.cost.toStringAsFixed(0)}',
+                          '×${m.quantity % 1 == 0 ? m.quantity.toInt() : m.quantity}  ${formatMoneyAmount(m.cost)}',
                           style: const TextStyle(
                             fontSize: 12,
                             color: Color(0xFF94A3B8),
@@ -856,7 +856,12 @@ class _CreateServiceSheetState extends State<_CreateServiceSheet> {
                               ),
                             ),
                             Text(
-                              '₸ ${_materials.fold(0.0, (s, m) => s + m.cost * m.quantity).toStringAsFixed(0)}',
+                              formatMoneyAmount(
+                                _materials.fold(
+                                  0.0,
+                                  (s, m) => s + m.cost * m.quantity,
+                                ),
+                              ),
                               style: const TextStyle(
                                 fontWeight: FontWeight.w700,
                                 color: Color(0xFF0F172A),

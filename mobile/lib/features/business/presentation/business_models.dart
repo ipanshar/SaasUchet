@@ -1488,17 +1488,31 @@ Color hexColor(String hex) {
 }
 
 String formatMoney(int value) {
-  final sign = value < 0 ? '-' : '';
-  final digits = value.abs().toString();
+  return formatMoneyAmount(value);
+}
+
+String formatMoneyAmount(num value) {
+  final cents = (value * 100).round();
+  final sign = cents < 0 ? '-' : '';
+  final absoluteCents = cents.abs();
+  final whole = absoluteCents ~/ 100;
+  final fraction = absoluteCents % 100;
+  final fractionText =
+      fraction == 0 ? '' : ',${fraction.toString().padLeft(2, '0')}';
+  return '$sign₸ ${_formatMoneyDigits(whole)}$fractionText';
+}
+
+String _formatMoneyDigits(int value) {
+  final digits = value.toString();
   final buffer = StringBuffer();
   for (var i = 0; i < digits.length; i++) {
     final reverseIndex = digits.length - i;
     buffer.write(digits[i]);
     if (reverseIndex > 1 && reverseIndex % 3 == 1) {
-      buffer.write(',');
+      buffer.write(' ');
     }
   }
-  return '$sign₸ ${buffer.toString()}';
+  return buffer.toString();
 }
 
 String initialsOf(String value) {
