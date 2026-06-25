@@ -660,6 +660,34 @@ func (h Handler) WarehouseByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h Handler) FinancialSummary(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permFinanceRead) {
+		return
+	}
+
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	summary, err := h.store.FinancialSummary(user, from, to)
+	if err != nil {
+		if errors.Is(err, ErrValidation) {
+			response.Error(w, http.StatusBadRequest, "invalid period")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	response.JSON(w, http.StatusOK, summary)
+}
+
 func (h Handler) MoneyDocuments(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.authorize(w, r)
 	if !ok {

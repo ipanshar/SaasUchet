@@ -112,6 +112,12 @@ abstract class BusinessGateway {
     required String to,
   });
 
+  Future<Map<String, dynamic>> fetchFinancialSummary({
+    required String accessToken,
+    required String from,
+    required String to,
+  });
+
   Future<Map<String, dynamic>> createInventoryDocument({
     required String accessToken,
     required Map<String, dynamic> payload,

@@ -232,6 +232,23 @@ class _ReportsScreenState extends State<_ReportsScreen> {
                 );
               },
             ),
+            const SizedBox(height: 10),
+            _ReportLinkCard(
+              icon: Icons.account_balance_rounded,
+              title: 'Финансовая сводка',
+              subtitle: 'Деньги, долги, товары, зарплата за период · PDF / Excel',
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => _FinancialReportScreen(
+                      accessToken: widget.accessToken,
+                      businessGateway: widget.businessGateway,
+                      companyName: widget.overview.companyName,
+                    ),
+                  ),
+                );
+              },
+            ),
             const SizedBox(height: 18),
             _ReportSection(
               title: 'Торговля',

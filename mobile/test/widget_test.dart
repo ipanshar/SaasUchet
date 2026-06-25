@@ -485,6 +485,34 @@ class _FakeBusinessGateway extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> fetchFinancialSummary({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    return {
+      'from': from,
+      'to': to,
+      'money_opening': 0,
+      'money_income': 0,
+      'money_expense': 0,
+      'money_closing': 0,
+      'receivable_opening': 0,
+      'receivable_accrued': 0,
+      'receivable_paid': 0,
+      'receivable_closing': 0,
+      'payable_opening': 0,
+      'payable_accrued': 0,
+      'payable_paid': 0,
+      'payable_closing': 0,
+      'purchases_total': 0,
+      'sales_total': 0,
+      'salary_accrued': 0,
+      'salary_paid': 0,
+    };
+  }
+
+  @override
   Future<Map<String, dynamic>> createInventoryDocument({
     required String accessToken,
     required Map<String, dynamic> payload,

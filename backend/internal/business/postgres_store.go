@@ -796,6 +796,190 @@ func (s *PostgresStore) ListWarehouseTurnover(user auth.User, warehouseID string
 	return items, rows.Err()
 }
 
+func (s *PostgresStore) FinancialSummary(user auth.User, from string, to string) (FinancialSummary, error) {
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	if _, err := time.Parse("2006-01-02", from); err != nil {
+		return FinancialSummary{}, fmt.Errorf("%w: invalid from date", ErrValidation)
+	}
+	if _, err := time.Parse("2006-01-02", to); err != nil {
+		return FinancialSummary{}, fmt.Errorf("%w: invalid to date", ErrValidation)
+	}
+
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return FinancialSummary{}, err
+	}
+
+	summary := FinancialSummary{From: from, To: to}
+
+	// Деньги: остаток выводим от текущего баланса назад по движениям.
+	var currentTotal, signedFrom, signedAfter, income, expense float64
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    (SELECT COALESCE(SUM(COALESCE(cab.balance_amount, ca.opening_balance)), 0)
+		       FROM cash_accounts ca
+		       LEFT JOIN cash_account_balances cab ON cab.account_id = ca.id
+		       WHERE ca.company_id = $1::uuid AND ca.archived_at IS NULL),
+		    (SELECT COALESCE(SUM(CASE
+		                WHEN movement_direction IN ('income','transfer_in') THEN amount
+		                WHEN movement_direction IN ('expense','transfer_out') THEN -amount
+		                ELSE 0 END), 0)
+		       FROM money_movements
+		       WHERE company_id = $1::uuid AND happened_at >= $2::date),
+		    (SELECT COALESCE(SUM(CASE
+		                WHEN movement_direction IN ('income','transfer_in') THEN amount
+		                WHEN movement_direction IN ('expense','transfer_out') THEN -amount
+		                ELSE 0 END), 0)
+		       FROM money_movements
+		       WHERE company_id = $1::uuid AND happened_at >= ($3::date + INTERVAL '1 day')),
+		    (SELECT COALESCE(SUM(mm.amount), 0)
+		       FROM money_movements mm
+		       JOIN money_documents md ON md.id = mm.document_id
+		       WHERE mm.company_id = $1::uuid AND mm.movement_direction = 'income'
+		         AND md.document_type <> 'opening'
+		         AND mm.happened_at >= $2::date AND mm.happened_at < ($3::date + INTERVAL '1 day')),
+		    (SELECT COALESCE(SUM(mm.amount), 0)
+		       FROM money_movements mm
+		       JOIN money_documents md ON md.id = mm.document_id
+		       WHERE mm.company_id = $1::uuid AND mm.movement_direction = 'expense'
+		         AND md.document_type <> 'opening'
+		         AND mm.happened_at >= $2::date AND mm.happened_at < ($3::date + INTERVAL '1 day'))`,
+		companyID,
+		from,
+		to,
+	).Scan(&currentTotal, &signedFrom, &signedAfter, &income, &expense); err != nil {
+		return FinancialSummary{}, err
+	}
+	summary.MoneyOpening = int(currentTotal - signedFrom)
+	summary.MoneyClosing = int(currentTotal - signedAfter)
+	summary.MoneyIncome = int(income)
+	summary.MoneyExpense = int(expense)
+
+	// Долги: дебиторка и кредиторка с оборотами.
+	recOpening, recAccrued, recPaid, err := s.debtTurnover(ctx, companyID, "sale_receivable", from, to)
+	if err != nil {
+		return FinancialSummary{}, err
+	}
+	summary.ReceivableOpening = recOpening
+	summary.ReceivableAccrued = recAccrued
+	summary.ReceivablePaid = recPaid
+	summary.ReceivableClosing = recOpening + recAccrued - recPaid
+
+	payOpening, payAccrued, payPaid, err := s.debtTurnover(ctx, companyID, "purchase_payable", from, to)
+	if err != nil {
+		return FinancialSummary{}, err
+	}
+	summary.PayableOpening = payOpening
+	summary.PayableAccrued = payAccrued
+	summary.PayablePaid = payPaid
+	summary.PayableClosing = payOpening + payAccrued - payPaid
+
+	// Товары за период (в деньгах).
+	goodsRows, err := s.db.QueryContext(
+		ctx,
+		`SELECT d.document_type, COALESCE(SUM(l.line_total), 0)
+		 FROM inventory_documents d
+		 JOIN inventory_document_lines l ON l.document_id = d.id
+		 WHERE d.company_id = $1::uuid
+		   AND d.status = 'posted'
+		   AND d.document_date >= $2::date
+		   AND d.document_date < ($3::date + INTERVAL '1 day')
+		   AND d.document_type IN ('purchase_receipt', 'sale_issue')
+		 GROUP BY d.document_type`,
+		companyID,
+		from,
+		to,
+	)
+	if err != nil {
+		return FinancialSummary{}, err
+	}
+	defer goodsRows.Close()
+	for goodsRows.Next() {
+		var docType string
+		var total float64
+		if err := goodsRows.Scan(&docType, &total); err != nil {
+			return FinancialSummary{}, err
+		}
+		switch docType {
+		case "purchase_receipt":
+			summary.PurchasesTotal = int(total)
+		case "sale_issue":
+			summary.SalesTotal = int(total)
+		}
+	}
+	if err := goodsRows.Err(); err != nil {
+		return FinancialSummary{}, err
+	}
+
+	// Зарплата за период.
+	var salaryAccrued, salaryPaid float64
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    COALESCE(SUM(e.net_amount), 0),
+		    COALESCE(SUM(e.net_amount) FILTER (WHERE p.status = 'paid'), 0)
+		 FROM payroll_periods p
+		 JOIN payroll_entries e ON e.period_id = p.id
+		 WHERE p.company_id = $1::uuid
+		   AND make_date(p.period_year, p.period_month, 1) >= date_trunc('month', $2::date)::date
+		   AND make_date(p.period_year, p.period_month, 1) <= $3::date`,
+		companyID,
+		from,
+		to,
+	).Scan(&salaryAccrued, &salaryPaid); err != nil {
+		return FinancialSummary{}, err
+	}
+	summary.SalaryAccrued = int(salaryAccrued)
+	summary.SalaryPaid = int(salaryPaid)
+
+	return summary, nil
+}
+
+// debtTurnover возвращает (opening, accrued, paid) по денежным документам заданного
+// типа: opening = начислено_до − погашено_до, accrued/paid — обороты за период.
+func (s *PostgresStore) debtTurnover(ctx context.Context, companyID string, docType string, from string, to string) (int, int, int, error) {
+	var accruedBefore, paidBefore, accruedPeriod, paidPeriod float64
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    COALESCE((SELECT SUM(l.amount)
+		       FROM money_document_lines l
+		       JOIN money_documents d ON d.id = l.document_id
+		       WHERE d.company_id = $1::uuid AND d.document_type = $2 AND d.status <> 'cancelled'
+		         AND d.operation_date < $3::date), 0),
+		    COALESCE((SELECT SUM(mm.amount)
+		       FROM money_movements mm
+		       JOIN money_documents d ON d.id = mm.document_id
+		       WHERE d.company_id = $1::uuid AND d.document_type = $2 AND d.status <> 'cancelled'
+		         AND mm.happened_at < $3::date), 0),
+		    COALESCE((SELECT SUM(l.amount)
+		       FROM money_document_lines l
+		       JOIN money_documents d ON d.id = l.document_id
+		       WHERE d.company_id = $1::uuid AND d.document_type = $2 AND d.status <> 'cancelled'
+		         AND d.operation_date >= $3::date AND d.operation_date <= $4::date), 0),
+		    COALESCE((SELECT SUM(mm.amount)
+		       FROM money_movements mm
+		       JOIN money_documents d ON d.id = mm.document_id
+		       WHERE d.company_id = $1::uuid AND d.document_type = $2 AND d.status <> 'cancelled'
+		         AND mm.happened_at >= $3::date AND mm.happened_at < ($4::date + INTERVAL '1 day')), 0)`,
+		companyID,
+		docType,
+		from,
+		to,
+	).Scan(&accruedBefore, &paidBefore, &accruedPeriod, &paidPeriod); err != nil {
+		return 0, 0, 0, err
+	}
+	opening := int(accruedBefore - paidBefore)
+	accrued := int(accruedPeriod)
+	paid := int(paidPeriod)
+	return opening, accrued, paid, nil
+}
+
 func (s *PostgresStore) ListWarehouseMovements(user auth.User, warehouseID string, search string) ([]WarehouseMovement, error) {
 	ctx, cancel := s.withTimeout()
 	defer cancel()

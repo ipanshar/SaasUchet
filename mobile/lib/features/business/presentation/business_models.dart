@@ -365,6 +365,48 @@ class _WarehouseTurnoverItem {
   final int closing;
 }
 
+class _FinancialSummary {
+  const _FinancialSummary({
+    required this.from,
+    required this.to,
+    required this.moneyOpening,
+    required this.moneyIncome,
+    required this.moneyExpense,
+    required this.moneyClosing,
+    required this.receivableOpening,
+    required this.receivableAccrued,
+    required this.receivablePaid,
+    required this.receivableClosing,
+    required this.payableOpening,
+    required this.payableAccrued,
+    required this.payablePaid,
+    required this.payableClosing,
+    required this.purchasesTotal,
+    required this.salesTotal,
+    required this.salaryAccrued,
+    required this.salaryPaid,
+  });
+
+  final String from;
+  final String to;
+  final int moneyOpening;
+  final int moneyIncome;
+  final int moneyExpense;
+  final int moneyClosing;
+  final int receivableOpening;
+  final int receivableAccrued;
+  final int receivablePaid;
+  final int receivableClosing;
+  final int payableOpening;
+  final int payableAccrued;
+  final int payablePaid;
+  final int payableClosing;
+  final int purchasesTotal;
+  final int salesTotal;
+  final int salaryAccrued;
+  final int salaryPaid;
+}
+
 class _WarehouseMovement {
   const _WarehouseMovement({
     required this.id,
@@ -1117,6 +1159,28 @@ _WarehouseTurnoverItem _warehouseTurnoverItemFromJson(
       receipts: json['receipts'] as int? ?? 0,
       issues: json['issues'] as int? ?? 0,
       closing: json['closing'] as int? ?? 0,
+    );
+
+_FinancialSummary _financialSummaryFromJson(Map<String, dynamic> json) =>
+    _FinancialSummary(
+      from: json['from'] as String? ?? '',
+      to: json['to'] as String? ?? '',
+      moneyOpening: json['money_opening'] as int? ?? 0,
+      moneyIncome: json['money_income'] as int? ?? 0,
+      moneyExpense: json['money_expense'] as int? ?? 0,
+      moneyClosing: json['money_closing'] as int? ?? 0,
+      receivableOpening: json['receivable_opening'] as int? ?? 0,
+      receivableAccrued: json['receivable_accrued'] as int? ?? 0,
+      receivablePaid: json['receivable_paid'] as int? ?? 0,
+      receivableClosing: json['receivable_closing'] as int? ?? 0,
+      payableOpening: json['payable_opening'] as int? ?? 0,
+      payableAccrued: json['payable_accrued'] as int? ?? 0,
+      payablePaid: json['payable_paid'] as int? ?? 0,
+      payableClosing: json['payable_closing'] as int? ?? 0,
+      purchasesTotal: json['purchases_total'] as int? ?? 0,
+      salesTotal: json['sales_total'] as int? ?? 0,
+      salaryAccrued: json['salary_accrued'] as int? ?? 0,
+      salaryPaid: json['salary_paid'] as int? ?? 0,
     );
 
 _WarehouseMovement _warehouseMovementFromJson(Map<String, dynamic> json) =>

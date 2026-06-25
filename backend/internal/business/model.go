@@ -246,6 +246,32 @@ type WarehouseStockItem struct {
 	Status      string `json:"status"`
 }
 
+type FinancialSummary struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+
+	MoneyOpening int `json:"money_opening"`
+	MoneyIncome  int `json:"money_income"`
+	MoneyExpense int `json:"money_expense"`
+	MoneyClosing int `json:"money_closing"`
+
+	ReceivableOpening int `json:"receivable_opening"`
+	ReceivableAccrued int `json:"receivable_accrued"`
+	ReceivablePaid    int `json:"receivable_paid"`
+	ReceivableClosing int `json:"receivable_closing"`
+
+	PayableOpening int `json:"payable_opening"`
+	PayableAccrued int `json:"payable_accrued"`
+	PayablePaid    int `json:"payable_paid"`
+	PayableClosing int `json:"payable_closing"`
+
+	PurchasesTotal int `json:"purchases_total"`
+	SalesTotal     int `json:"sales_total"`
+
+	SalaryAccrued int `json:"salary_accrued"`
+	SalaryPaid    int `json:"salary_paid"`
+}
+
 type WarehouseTurnoverItem struct {
 	ProductID   string `json:"product_id"`
 	ProductName string `json:"product_name"`

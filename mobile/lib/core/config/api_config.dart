@@ -63,6 +63,9 @@ class ApiConfig {
   static Uri businessWarehouseTurnoverUri(String warehouseId) =>
       Uri.parse('$baseUrl/api/v1/business/warehouses/$warehouseId/turnover');
 
+  static Uri get businessFinancialSummaryUri =>
+      Uri.parse('$baseUrl/api/v1/business/financial-summary');
+
   static Uri businessMoneyDocumentUri(String documentId) =>
       Uri.parse('$baseUrl/api/v1/business/money-documents/$documentId');
 
