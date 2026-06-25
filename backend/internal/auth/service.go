@@ -299,13 +299,20 @@ func normalizePhone(value string) (string, error) {
 	}
 
 	normalizedDigits := digits.String()
-	if len(normalizedDigits) < 10 || len(normalizedDigits) > 15 {
-		return "", newPublicError(ErrValidation, "phone must contain 10 to 15 digits")
+
+	switch {
+	case len(normalizedDigits) == 11 && normalizedDigits[0] == '8':
+		// Local trunk prefix 8 7XX... → international 7 7XX...
+		normalizedDigits = "7" + normalizedDigits[1:]
+	case len(normalizedDigits) == 10:
+		// Number without country code → prepend Kazakhstan country code.
+		normalizedDigits = "7" + normalizedDigits
 	}
 
-	// Convert local trunk prefix to international format for common 11-digit numbers.
-	if len(normalizedDigits) == 11 && normalizedDigits[0] == '8' {
-		normalizedDigits = "7" + normalizedDigits[1:]
+	// Kazakhstan numbers are +7 followed by 10 digits whose first digit is 7
+	// (all KZ operator and area codes start with 7).
+	if len(normalizedDigits) != 11 || normalizedDigits[0] != '7' || normalizedDigits[1] != '7' {
+		return "", newPublicError(ErrValidation, "phone must be a Kazakhstan number: +7 7XX XXX XX XX")
 	}
 
 	return "+" + normalizedDigits, nil

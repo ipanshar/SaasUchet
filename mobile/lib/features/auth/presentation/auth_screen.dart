@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:saas_uchet_mobile/core/network/api_exception.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_gateway.dart';
 import 'package:saas_uchet_mobile/features/auth/domain/auth_session.dart';
@@ -50,7 +51,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     await _runAuthAction(() async {
       final session = await widget.authGateway.login(
-        phone: _loginPhoneController.text.trim(),
+        phone: _phoneToE164(_loginPhoneController),
         password: _loginPasswordController.text,
       );
       widget.onAuthenticated(session);
@@ -65,7 +66,7 @@ class _AuthScreenState extends State<AuthScreen> {
     await _runAuthAction(() async {
       final session = await widget.authGateway.register(
         fullName: _registerFullNameController.text.trim(),
-        phone: _registerPhoneController.text.trim(),
+        phone: _phoneToE164(_registerPhoneController),
         password: _registerPasswordController.text,
       );
       widget.onAuthenticated(session);
@@ -232,12 +233,8 @@ class _AuthScreenState extends State<AuthScreen> {
       child: Column(
         key: const ValueKey('login-form'),
         children: [
-          _AuthField(
+          _KzPhoneField(
             controller: _loginPhoneController,
-            label: 'Номер телефона',
-            hintText: '+7 701 123 45 67',
-            keyboardType: TextInputType.phone,
-            prefixIcon: Icons.phone_rounded,
             validator: _validatePhone,
           ),
           const SizedBox(height: 16),
@@ -293,12 +290,8 @@ class _AuthScreenState extends State<AuthScreen> {
             validator: _validateFullName,
           ),
           const SizedBox(height: 16),
-          _AuthField(
+          _KzPhoneField(
             controller: _registerPhoneController,
-            label: 'Номер телефона',
-            hintText: '+7 701 123 45 67',
-            keyboardType: TextInputType.phone,
-            prefixIcon: Icons.phone_rounded,
             validator: _validatePhone,
           ),
           const SizedBox(height: 16),
@@ -345,14 +338,22 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   String? _validatePhone(String? value) {
-    final normalized = (value ?? '').trim();
-    if (normalized.isEmpty) {
+    final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
       return 'Укажи номер телефона';
     }
-    if (normalized.length < 10) {
-      return 'Номер выглядит слишком коротким';
+    if (digits.length != 10) {
+      return 'Введите 10 цифр номера';
+    }
+    if (digits[0] != '7') {
+      return 'Это не похоже на номер Казахстана';
     }
     return null;
+  }
+
+  String _phoneToE164(TextEditingController controller) {
+    final digits = controller.text.replaceAll(RegExp(r'\D'), '');
+    return '+7$digits';
   }
 
   String? _validatePassword(String? value) {
@@ -374,7 +375,6 @@ class _AuthField extends StatelessWidget {
     required this.hintText,
     required this.prefixIcon,
     required this.validator,
-    this.keyboardType,
     this.obscureText = false,
     this.trailingIcon,
     this.onTrailingPressed,
@@ -386,7 +386,6 @@ class _AuthField extends StatelessWidget {
   final String hintText;
   final IconData prefixIcon;
   final String? Function(String?) validator;
-  final TextInputType? keyboardType;
   final bool obscureText;
   final IconData? trailingIcon;
   final VoidCallback? onTrailingPressed;
@@ -408,7 +407,6 @@ class _AuthField extends StatelessWidget {
         const SizedBox(height: 8),
         TextFormField(
           controller: controller,
-          keyboardType: keyboardType,
           obscureText: obscureText,
           textCapitalization: textCapitalization,
           decoration: InputDecoration(
@@ -424,6 +422,91 @@ class _AuthField extends StatelessWidget {
           validator: validator,
         ),
       ],
+    );
+  }
+}
+
+class _KzPhoneField extends StatelessWidget {
+  const _KzPhoneField({
+    required this.controller,
+    required this.validator,
+  });
+
+  final TextEditingController controller;
+  final String? Function(String?) validator;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Номер телефона',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF0F172A),
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          keyboardType: TextInputType.phone,
+          inputFormatters: [_KzPhoneInputFormatter()],
+          decoration: const InputDecoration(
+            hintText: '701 123 45 67',
+            prefixIcon: Padding(
+              padding: EdgeInsets.only(left: 16, right: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('🇰🇿', style: TextStyle(fontSize: 20)),
+                  SizedBox(width: 8),
+                  Text(
+                    '+7',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            prefixIconConstraints: BoxConstraints(minWidth: 0, minHeight: 0),
+          ),
+          validator: validator,
+        ),
+      ],
+    );
+  }
+}
+
+/// Форматирует ввод казахстанского номера: только цифры (макс 10),
+/// сгруппированные как `XXX XXX XX XX`.
+class _KzPhoneInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    if (digits.length > 10) {
+      digits = digits.substring(0, 10);
+    }
+
+    final buffer = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      if (i == 3 || i == 6 || i == 8) {
+        buffer.write(' ');
+      }
+      buffer.write(digits[i]);
+    }
+
+    final formatted = buffer.toString();
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
 }
