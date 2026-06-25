@@ -347,6 +347,10 @@ class _MoreScreenState extends State<_MoreScreen> {
     }
   }
 
+  void _openSalary() {
+    setState(() => _section = _MoreSection.salary);
+  }
+
   void _openSettings() {
     setState(() => _section = _MoreSection.settings);
   }
@@ -445,6 +449,33 @@ class _MoreScreenState extends State<_MoreScreen> {
 
     if (_section == _MoreSection.documents) {
       return _buildDocumentsPage();
+    }
+
+    if (_section == _MoreSection.salary) {
+      return SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _closeSection,
+                icon: const Icon(Icons.arrow_back_rounded),
+                label: const Text('Назад'),
+              ),
+            ),
+            Expanded(
+              child: _EmployeeReportScreen(
+                accessToken: widget.session.accessToken,
+                businessGateway: widget.businessGateway,
+                companyName: widget.overview.companyName,
+                currentUserOnly: true,
+                embedded: true,
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
     if (_section == _MoreSection.settings) {
@@ -711,6 +742,22 @@ class _MoreScreenState extends State<_MoreScreen> {
                 children: [
                   _buildHiddenTabsCard(),
                   const SizedBox(height: 16),
+                  if (widget.overview.myPayroll.hasEmployee) ...[
+                    _BusinessCard(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: _openSalary,
+                        child: const _MenuTile(
+                          icon: Icons.payments_rounded,
+                          iconColor: Color(0xFF00A86B),
+                          iconTone: Color(0x1400A86B),
+                          title: 'Моя зарплата',
+                          subtitle: 'Начисления и выплаты за период',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   _BusinessCard(
                     child: Column(
                       children: [
@@ -2202,6 +2249,7 @@ enum _MoreSection {
   users,
   notifications,
   documents,
+  salary,
   settings,
   help,
 }
