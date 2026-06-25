@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:excel/excel.dart' as xlsx;
 import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -16,6 +17,7 @@ import 'package:saas_uchet_mobile/features/business/domain/business_gateway.dart
 import 'package:saas_uchet_mobile/features/business/presentation/company_editor_screen.dart';
 import 'package:saas_uchet_mobile/features/business/presentation/nav_settings_screen.dart';
 import 'package:saas_uchet_mobile/features/business/presentation/profile_editor_screen.dart';
+import 'package:saas_uchet_mobile/features/business/presentation/share_file.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 part 'onboarding_flow.dart';
@@ -36,6 +38,7 @@ part 'salary_payroll.dart';
 part 'salary_settings.dart';
 part 'salary_models.dart';
 part 'reports_screen.dart';
+part 'stock_report_screen.dart';
 part 'taxes_screen.dart';
 part 'business_widgets.dart';
 part 'business_models.dart';

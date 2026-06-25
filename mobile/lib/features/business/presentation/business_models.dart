@@ -309,20 +309,24 @@ class _WarehouseStockItem {
     required this.productId,
     required this.productName,
     required this.sku,
+    required this.barcode,
     required this.category,
     required this.unitName,
     required this.available,
     required this.minQuantity,
+    required this.cost,
     required this.status,
   });
 
   final String productId;
   final String productName;
   final String sku;
+  final String barcode;
   final String category;
   final String unitName;
   final int available;
   final int minQuantity;
+  final int cost;
   final ProductStatus status;
 
   String get statusLabel {
@@ -1064,10 +1068,12 @@ _WarehouseStockItem _warehouseStockItemFromJson(Map<String, dynamic> json) =>
       productId: json['product_id'] as String? ?? '',
       productName: json['product_name'] as String? ?? '',
       sku: json['sku'] as String? ?? '',
+      barcode: json['barcode'] as String? ?? '',
       category: json['category'] as String? ?? '',
       unitName: json['unit_name'] as String? ?? 'шт',
       available: json['available'] as int? ?? 0,
       minQuantity: json['min_quantity'] as int? ?? 0,
+      cost: json['cost'] as int? ?? 0,
       status: switch (json['status'] as String? ?? '') {
         'low_stock' => ProductStatus.lowStock,
         'out_of_stock' => ProductStatus.outOfStock,

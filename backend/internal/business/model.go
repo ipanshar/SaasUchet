@@ -237,10 +237,12 @@ type WarehouseStockItem struct {
 	ProductID   string `json:"product_id"`
 	ProductName string `json:"product_name"`
 	SKU         string `json:"sku"`
+	Barcode     string `json:"barcode"`
 	Category    string `json:"category"`
 	UnitName    string `json:"unit_name"`
 	Available   int    `json:"available"`
 	MinQuantity int    `json:"min_quantity"`
+	Cost        int    `json:"cost"`
 	Status      string `json:"status"`
 }
 

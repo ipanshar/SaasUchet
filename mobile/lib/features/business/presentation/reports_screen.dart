@@ -199,6 +199,23 @@ class _ReportsScreenState extends State<_ReportsScreen> {
               message: _error!,
             )
           else ...[
+            _ReportLinkCard(
+              icon: Icons.inventory_2_rounded,
+              title: 'Остатки на складах',
+              subtitle: 'Текущие остатки и себестоимость · PDF / Excel',
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => _StockReportScreen(
+                      accessToken: widget.accessToken,
+                      businessGateway: widget.businessGateway,
+                      companyName: widget.overview.companyName,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 18),
             _ReportSection(
               title: 'Торговля',
               children: [

@@ -659,10 +659,12 @@ func (s *PostgresStore) ListWarehouseStock(user auth.User, warehouseID string, s
 		    p.id::text,
 		    p.name,
 		    p.sku,
+		    COALESCE(p.barcode, ''),
 		    COALESCE(pc.name, ''),
 		    p.unit_name,
 		    COALESCE(ib.quantity_on_hand, 0),
-		    p.min_quantity
+		    p.min_quantity,
+		    COALESCE(ib.average_cost, 0)
 		 FROM inventory_balances ib
 		 JOIN products p ON p.id = ib.product_id
 		 LEFT JOIN product_categories pc ON pc.id = p.category_id
@@ -690,19 +692,23 @@ func (s *PostgresStore) ListWarehouseStock(user auth.User, warehouseID string, s
 		var item WarehouseStockItem
 		var available float64
 		var minQuantity float64
+		var averageCost float64
 		if err := rows.Scan(
 			&item.ProductID,
 			&item.ProductName,
 			&item.SKU,
+			&item.Barcode,
 			&item.Category,
 			&item.UnitName,
 			&available,
 			&minQuantity,
+			&averageCost,
 		); err != nil {
 			return nil, err
 		}
 		item.Available = int(available)
 		item.MinQuantity = int(minQuantity)
+		item.Cost = int(averageCost)
 		item.Status = productStatus(item.Available, item.MinQuantity)
 		items = append(items, item)
 	}
@@ -5465,6 +5471,37 @@ func (s *PostgresStore) completeProductionOrder(ctx context.Context, tx *sql.Tx,
 	)
 	if err != nil {
 		return err
+	}
+
+	// Себестоимость выпуска формируется из стоимости сырья (по себестоимости
+	// ингредиентов) и расходов на партию (recipes.payroll_amount), делённых на
+	// количество выпущенной продукции.
+	totalIngredientCost := 0
+	for _, line := range inputLines {
+		totalIngredientCost += line.UnitCost * line.Quantity
+	}
+
+	var payrollAmount float64
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(payroll_amount, 0) FROM recipes WHERE id = $1::uuid AND company_id = $2::uuid`,
+		order.RecipeID,
+		companyID,
+	).Scan(&payrollAmount); err != nil {
+		return err
+	}
+	batchPayroll := int(math.Round(payrollAmount * order.PlannedQuantity))
+
+	totalOutputQty := 0
+	for _, line := range outputLines {
+		totalOutputQty += line.Quantity
+	}
+	if totalOutputQty > 0 {
+		unitOutputCost := int(math.Round(float64(totalIngredientCost+batchPayroll) / float64(totalOutputQty)))
+		for i := range outputLines {
+			outputLines[i].UnitCost = unitOutputCost
+			outputLines[i].UnitPrice = unitOutputCost
+		}
 	}
 
 	inDocumentID, err := s.createProductionInventoryDocument(
