@@ -294,7 +294,7 @@ func main() {
 			purSeq++
 			lines := []map[string]any{}
 			for _, p := range pickProducts(append(append([]*product{}, rawMats...), resale...), 2+rng.Intn(3)) {
-				qty := 10 + rng.Intn(40)
+				qty := purchaseQtyFor(p)
 				lines = append(lines, map[string]any{
 					"product_id": p.id, "quantity": qty, "unit_price": p.cost, "unit_cost": p.cost,
 				})
@@ -529,38 +529,36 @@ type product struct {
 
 func demoProducts() []product {
 	raw := []product{
-		{name: "ЛДСП Эггер 18мм", sku: "RAW-01", cost: 8000},
-		{name: "Кромка ПВХ 2мм", sku: "RAW-02", cost: 150},
-		{name: "Петли Blum", sku: "RAW-03", cost: 700},
-		{name: "Направляющие 450мм", sku: "RAW-04", cost: 1800},
-		{name: "Ручки мебельные", sku: "RAW-05", cost: 500},
-		{name: "Саморезы (упак)", sku: "RAW-06", cost: 200},
-		{name: "ДВП задняя стенка", sku: "RAW-07", cost: 1200},
-		{name: "Поролон и ткань", sku: "RAW-08", cost: 3500},
+		{name: "ЛДСП Эггер 18мм", sku: "RAW-01", kind: "raw", cost: 8000, initQty: 250},
+		{name: "Кромка ПВХ 2мм", sku: "RAW-02", kind: "raw", cost: 150, initQty: 800},
+		{name: "Петли Blum", sku: "RAW-03", kind: "raw", cost: 700, initQty: 400},
+		{name: "Направляющие 450мм", sku: "RAW-04", kind: "raw", cost: 1800, initQty: 250},
+		{name: "Ручки мебельные", sku: "RAW-05", kind: "raw", cost: 500, initQty: 350},
+		{name: "Саморезы (упак)", sku: "RAW-06", kind: "raw", cost: 200, initQty: 100},
+		{name: "ДВП задняя стенка", sku: "RAW-07", kind: "raw", cost: 1200, initQty: 100},
+		{name: "Поролон и ткань", sku: "RAW-08", kind: "raw", cost: 3500, initQty: 80},
 	}
 	good := []product{
-		{name: "Матрас Comfort", sku: "GOOD-01", cost: 35000, price: 60000},
-		{name: "Зеркало настенное", sku: "GOOD-02", cost: 8000, price: 15000},
-		{name: "Светильник LED", sku: "GOOD-03", cost: 6000, price: 12000},
+		{name: "Матрас Comfort", sku: "GOOD-01", kind: "good", sellable: true, cost: 35000, price: 60000, initQty: 40},
+		{name: "Зеркало настенное", sku: "GOOD-02", kind: "good", sellable: true, cost: 8000, price: 15000, initQty: 40},
+		{name: "Светильник LED", sku: "GOOD-03", kind: "good", sellable: true, cost: 6000, price: 12000, initQty: 40},
 	}
 	fin := []product{
-		{name: "Шкаф-купе", sku: "FIN-01", cost: 90000, price: 160000},
-		{name: "Кухонный гарнитур", sku: "FIN-02", cost: 150000, price: 280000},
-		{name: "Стол письменный", sku: "FIN-03", cost: 35000, price: 65000},
-		{name: "Кровать двуспальная", sku: "FIN-04", cost: 70000, price: 130000},
-		{name: "Комод", sku: "FIN-05", cost: 40000, price: 75000},
+		{name: "Шкаф-купе", sku: "FIN-01", kind: "fin", sellable: true, cost: 90000, price: 160000, initQty: 90},
+		{name: "Кухонный гарнитур", sku: "FIN-02", kind: "fin", sellable: true, cost: 150000, price: 280000, initQty: 90},
+		{name: "Стол письменный", sku: "FIN-03", kind: "fin", sellable: true, cost: 35000, price: 65000, initQty: 90},
+		{name: "Кровать двуспальная", sku: "FIN-04", kind: "fin", sellable: true, cost: 70000, price: 130000, initQty: 90},
+		{name: "Комод", sku: "FIN-05", kind: "fin", sellable: true, cost: 40000, price: 75000, initQty: 90},
 	}
 	out := []product{}
 	for _, p := range raw {
-		p.kind, p.sellable, p.initQty = "raw", false, 10000
+		p.sellable = false
 		out = append(out, p)
 	}
 	for _, p := range good {
-		p.kind, p.sellable, p.initQty = "good", true, 1000
 		out = append(out, p)
 	}
 	for _, p := range fin {
-		p.kind, p.sellable, p.initQty = "fin", true, 1000
 		out = append(out, p)
 	}
 	return out
@@ -691,6 +689,17 @@ func pickProducts(src []*product, n int) []*product {
 		out = append(out, src[i])
 	}
 	return out
+}
+
+func purchaseQtyFor(p *product) int {
+	switch p.kind {
+	case "raw":
+		return 5 + rng.Intn(8)
+	case "good":
+		return 3 + rng.Intn(5)
+	default:
+		return 3 + rng.Intn(5)
+	}
 }
 
 func monthsBetween(from, to time.Time) []time.Time {
