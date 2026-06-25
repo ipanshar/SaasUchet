@@ -1047,13 +1047,24 @@ func (s *PostgresStore) FinancialSummary(user auth.User, from string, to string)
 		return FinancialSummary{}, err
 	}
 
-	// Зарплата за период.
+	// Зарплата за период: начисление считаем по payroll-периодам, выплату — по
+	// фактическим денежным движениям salary-документов в выбранном диапазоне.
 	var salaryAccrued, salaryPaid float64
 	if err := s.db.QueryRowContext(
 		ctx,
 		`SELECT
 		    COALESCE(SUM(e.net_amount), 0),
-		    COALESCE(SUM(e.net_amount) FILTER (WHERE p.status = 'paid'), 0)
+		    COALESCE((
+		      SELECT SUM(mm.amount)
+		      FROM money_movements mm
+		      JOIN money_documents md ON md.id = mm.document_id
+		      WHERE mm.company_id = $1::uuid
+		        AND mm.movement_direction = 'expense'
+		        AND md.document_type = 'salary'
+		        AND md.status <> 'cancelled'
+		        AND mm.happened_at >= $2::date
+		        AND mm.happened_at < ($3::date + INTERVAL '1 day')
+		    ), 0)
 		 FROM payroll_periods p
 		 JOIN payroll_entries e ON e.period_id = p.id
 		 WHERE p.company_id = $1::uuid

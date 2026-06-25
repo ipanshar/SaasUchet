@@ -30,17 +30,15 @@ class _FinancialReportScreenState extends State<_FinancialReportScreen> {
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _from = DateTime(now.year, now.month, 1);
+    _from = DateTime(now.year, now.month - 3, 1);
     _to = DateTime(now.year, now.month, now.day);
   }
 
-  String _apiDate(DateTime date) =>
-      '${date.year.toString().padLeft(4, '0')}-'
+  String _apiDate(DateTime date) => '${date.year.toString().padLeft(4, '0')}-'
       '${date.month.toString().padLeft(2, '0')}-'
       '${date.day.toString().padLeft(2, '0')}';
 
-  String _humanDate(DateTime date) =>
-      '${date.day.toString().padLeft(2, '0')}.'
+  String _humanDate(DateTime date) => '${date.day.toString().padLeft(2, '0')}.'
       '${date.month.toString().padLeft(2, '0')}.${date.year}';
 
   Future<void> _pickDate({required bool isFrom}) async {
