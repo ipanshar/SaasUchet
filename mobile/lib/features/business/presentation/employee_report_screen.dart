@@ -8,11 +8,15 @@ class _EmployeeReportScreen extends StatefulWidget {
     required this.accessToken,
     required this.businessGateway,
     required this.companyName,
+    this.currentUserOnly = false,
+    this.embedded = false,
   });
 
   final String accessToken;
   final BusinessGateway businessGateway;
   final String companyName;
+  final bool currentUserOnly;
+  final bool embedded;
 
   @override
   State<_EmployeeReportScreen> createState() => _EmployeeReportScreenState();
@@ -35,7 +39,14 @@ class _EmployeeReportScreenState extends State<_EmployeeReportScreen> {
     final now = DateTime.now();
     _from = DateTime(now.year, 1, 1);
     _to = DateTime(now.year, now.month, now.day);
-    _loadEmployees();
+    if (widget.currentUserOnly) {
+      _loadingEmployees = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _form();
+      });
+    } else {
+      _loadEmployees();
+    }
   }
 
   Future<void> _loadEmployees() async {
@@ -63,13 +74,11 @@ class _EmployeeReportScreenState extends State<_EmployeeReportScreen> {
     }
   }
 
-  String _apiDate(DateTime date) =>
-      '${date.year.toString().padLeft(4, '0')}-'
+  String _apiDate(DateTime date) => '${date.year.toString().padLeft(4, '0')}-'
       '${date.month.toString().padLeft(2, '0')}-'
       '${date.day.toString().padLeft(2, '0')}';
 
-  String _humanDate(DateTime date) =>
-      '${date.day.toString().padLeft(2, '0')}.'
+  String _humanDate(DateTime date) => '${date.day.toString().padLeft(2, '0')}.'
       '${date.month.toString().padLeft(2, '0')}.${date.year}';
 
   Future<void> _pickDate({required bool isFrom}) async {
@@ -96,18 +105,24 @@ class _EmployeeReportScreenState extends State<_EmployeeReportScreen> {
 
   Future<void> _form() async {
     final employee = _selected;
-    if (employee == null) return;
+    if (!widget.currentUserOnly && employee == null) return;
     setState(() {
       _forming = true;
       _error = null;
     });
     try {
-      final payload = await widget.businessGateway.fetchEmployeeStatement(
-        accessToken: widget.accessToken,
-        employeeId: employee.id,
-        from: _apiDate(_from),
-        to: _apiDate(_to),
-      );
+      final payload = widget.currentUserOnly
+          ? await widget.businessGateway.fetchCurrentEmployeeStatement(
+              accessToken: widget.accessToken,
+              from: _apiDate(_from),
+              to: _apiDate(_to),
+            )
+          : await widget.businessGateway.fetchEmployeeStatement(
+              accessToken: widget.accessToken,
+              employeeId: employee!.id,
+              from: _apiDate(_from),
+              to: _apiDate(_to),
+            );
       final statement = _employeeStatementFromJson(payload);
       if (!mounted) return;
       setState(() {
@@ -117,7 +132,9 @@ class _EmployeeReportScreenState extends State<_EmployeeReportScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = error.toString();
+        _error = widget.currentUserOnly
+            ? 'Пользователь не связан с сотрудником компании.'
+            : error.toString();
         _forming = false;
       });
     }
@@ -180,31 +197,58 @@ class _EmployeeReportScreenState extends State<_EmployeeReportScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final statement = _statement;
-    final canExport = statement != null && !_exporting;
+    final content = _buildContent(context);
+    if (widget.embedded) return content;
     return Scaffold(
       backgroundColor: const Color(0xFFF7FAF8),
       appBar: AppBar(
         backgroundColor: const Color(0xFFF7FAF8),
         foregroundColor: const Color(0xFF0F172A),
         elevation: 0,
-        title: const Text('Зарплатная карточка'),
+        title: Text(
+            widget.currentUserOnly ? 'Моя зарплата' : 'Зарплатная карточка'),
       ),
-      body: _loadingEmployees
-          ? const Center(child: CircularProgressIndicator())
-          : _employees.isEmpty
-              ? const _ReportNotice(
-                  icon: Icons.people_outline_rounded,
-                  title: 'Нет сотрудников',
-                  message: 'Добавьте сотрудника в разделе «Зарплата».',
-                )
-              : Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+      body: content,
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    final statement = _statement;
+    final canExport = statement != null && !_exporting;
+    return _loadingEmployees
+        ? const Center(child: CircularProgressIndicator())
+        : !widget.currentUserOnly && _employees.isEmpty
+            ? const _ReportNotice(
+                icon: Icons.people_outline_rounded,
+                title: 'Нет сотрудников',
+                message: 'Добавьте сотрудника в разделе «Зарплата».',
+              )
+            : Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (widget.currentUserOnly) ...[
+                          const Text(
+                            'Моя зарплата',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Карточка формируется только по сотруднику, связанному с вашим пользователем.',
+                            style: TextStyle(
+                              color: Color(0xFF64748B),
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ] else ...[
                           const Text(
                             'Сотрудник',
                             style: TextStyle(
@@ -250,96 +294,104 @@ class _EmployeeReportScreenState extends State<_EmployeeReportScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _DateField(
-                                  label: 'Дата начала',
-                                  value: _humanDate(_from),
-                                  onTap: () => _pickDate(isFrom: true),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _DateField(
-                                  label: 'Дата окончания',
-                                  value: _humanDate(_to),
-                                  onTap: () => _pickDate(isFrom: false),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed:
-                                  _selected == null || _forming ? null : _form,
-                              icon: _forming
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : const Icon(Icons.assessment_rounded),
-                              label: Text(
-                                  _forming ? 'Формируем...' : 'Сформировать'),
-                            ),
-                          ),
                         ],
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _DateField(
+                                label: 'Дата начала',
+                                value: _humanDate(_from),
+                                onTap: () => _pickDate(isFrom: true),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _DateField(
+                                label: 'Дата окончания',
+                                value: _humanDate(_to),
+                                onTap: () => _pickDate(isFrom: false),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: _forming ||
+                                    (!widget.currentUserOnly &&
+                                        _selected == null)
+                                ? null
+                                : _form,
+                            icon: _forming
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.assessment_rounded),
+                            label: Text(
+                                _forming ? 'Формируем...' : 'Сформировать'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(color: Color(0xFFEF4444)),
                       ),
                     ),
-                    if (_error != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Text(
-                          _error!,
-                          style: const TextStyle(color: Color(0xFFEF4444)),
+                  Expanded(child: _buildBody()),
+                  if (statement != null)
+                    SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: canExport ? _exportPdf : null,
+                                icon: const Icon(Icons.picture_as_pdf_rounded),
+                                label: const Text('PDF'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: canExport ? _exportExcel : null,
+                                icon: const Icon(Icons.table_chart_rounded),
+                                label: const Text('Excel'),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    Expanded(child: _buildBody()),
-                    if (statement != null)
-                      SafeArea(
-                        top: false,
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: canExport ? _exportPdf : null,
-                                  icon:
-                                      const Icon(Icons.picture_as_pdf_rounded),
-                                  label: const Text('PDF'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: canExport ? _exportExcel : null,
-                                  icon: const Icon(Icons.table_chart_rounded),
-                                  label: const Text('Excel'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-    );
+                    ),
+                ],
+              );
   }
 
   Widget _buildBody() {
     final statement = _statement;
     if (statement == null) {
-      return const _ReportNotice(
-        icon: Icons.badge_rounded,
-        title: 'Отчёт не сформирован',
-        message: 'Выберите сотрудника и период, затем «Сформировать».',
+      return _ReportNotice(
+        icon: widget.currentUserOnly
+            ? Icons.person_search_rounded
+            : Icons.badge_rounded,
+        title: widget.currentUserOnly
+            ? 'Сотрудник не связан'
+            : 'Отчёт не сформирован',
+        message: widget.currentUserOnly
+            ? 'Попросите администратора связать ваш профиль с карточкой сотрудника.'
+            : 'Выберите сотрудника и период, затем «Сформировать».',
       );
     }
     return ListView(
@@ -422,7 +474,8 @@ class _EmployeeReportScreenState extends State<_EmployeeReportScreen> {
             message: 'За выбранный период по сотруднику нет ведомостей.',
           )
         else
-          ...statement.entries.map((entry) => _EmployeeStatementRow(entry: entry)),
+          ...statement.entries
+              .map((entry) => _EmployeeStatementRow(entry: entry)),
       ],
     );
   }

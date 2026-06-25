@@ -5,6 +5,9 @@ part of 'business_shell.dart';
 class _Employee {
   const _Employee({
     required this.id,
+    required this.userId,
+    required this.userName,
+    required this.userPhone,
     required this.fullName,
     required this.position,
     required this.iin,
@@ -23,6 +26,9 @@ class _Employee {
   });
 
   final String id;
+  final String userId;
+  final String userName;
+  final String userPhone;
   final String fullName;
   final String position;
   final String iin;
@@ -40,6 +46,18 @@ class _Employee {
   final String notes;
 
   bool get isActive => status == 'active';
+
+  bool get hasLinkedUser => userId.isNotEmpty;
+
+  String get linkedUserLabel {
+    if (!hasLinkedUser) return 'Не связан';
+    if (userName.isNotEmpty && userPhone.isNotEmpty) {
+      return '$userName · $userPhone';
+    }
+    if (userName.isNotEmpty) return userName;
+    if (userPhone.isNotEmpty) return userPhone;
+    return 'Пользователь';
+  }
 
   String get salaryTypeLabel => salaryTypeLabelFor(salaryType);
 
@@ -90,6 +108,9 @@ String salaryTypeLabelFor(String salaryType) {
 
 _Employee _employeeFromJson(Map<String, dynamic> j) => _Employee(
       id: j['id'] as String? ?? '',
+      userId: j['user_id'] as String? ?? '',
+      userName: j['user_name'] as String? ?? '',
+      userPhone: j['user_phone'] as String? ?? '',
       fullName: j['full_name'] as String? ?? '',
       position: j['position'] as String? ?? '',
       iin: j['iin'] as String? ?? '',
@@ -105,6 +126,37 @@ _Employee _employeeFromJson(Map<String, dynamic> j) => _Employee(
       hireDate: j['hire_date'] as String? ?? '',
       status: j['status'] as String? ?? 'active',
       notes: j['notes'] as String? ?? '',
+    );
+
+class _PayrollUser {
+  const _PayrollUser({
+    required this.userId,
+    required this.fullName,
+    required this.phone,
+    required this.role,
+    required this.roleLabel,
+  });
+
+  final String userId;
+  final String fullName;
+  final String phone;
+  final String role;
+  final String roleLabel;
+
+  String get label {
+    if (fullName.isNotEmpty && phone.isNotEmpty) return '$fullName · $phone';
+    if (fullName.isNotEmpty) return fullName;
+    if (phone.isNotEmpty) return phone;
+    return roleLabel;
+  }
+}
+
+_PayrollUser _payrollUserFromJson(Map<String, dynamic> j) => _PayrollUser(
+      userId: j['user_id'] as String? ?? '',
+      fullName: j['full_name'] as String? ?? '',
+      phone: j['phone'] as String? ?? '',
+      role: j['role'] as String? ?? 'staff',
+      roleLabel: j['role_label'] as String? ?? 'Сотрудник',
     );
 
 // ── Payroll periods / Ведомости ────────────────────────────────────────────────

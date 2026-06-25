@@ -72,6 +72,9 @@ class ApiConfig {
   static Uri payrollEmployeeStatementUri(String employeeId) =>
       Uri.parse('$baseUrl/api/v1/payroll/employees/$employeeId/statement');
 
+  static Uri get payrollMeStatementUri =>
+      Uri.parse('$baseUrl/api/v1/payroll/me/statement');
+
   static Uri businessMoneyDocumentUri(String documentId) =>
       Uri.parse('$baseUrl/api/v1/business/money-documents/$documentId');
 
@@ -99,6 +102,8 @@ class ApiConfig {
 
   static Uri get payrollEmployeesUri =>
       Uri.parse('$baseUrl/api/v1/payroll/employees');
+
+  static Uri get payrollUsersUri => Uri.parse('$baseUrl/api/v1/payroll/users');
 
   static Uri payrollEmployeeUri(String employeeId) =>
       Uri.parse('$baseUrl/api/v1/payroll/employees/$employeeId');

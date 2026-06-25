@@ -1,6 +1,7 @@
 package business
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -51,6 +52,62 @@ func (h Handler) Employees(w http.ResponseWriter, r *http.Request) {
 	default:
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// PayrollUsers handles GET /api/v1/payroll/users for linking employees to
+// registered company users.
+func (h Handler) PayrollUsers(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user, permPayrollWrite) {
+		return
+	}
+
+	users, err := h.store.ListPayrollUsers(user)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"users": users})
+}
+
+// CurrentEmployeeStatement handles GET /api/v1/payroll/me/statement. It is
+// intentionally personal and does not require payroll.read.
+func (h Handler) CurrentEmployeeStatement(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !h.requireActiveCompanyPermission(w, user) {
+		return
+	}
+
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	statement, err := h.store.CurrentEmployeeStatement(user, from, to)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "employee link not found")
+			return
+		}
+		if errors.Is(err, ErrValidation) {
+			response.Error(w, http.StatusBadRequest, "invalid statement request")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	response.JSON(w, http.StatusOK, statement)
 }
 
 // EmployeeByID handles /api/v1/payroll/employees/{id} (update, delete).

@@ -20,6 +20,8 @@ type Store interface {
 	FinancialSummary(user auth.User, from string, to string) (FinancialSummary, error)
 	CounterpartyStatement(user auth.User, clientID string, from string, to string) (CounterpartyStatement, error)
 	EmployeeStatement(user auth.User, employeeID string, from string, to string) (EmployeeStatement, error)
+	CurrentEmployeeStatement(user auth.User, from string, to string) (EmployeeStatement, error)
+	MyPayrollOverview(user auth.User, from string, to string) (MyPayroll, error)
 	ListProducts(user auth.User) ([]Product, error)
 	CreateProduct(user auth.User, input CreateProductInput) (Product, error)
 	UpdateProduct(user auth.User, productID string, input CreateProductInput) (Product, error)
@@ -48,6 +50,7 @@ type Store interface {
 	ListProductionOrders(user auth.User) ([]ProductionOrder, error)
 	CreateProductionOrder(user auth.User, input CreateProductionOrderInput) (ProductionOrder, error)
 	UpdateProductionOrderStatus(user auth.User, orderID string, input UpdateProductionOrderStatusInput) (ProductionOrder, error)
+	ListPayrollUsers(user auth.User) ([]PayrollUser, error)
 	ListEmployees(user auth.User) ([]Employee, error)
 	CreateEmployee(user auth.User, input CreateEmployeeInput) (Employee, error)
 	UpdateEmployee(user auth.User, employeeID string, input CreateEmployeeInput) (Employee, error)
@@ -1211,6 +1214,18 @@ func (s *MemoryStore) EmployeeStatement(_ auth.User, employeeID string, from str
 	return EmployeeStatement{EmployeeID: employeeID, From: from, To: to, Entries: []EmployeeStatementEntry{}}, nil
 }
 
+func (s *MemoryStore) CurrentEmployeeStatement(user auth.User, from string, to string) (EmployeeStatement, error) {
+	return EmployeeStatement{EmployeeID: user.ID, EmployeeName: user.FullName, From: from, To: to, Entries: []EmployeeStatementEntry{}}, nil
+}
+
+func (s *MemoryStore) MyPayrollOverview(user auth.User, from string, to string) (MyPayroll, error) {
+	return MyPayroll{HasEmployee: true, EmployeeID: user.ID, EmployeeName: user.FullName, From: from, To: to}, nil
+}
+
+func (s *MemoryStore) ListPayrollUsers(_ auth.User) ([]PayrollUser, error) {
+	return []PayrollUser{}, nil
+}
+
 func (s *MemoryStore) CreateEmployee(_ auth.User, input CreateEmployeeInput) (Employee, error) {
 	normalized := NormalizeEmployeeInput(input)
 	if err := ValidateEmployeeInput(normalized); err != nil {
@@ -1218,6 +1233,7 @@ func (s *MemoryStore) CreateEmployee(_ auth.User, input CreateEmployeeInput) (Em
 	}
 	return Employee{
 		ID:              mustGenerateProductID(),
+		UserID:          normalized.UserID,
 		FullName:        normalized.FullName,
 		Position:        normalized.Position,
 		IIN:             normalized.IIN,
@@ -1243,6 +1259,7 @@ func (s *MemoryStore) UpdateEmployee(_ auth.User, employeeID string, input Creat
 	}
 	return Employee{
 		ID:              employeeID,
+		UserID:          normalized.UserID,
 		FullName:        normalized.FullName,
 		Position:        normalized.Position,
 		IIN:             normalized.IIN,

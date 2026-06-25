@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/auth"
 	"github.com/altyncloud/saas-uchet/backend/internal/response"
@@ -106,6 +107,15 @@ func (h Handler) Overview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	now := time.Now()
+	myPayrollFrom := time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location()).Format("2006-01-02")
+	myPayrollTo := now.Format("2006-01-02")
+	myPayroll, err := h.store.MyPayrollOverview(user, myPayrollFrom, myPayrollTo)
+	if err != nil {
+		log.Printf("business overview MyPayrollOverview failed user=%s: %v", user.ID, err)
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
 
 	companyName := membership.Name
 	if strings.TrimSpace(companyName) == "" {
@@ -123,6 +133,7 @@ func (h Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		InventoryDocuments: inventoryDocuments,
 		MoneyDocuments:     moneyDocuments,
 		PayrollPeriods:     payrollPeriods,
+		MyPayroll:          myPayroll,
 	}))
 }
 

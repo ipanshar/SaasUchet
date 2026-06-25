@@ -384,6 +384,34 @@ class _EmployeeTile extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
+              Icon(
+                employee.hasLinkedUser
+                    ? Icons.person_rounded
+                    : Icons.person_off_outlined,
+                size: 16,
+                color: employee.hasLinkedUser
+                    ? const Color(0xFF00A86B)
+                    : const Color(0xFF94A3B8),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  employee.linkedUserLabel,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: employee.hasLinkedUser
+                        ? const Color(0xFF0F172A)
+                        : const Color(0xFF94A3B8),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
               const Icon(Icons.payments_outlined,
                   size: 16, color: Color(0xFF64748B)),
               const SizedBox(width: 6),
@@ -393,7 +421,8 @@ class _EmployeeTile extends StatelessWidget {
                         fontSize: 13, fontWeight: FontWeight.w600)),
               ),
               if (!employee.isActive)
-                const _StatusBadge(label: 'Неактивен', kind: StatusKind.neutral),
+                const _StatusBadge(
+                    label: 'Неактивен', kind: StatusKind.neutral),
               IconButton(
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.delete_outline_rounded,
@@ -488,8 +517,13 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
 
   String _salaryType = 'monthly';
   String _salesBasis = 'revenue';
+  String _selectedUserId = '';
+  List<_PayrollUser> _users = const [];
   bool _isActive = true;
   bool _isSubmitting = false;
+  bool _loadingUsers = true;
+  bool _userSelectedManually = false;
+  String? _usersError;
 
   @override
   void initState() {
@@ -499,8 +533,8 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
     _positionCtrl = TextEditingController(text: e?.position ?? '');
     _iinCtrl = TextEditingController(text: e?.iin ?? '');
     _phoneCtrl = TextEditingController(text: e?.phone ?? '');
-    _monthlyCtrl =
-        TextEditingController(text: e == null ? '' : e.monthlySalary.toString());
+    _monthlyCtrl = TextEditingController(
+        text: e == null ? '' : e.monthlySalary.toString());
     _hourlyCtrl =
         TextEditingController(text: e == null ? '' : e.hourlyRate.toString());
     _salesPercentCtrl = TextEditingController(
@@ -512,7 +546,11 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
     _notesCtrl = TextEditingController(text: e?.notes ?? '');
     _salaryType = e?.salaryType ?? 'monthly';
     _salesBasis = e?.salesBasis ?? 'revenue';
+    _selectedUserId = e?.userId ?? '';
+    _userSelectedManually = _selectedUserId.isNotEmpty;
     _isActive = e?.isActive ?? true;
+    _phoneCtrl.addListener(_autoSelectUserByPhone);
+    _loadUsers();
   }
 
   @override
@@ -520,6 +558,7 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
     _nameCtrl.dispose();
     _positionCtrl.dispose();
     _iinCtrl.dispose();
+    _phoneCtrl.removeListener(_autoSelectUserByPhone);
     _phoneCtrl.dispose();
     _monthlyCtrl.dispose();
     _hourlyCtrl.dispose();
@@ -529,8 +568,89 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
     super.dispose();
   }
 
-  bool get _showMonthly => _salaryType == 'monthly' || _salaryType == 'combined';
+  bool get _showMonthly =>
+      _salaryType == 'monthly' || _salaryType == 'combined';
   bool get _showHourly => _salaryType == 'hourly';
+
+  String get _selectedUserValue {
+    if (_selectedUserId.isEmpty) return '';
+    if (_users.any((user) => user.userId == _selectedUserId)) {
+      return _selectedUserId;
+    }
+    return _selectedFallbackUserLabel.isNotEmpty ? _selectedUserId : '';
+  }
+
+  String get _selectedFallbackUserLabel {
+    final initial = widget.initial;
+    if (_selectedUserId.isEmpty ||
+        initial == null ||
+        initial.userId != _selectedUserId) {
+      return '';
+    }
+    return initial.linkedUserLabel;
+  }
+
+  Future<void> _loadUsers() async {
+    setState(() {
+      _loadingUsers = true;
+      _usersError = null;
+    });
+    try {
+      final payload = await widget.gateway.fetchPayrollUsers(
+        accessToken: widget.accessToken,
+      );
+      final users = payload.map(_payrollUserFromJson).toList(growable: false);
+      if (!mounted) return;
+      setState(() {
+        _users = users;
+        if (_selectedUserId.isNotEmpty &&
+            !users.any((user) => user.userId == _selectedUserId) &&
+            _selectedFallbackUserLabel.isEmpty) {
+          _selectedUserId = '';
+          _userSelectedManually = false;
+        }
+        _loadingUsers = false;
+      });
+      _autoSelectUserByPhone();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _users = const [];
+        _loadingUsers = false;
+        _usersError = 'Не удалось загрузить пользователей компании';
+      });
+    }
+  }
+
+  void _autoSelectUserByPhone() {
+    if (!mounted || _userSelectedManually || _users.isEmpty) return;
+    final phone = _normalizePhoneForMatch(_phoneCtrl.text);
+    if (phone.isEmpty) {
+      if (_selectedUserId.isNotEmpty) {
+        setState(() => _selectedUserId = '');
+      }
+      return;
+    }
+    final match = _users.where((user) {
+      return _normalizePhoneForMatch(user.phone) == phone;
+    }).firstOrNull;
+    if (match == null) {
+      if (_selectedUserId.isNotEmpty) {
+        setState(() => _selectedUserId = '');
+      }
+      return;
+    }
+    if (match.userId == _selectedUserId) return;
+    setState(() => _selectedUserId = match.userId);
+  }
+
+  static String _normalizePhoneForMatch(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 11 && digits.startsWith('8')) {
+      return '7${digits.substring(1)}';
+    }
+    return digits;
+  }
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty) {
@@ -545,6 +665,9 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
         'position': _positionCtrl.text.trim(),
         'iin': _iinCtrl.text.trim(),
         'phone': _phoneCtrl.text.trim(),
+        'user_id': _selectedUserId,
+        'disable_user_auto_link':
+            _userSelectedManually && _selectedUserId.isEmpty,
         'salary_type': _salaryType,
         'monthly_salary': _showMonthly ? _intOf(_monthlyCtrl.text) : 0,
         'hourly_rate': _showHourly ? _intOf(_hourlyCtrl.text) : 0,
@@ -602,7 +725,8 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
         child: Column(
           children: [
             _SheetDragHandle(
-                title: isEditing ? 'Редактировать сотрудника' : 'Новый сотрудник'),
+                title:
+                    isEditing ? 'Редактировать сотрудника' : 'Новый сотрудник'),
             Expanded(
               child: ListView(
                 controller: controller,
@@ -654,13 +778,86 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  const _SectionLabel(label: 'Пользователь'),
+                  if (_loadingUsers)
+                    Container(
+                      height: 54,
+                      alignment: Alignment.centerLeft,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: const Row(
+                        children: [
+                          SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 10),
+                          Text('Загружаем пользователей...'),
+                        ],
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      key: ValueKey(
+                          'employee_user_${_users.length}_$_selectedUserId'),
+                      initialValue: _selectedUserValue,
+                      decoration: _inputDecoration('Пользователь компании'),
+                      items: [
+                        const DropdownMenuItem(
+                          value: '',
+                          child: Text('Не связан'),
+                        ),
+                        if (_selectedFallbackUserLabel.isNotEmpty &&
+                            !_users
+                                .any((user) => user.userId == _selectedUserId))
+                          DropdownMenuItem(
+                            value: _selectedUserId,
+                            child: Text(
+                              _selectedFallbackUserLabel,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ..._users.map(
+                          (user) => DropdownMenuItem(
+                            value: user.userId,
+                            child: Text(
+                              user.label,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedUserId = value ?? '';
+                          _userSelectedManually = true;
+                        });
+                      },
+                    ),
+                  if (_usersError != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _usersError!,
+                      style: const TextStyle(
+                        color: Color(0xFFEF4444),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
                   const _SectionLabel(label: 'Тип оплаты *'),
                   DropdownButtonFormField<String>(
                     initialValue: _salaryType,
                     decoration: _inputDecoration('Тип оплаты'),
                     items: const [
                       DropdownMenuItem(value: 'monthly', child: Text('Оклад')),
-                      DropdownMenuItem(value: 'hourly', child: Text('Почасовая')),
+                      DropdownMenuItem(
+                          value: 'hourly', child: Text('Почасовая')),
                       DropdownMenuItem(
                           value: 'piece_rate', child: Text('Сдельная')),
                       DropdownMenuItem(value: 'bonus', child: Text('Бонусная')),
@@ -697,8 +894,8 @@ class _EmployeeSheetState extends State<_EmployeeSheet> {
                   ],
                   const SizedBox(height: 20),
                   const Text('Комиссия с продаж',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 15)),
+                      style:
+                          TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                   const SizedBox(height: 4),
                   const Text(
                     'Начисляется по проведённым продажам, где сотрудник указан продавцом. 0 — без комиссии.',

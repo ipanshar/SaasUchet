@@ -24,13 +24,15 @@ func (s *PostgresStore) ListEmployees(user auth.User) ([]Employee, error) {
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id::text, full_name, position, COALESCE(iin,''), COALESCE(phone,''),
-		        salary_type, monthly_salary, hourly_rate, piece_rate, piece_rate_source,
-		        sales_percent, sales_basis,
-		        standard_days, COALESCE(hire_date::text,''), status, notes
-		 FROM employees
-		 WHERE company_id = $1::uuid AND archived_at IS NULL
-		 ORDER BY lower(full_name) ASC`,
+		`SELECT e.id::text, COALESCE(e.user_id,''), COALESCE(u.full_name,''), COALESCE(u.phone,''),
+		        e.full_name, e.position, COALESCE(e.iin,''), COALESCE(e.phone,''),
+		        e.salary_type, e.monthly_salary, e.hourly_rate, e.piece_rate, e.piece_rate_source,
+		        e.sales_percent, e.sales_basis,
+		        e.standard_days, COALESCE(e.hire_date::text,''), e.status, e.notes
+		 FROM employees e
+		 LEFT JOIN users u ON u.id = e.user_id
+		 WHERE e.company_id = $1::uuid AND e.archived_at IS NULL
+		 ORDER BY lower(e.full_name) ASC`,
 		companyID,
 	)
 	if err != nil {
@@ -49,16 +51,53 @@ func (s *PostgresStore) ListEmployees(user auth.User) ([]Employee, error) {
 	return employees, rows.Err()
 }
 
+func (s *PostgresStore) ListPayrollUsers(user auth.User) ([]PayrollUser, error) {
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT u.id, u.full_name, u.phone, cm.role
+		 FROM company_memberships cm
+		 JOIN users u ON u.id = cm.user_id
+		 WHERE cm.company_id = $1::uuid
+		 ORDER BY
+		   CASE cm.role
+		     WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 WHEN 'accountant' THEN 3
+		     WHEN 'manager' THEN 4 WHEN 'sales' THEN 5 WHEN 'warehouse' THEN 6
+		     ELSE 7
+		   END,
+		   lower(u.full_name)`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	users := make([]PayrollUser, 0)
+	for rows.Next() {
+		var u PayrollUser
+		if err := rows.Scan(&u.UserID, &u.FullName, &u.Phone, &u.Role); err != nil {
+			return nil, err
+		}
+		u.RoleLabel = companyRoleLabel(u.Role)
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 func (s *PostgresStore) EmployeeStatement(user auth.User, employeeID string, from string, to string) (EmployeeStatement, error) {
+	if err := validatePayrollStatementDates(from, to); err != nil {
+		return EmployeeStatement{}, err
+	}
 	from = strings.TrimSpace(from)
 	to = strings.TrimSpace(to)
 	employeeID = strings.TrimSpace(employeeID)
-	if _, err := time.Parse("2006-01-02", from); err != nil {
-		return EmployeeStatement{}, fmt.Errorf("%w: invalid from date", ErrValidation)
-	}
-	if _, err := time.Parse("2006-01-02", to); err != nil {
-		return EmployeeStatement{}, fmt.Errorf("%w: invalid to date", ErrValidation)
-	}
 
 	ctx, cancel := s.withTimeout()
 	defer cancel()
@@ -68,6 +107,92 @@ func (s *PostgresStore) EmployeeStatement(user auth.User, employeeID string, fro
 		return EmployeeStatement{}, err
 	}
 
+	return s.employeeStatementByID(ctx, companyID, employeeID, from, to)
+}
+
+func (s *PostgresStore) CurrentEmployeeStatement(user auth.User, from string, to string) (EmployeeStatement, error) {
+	if err := validatePayrollStatementDates(from, to); err != nil {
+		return EmployeeStatement{}, err
+	}
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return EmployeeStatement{}, err
+	}
+
+	employeeID, err := s.currentEmployeeID(ctx, companyID, user.ID)
+	if err != nil {
+		return EmployeeStatement{}, err
+	}
+
+	return s.employeeStatementByID(ctx, companyID, employeeID, from, to)
+}
+
+func (s *PostgresStore) MyPayrollOverview(user auth.User, from string, to string) (MyPayroll, error) {
+	if err := validatePayrollStatementDates(from, to); err != nil {
+		return MyPayroll{}, err
+	}
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return MyPayroll{}, err
+	}
+
+	summary := MyPayroll{From: from, To: to}
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT id::text, full_name, COALESCE(position, '')
+		 FROM employees
+		 WHERE company_id = $1::uuid AND user_id = $2 AND status = 'active' AND archived_at IS NULL
+		 ORDER BY updated_at DESC
+		 LIMIT 1`,
+		companyID,
+		user.ID,
+	).Scan(&summary.EmployeeID, &summary.EmployeeName, &summary.Position)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return summary, nil
+		}
+		return MyPayroll{}, err
+	}
+	summary.HasEmployee = true
+
+	var gross, net, paid float64
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+		    COALESCE(SUM(e.gross_amount), 0),
+		    COALESCE(SUM(e.net_amount), 0),
+		    COALESCE(SUM(CASE WHEN e.paid_at IS NOT NULL THEN e.net_amount ELSE 0 END), 0)
+		 FROM payroll_entries e
+		 JOIN payroll_periods p ON p.id = e.period_id
+		 WHERE p.company_id = $1::uuid AND e.employee_id = $2::uuid
+		   AND make_date(p.period_year, p.period_month, 1) >= date_trunc('month', $3::date)::date
+		   AND make_date(p.period_year, p.period_month, 1) <= $4::date`,
+		companyID,
+		summary.EmployeeID,
+		from,
+		to,
+	).Scan(&gross, &net, &paid); err != nil {
+		return MyPayroll{}, err
+	}
+	summary.TotalGross = int(gross)
+	summary.TotalNet = int(net)
+	summary.TotalPaid = int(paid)
+	return summary, nil
+}
+
+func (s *PostgresStore) employeeStatementByID(ctx context.Context, companyID string, employeeID string, from string, to string) (EmployeeStatement, error) {
 	statement := EmployeeStatement{EmployeeID: employeeID, From: from, To: to}
 
 	if err := s.db.QueryRowContext(
@@ -163,20 +288,29 @@ func (s *PostgresStore) CreateEmployee(user auth.User, input CreateEmployeeInput
 	if err := ValidateEmployeeInput(normalized); err != nil {
 		return Employee{}, err
 	}
+	linkedUserID, err := s.resolveEmployeeUserID(ctx, companyID, normalized)
+	if err != nil {
+		return Employee{}, err
+	}
+	if normalized.Status == "active" {
+		if err := s.ensureEmployeeUserAvailable(ctx, companyID, linkedUserID, ""); err != nil {
+			return Employee{}, err
+		}
+	}
 
 	id := mustGenerateProductID()
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO employees
-		   (id, company_id, full_name, position, iin, phone, salary_type,
+		   (id, company_id, user_id, full_name, position, iin, phone, salary_type,
 		    monthly_salary, hourly_rate, piece_rate, piece_rate_source,
 		    sales_percent, sales_basis,
 		    standard_days, hire_date, status, notes, created_at, updated_at)
 		 VALUES
-		   ($1::uuid, $2::uuid, $3, $4, NULLIF($5,''), NULLIF($6,''), $7,
-		    $8, $9, $10, $11,
-		    $12, $13,
-		    $14, NULLIF($15,'')::date, $16, $17, NOW(), NOW())`,
-		id, companyID, normalized.FullName, normalized.Position, normalized.IIN, normalized.Phone,
+		   ($1::uuid, $2::uuid, NULLIF($3,''), $4, $5, NULLIF($6,''), NULLIF($7,''), $8,
+		    $9, $10, $11, $12,
+		    $13, $14,
+		    $15, NULLIF($16,'')::date, $17, $18, NOW(), NOW())`,
+		id, companyID, linkedUserID, normalized.FullName, normalized.Position, normalized.IIN, normalized.Phone,
 		normalized.SalaryType, normalized.MonthlySalary, normalized.HourlyRate, normalized.PieceRate,
 		normalized.PieceRateSource, normalized.SalesPercent, normalized.SalesBasis,
 		normalized.StandardDays, normalized.HireDate, normalized.Status, normalized.Notes,
@@ -201,15 +335,24 @@ func (s *PostgresStore) UpdateEmployee(user auth.User, employeeID string, input 
 	if err := ValidateEmployeeInput(normalized); err != nil {
 		return Employee{}, err
 	}
+	linkedUserID, err := s.resolveEmployeeUserID(ctx, companyID, normalized)
+	if err != nil {
+		return Employee{}, err
+	}
+	if normalized.Status == "active" {
+		if err := s.ensureEmployeeUserAvailable(ctx, companyID, linkedUserID, employeeID); err != nil {
+			return Employee{}, err
+		}
+	}
 
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE employees SET
-		   full_name=$3, position=$4, iin=NULLIF($5,''), phone=NULLIF($6,''), salary_type=$7,
-		   monthly_salary=$8, hourly_rate=$9, piece_rate=$10, piece_rate_source=$11,
-		   sales_percent=$12, sales_basis=$13,
-		   standard_days=$14, hire_date=NULLIF($15,'')::date, status=$16, notes=$17, updated_at=NOW()
+		   user_id=NULLIF($3,''), full_name=$4, position=$5, iin=NULLIF($6,''), phone=NULLIF($7,''), salary_type=$8,
+		   monthly_salary=$9, hourly_rate=$10, piece_rate=$11, piece_rate_source=$12,
+		   sales_percent=$13, sales_basis=$14,
+		   standard_days=$15, hire_date=NULLIF($16,'')::date, status=$17, notes=$18, updated_at=NOW()
 		 WHERE id=$1::uuid AND company_id=$2::uuid AND archived_at IS NULL`,
-		employeeID, companyID, normalized.FullName, normalized.Position, normalized.IIN, normalized.Phone,
+		employeeID, companyID, linkedUserID, normalized.FullName, normalized.Position, normalized.IIN, normalized.Phone,
 		normalized.SalaryType, normalized.MonthlySalary, normalized.HourlyRate, normalized.PieceRate,
 		normalized.PieceRateSource, normalized.SalesPercent, normalized.SalesBasis,
 		normalized.StandardDays, normalized.HireDate, normalized.Status, normalized.Notes,
@@ -249,12 +392,14 @@ func (s *PostgresStore) DeleteEmployee(user auth.User, employeeID string) error 
 
 func (s *PostgresStore) getEmployee(ctx context.Context, companyID string, employeeID string) (Employee, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id::text, full_name, position, COALESCE(iin,''), COALESCE(phone,''),
-		        salary_type, monthly_salary, hourly_rate, piece_rate, piece_rate_source,
-		        sales_percent, sales_basis,
-		        standard_days, COALESCE(hire_date::text,''), status, notes
-		 FROM employees
-		 WHERE id=$1::uuid AND company_id=$2::uuid`,
+		`SELECT e.id::text, COALESCE(e.user_id,''), COALESCE(u.full_name,''), COALESCE(u.phone,''),
+		        e.full_name, e.position, COALESCE(e.iin,''), COALESCE(e.phone,''),
+		        e.salary_type, e.monthly_salary, e.hourly_rate, e.piece_rate, e.piece_rate_source,
+		        e.sales_percent, e.sales_basis,
+		        e.standard_days, COALESCE(e.hire_date::text,''), e.status, e.notes
+		 FROM employees e
+		 LEFT JOIN users u ON u.id = e.user_id
+		 WHERE e.id=$1::uuid AND e.company_id=$2::uuid`,
 		employeeID, companyID,
 	)
 	return scanEmployee(row)
@@ -268,7 +413,8 @@ func scanEmployee(row rowScanner) (Employee, error) {
 	var emp Employee
 	var monthly, hourly, piece float64
 	if err := row.Scan(
-		&emp.ID, &emp.FullName, &emp.Position, &emp.IIN, &emp.Phone,
+		&emp.ID, &emp.UserID, &emp.UserName, &emp.UserPhone,
+		&emp.FullName, &emp.Position, &emp.IIN, &emp.Phone,
 		&emp.SalaryType, &monthly, &hourly, &piece, &emp.PieceRateSource,
 		&emp.SalesPercent, &emp.SalesBasis,
 		&emp.StandardDays, &emp.HireDate, &emp.Status, &emp.Notes,
@@ -279,6 +425,113 @@ func scanEmployee(row rowScanner) (Employee, error) {
 	emp.HourlyRate = int(hourly)
 	emp.PieceRate = int(piece)
 	return emp, nil
+}
+
+func validatePayrollStatementDates(from string, to string) error {
+	if _, err := time.Parse("2006-01-02", strings.TrimSpace(from)); err != nil {
+		return fmt.Errorf("%w: invalid from date", ErrValidation)
+	}
+	if _, err := time.Parse("2006-01-02", strings.TrimSpace(to)); err != nil {
+		return fmt.Errorf("%w: invalid to date", ErrValidation)
+	}
+	return nil
+}
+
+func (s *PostgresStore) currentEmployeeID(ctx context.Context, companyID string, userID string) (string, error) {
+	var employeeID string
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT id::text
+		 FROM employees
+		 WHERE company_id = $1::uuid AND user_id = $2 AND status = 'active' AND archived_at IS NULL
+		 ORDER BY updated_at DESC
+		 LIMIT 1`,
+		companyID,
+		userID,
+	).Scan(&employeeID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", sql.ErrNoRows
+		}
+		return "", err
+	}
+	return employeeID, nil
+}
+
+func (s *PostgresStore) resolveEmployeeUserID(ctx context.Context, companyID string, input CreateEmployeeInput) (string, error) {
+	userID := strings.TrimSpace(input.UserID)
+	if userID != "" {
+		var exists bool
+		if err := s.db.QueryRowContext(
+			ctx,
+			`SELECT EXISTS(
+			   SELECT 1 FROM company_memberships
+			   WHERE company_id = $1::uuid AND user_id = $2
+			 )`,
+			companyID,
+			userID,
+		).Scan(&exists); err != nil {
+			return "", err
+		}
+		if !exists {
+			return "", fmt.Errorf("%w: linked user is not a company member", ErrValidation)
+		}
+		return userID, nil
+	}
+	if input.DisableUserAutoLink {
+		return "", nil
+	}
+
+	phone := normalizePhone(input.Phone)
+	if phone == "" {
+		return "", nil
+	}
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT u.id
+		 FROM company_memberships cm
+		 JOIN users u ON u.id = cm.user_id
+		 WHERE cm.company_id = $1::uuid AND u.phone = $2
+		 LIMIT 1`,
+		companyID,
+		phone,
+	).Scan(&userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return userID, nil
+}
+
+func (s *PostgresStore) ensureEmployeeUserAvailable(ctx context.Context, companyID string, userID string, exceptEmployeeID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+	exceptEmployeeID = strings.TrimSpace(exceptEmployeeID)
+
+	query := `SELECT full_name
+	          FROM employees
+	          WHERE company_id = $1::uuid AND user_id = $2
+	            AND status = 'active' AND archived_at IS NULL`
+	args := []any{companyID, userID}
+	if exceptEmployeeID != "" {
+		query += ` AND id <> $3::uuid`
+		args = append(args, exceptEmployeeID)
+	}
+	query += ` LIMIT 1`
+
+	var existingName string
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&existingName)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	return fmt.Errorf("%w: user already linked to active employee %s", ErrValidation, existingName)
 }
 
 // ── Payroll periods ───────────────────────────────────────────────────────────

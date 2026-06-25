@@ -606,6 +606,38 @@ class BusinessApiClient extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> fetchCurrentEmployeeStatement({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    final uri = ApiConfig.payrollMeStatementUri.replace(
+      queryParameters: {
+        'from': from,
+        'to': to,
+      },
+    );
+    final response = await _client
+        .get(
+          uri,
+          headers: _headers(accessToken, json: false),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) {
+      throw _buildApiException(response);
+    }
+    final decodedBody = jsonDecode(response.body);
+    if (decodedBody is! Map<String, dynamic>) {
+      throw const ApiException(
+        message: 'API returned an unexpected response.',
+        statusCode: 500,
+      );
+    }
+
+    return decodedBody;
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> fetchWarehouseMovements({
     required String accessToken,
     required String warehouseId,
@@ -1241,6 +1273,21 @@ class BusinessApiClient extends BusinessGateway {
     if (response.statusCode != 200) throw _buildApiException(response);
     final decoded = jsonDecode(response.body);
     return List<Map<String, dynamic>>.from(decoded['employees'] ?? []);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchPayrollUsers({
+    required String accessToken,
+  }) async {
+    final response = await _client
+        .get(
+          ApiConfig.payrollUsersUri,
+          headers: _headers(accessToken, json: false),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) throw _buildApiException(response);
+    final decoded = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(decoded['users'] ?? []);
   }
 
   @override

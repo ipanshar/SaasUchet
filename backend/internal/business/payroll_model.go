@@ -12,6 +12,9 @@ import (
 // whole tenge (int), matching the rest of the money models.
 type Employee struct {
 	ID              string  `json:"id"`
+	UserID          string  `json:"user_id,omitempty"`
+	UserName        string  `json:"user_name,omitempty"`
+	UserPhone       string  `json:"user_phone,omitempty"`
 	FullName        string  `json:"full_name"`
 	Position        string  `json:"position"`
 	IIN             string  `json:"iin,omitempty"`
@@ -30,24 +33,27 @@ type Employee struct {
 }
 
 type CreateEmployeeInput struct {
-	FullName        string  `json:"full_name"`
-	Position        string  `json:"position"`
-	IIN             string  `json:"iin"`
-	Phone           string  `json:"phone"`
-	SalaryType      string  `json:"salary_type"`
-	MonthlySalary   int     `json:"monthly_salary"`
-	HourlyRate      int     `json:"hourly_rate"`
-	PieceRate       int     `json:"piece_rate"`
-	PieceRateSource string  `json:"piece_rate_source"`
-	SalesPercent    float64 `json:"sales_percent"`
-	SalesBasis      string  `json:"sales_basis"`
-	StandardDays    int     `json:"standard_days"`
-	HireDate        string  `json:"hire_date"`
-	Status          string  `json:"status"`
-	Notes           string  `json:"notes"`
+	UserID              string  `json:"user_id"`
+	DisableUserAutoLink bool    `json:"disable_user_auto_link"`
+	FullName            string  `json:"full_name"`
+	Position            string  `json:"position"`
+	IIN                 string  `json:"iin"`
+	Phone               string  `json:"phone"`
+	SalaryType          string  `json:"salary_type"`
+	MonthlySalary       int     `json:"monthly_salary"`
+	HourlyRate          int     `json:"hourly_rate"`
+	PieceRate           int     `json:"piece_rate"`
+	PieceRateSource     string  `json:"piece_rate_source"`
+	SalesPercent        float64 `json:"sales_percent"`
+	SalesBasis          string  `json:"sales_basis"`
+	StandardDays        int     `json:"standard_days"`
+	HireDate            string  `json:"hire_date"`
+	Status              string  `json:"status"`
+	Notes               string  `json:"notes"`
 }
 
 func NormalizeEmployeeInput(input CreateEmployeeInput) CreateEmployeeInput {
+	input.UserID = strings.TrimSpace(input.UserID)
 	input.FullName = strings.Join(strings.Fields(input.FullName), " ")
 	input.Position = strings.TrimSpace(input.Position)
 	input.IIN = normalizeDigits(input.IIN)
@@ -201,21 +207,29 @@ type EmployeeStatementEntry struct {
 }
 
 type EmployeeStatement struct {
-	EmployeeID     string                   `json:"employee_id"`
-	EmployeeName   string                   `json:"employee_name"`
-	Position       string                   `json:"position"`
-	From           string                   `json:"from"`
-	To             string                   `json:"to"`
-	TotalBase      int                      `json:"total_base"`
-	TotalPiece     int                      `json:"total_piece"`
-	TotalBonus     int                      `json:"total_bonus"`
-	TotalOvertime  int                      `json:"total_overtime"`
-	TotalVacation  int                      `json:"total_vacation"`
-	TotalDeductions int                     `json:"total_deductions"`
-	TotalGross     int                      `json:"total_gross"`
-	TotalNet       int                      `json:"total_net"`
-	TotalPaid      int                      `json:"total_paid"`
-	Entries        []EmployeeStatementEntry `json:"entries"`
+	EmployeeID      string                   `json:"employee_id"`
+	EmployeeName    string                   `json:"employee_name"`
+	Position        string                   `json:"position"`
+	From            string                   `json:"from"`
+	To              string                   `json:"to"`
+	TotalBase       int                      `json:"total_base"`
+	TotalPiece      int                      `json:"total_piece"`
+	TotalBonus      int                      `json:"total_bonus"`
+	TotalOvertime   int                      `json:"total_overtime"`
+	TotalVacation   int                      `json:"total_vacation"`
+	TotalDeductions int                      `json:"total_deductions"`
+	TotalGross      int                      `json:"total_gross"`
+	TotalNet        int                      `json:"total_net"`
+	TotalPaid       int                      `json:"total_paid"`
+	Entries         []EmployeeStatementEntry `json:"entries"`
+}
+
+type PayrollUser struct {
+	UserID    string `json:"user_id"`
+	FullName  string `json:"full_name"`
+	Phone     string `json:"phone"`
+	Role      string `json:"role"`
+	RoleLabel string `json:"role_label"`
 }
 
 type UpdatePayrollEntryInput struct {

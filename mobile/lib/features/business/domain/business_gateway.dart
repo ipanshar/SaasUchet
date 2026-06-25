@@ -132,6 +132,12 @@ abstract class BusinessGateway {
     required String to,
   });
 
+  Future<Map<String, dynamic>> fetchCurrentEmployeeStatement({
+    required String accessToken,
+    required String from,
+    required String to,
+  });
+
   Future<Map<String, dynamic>> createInventoryDocument({
     required String accessToken,
     required Map<String, dynamic> payload,
@@ -258,6 +264,10 @@ abstract class BusinessGateway {
   });
 
   Future<List<Map<String, dynamic>>> fetchEmployees({
+    required String accessToken,
+  });
+
+  Future<List<Map<String, dynamic>>> fetchPayrollUsers({
     required String accessToken,
   });
 

@@ -523,7 +523,9 @@ class _BusinessShellState extends State<BusinessShell> {
       }
     }
 
-    return actions.where((action) => allowed(action.id)).toList(growable: false);
+    return actions
+        .where((action) => allowed(action.id))
+        .toList(growable: false);
   }
 
   String _currentCompanyRole() {
@@ -572,6 +574,10 @@ class _BusinessShellState extends State<BusinessShell> {
           BusinessTab.salary,
           BusinessTab.reports,
         ];
+      case 'staff':
+        return const [
+          BusinessTab.salary,
+        ];
       case 'warehouse':
         return const [
           BusinessTab.warehouse,
@@ -590,11 +596,15 @@ class _BusinessShellState extends State<BusinessShell> {
   }
 
   List<BusinessTab> _normalizeTabsForRole(List<BusinessTab> tabs) {
-    final allowed = _allowedMiddleTabsForRole(_currentCompanyRole()).toSet();
-    final middle = tabs
+    final role = _currentCompanyRole();
+    final allowed = _allowedMiddleTabsForRole(role).toSet();
+    final activeMiddle = tabs
         .where((tab) => tab != BusinessTab.dashboard && tab != BusinessTab.more)
         .where(allowed.contains)
         .toList(growable: false);
+    final middle = role == 'staff' && activeMiddle.isEmpty
+        ? const [BusinessTab.salary]
+        : activeMiddle;
     return [BusinessTab.dashboard, ...middle, BusinessTab.more];
   }
 
@@ -818,6 +828,16 @@ class _BusinessShellState extends State<BusinessShell> {
           canWrite: overview.hasPermission('catalog.write'),
         );
       case BusinessTab.salary:
+        if (!overview.hasPermission('payroll.read') &&
+            !overview.hasPermission('payroll.write')) {
+          return _EmployeeReportScreen(
+            accessToken: _session.accessToken,
+            businessGateway: widget.businessGateway,
+            companyName: overview.companyName,
+            currentUserOnly: true,
+            embedded: true,
+          );
+        }
         return _SalaryScreen(
           accessToken: _session.accessToken,
           businessGateway: widget.businessGateway,

@@ -24,6 +24,7 @@ type Overview struct {
 	ActiveRole        string        `json:"active_role"`
 	Permissions       []string      `json:"permissions"`
 	Dashboard         Dashboard     `json:"dashboard"`
+	MyPayroll         MyPayroll     `json:"my_payroll"`
 	RecentActivities  []Activity    `json:"recent_activities"`
 	Clients           []Client      `json:"clients"`
 	Products          []Product     `json:"products"`
@@ -490,6 +491,18 @@ type StaffMember struct {
 	Role string `json:"role"`
 }
 
+type MyPayroll struct {
+	HasEmployee  bool   `json:"has_employee"`
+	EmployeeID   string `json:"employee_id,omitempty"`
+	EmployeeName string `json:"employee_name,omitempty"`
+	Position     string `json:"position,omitempty"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	TotalGross   int    `json:"total_gross"`
+	TotalNet     int    `json:"total_net"`
+	TotalPaid    int    `json:"total_paid"`
+}
+
 type overviewBuildInput struct {
 	User               auth.User
 	CompanyName        string
@@ -501,6 +514,7 @@ type overviewBuildInput struct {
 	InventoryDocuments []InventoryDocumentSummary
 	MoneyDocuments     []MoneyDocumentSummary
 	PayrollPeriods     []PayrollPeriod
+	MyPayroll          MyPayroll
 }
 
 func buildOverview(input overviewBuildInput) Overview {
@@ -531,6 +545,7 @@ func buildOverview(input overviewBuildInput) Overview {
 		Permissions:       permissions,
 		MenuNotifications: overviewNotificationCount(input),
 		Dashboard:         dashboard,
+		MyPayroll:         input.MyPayroll,
 		RecentActivities:  buildRecentActivities(input),
 		Clients:           input.Clients,
 		Products:          input.Products,

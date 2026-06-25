@@ -769,6 +769,7 @@ class _OverviewData {
     required this.clients,
     required this.products,
     required this.finance,
+    required this.myPayroll,
     required this.staff,
     required this.menuNotifications,
   });
@@ -805,6 +806,9 @@ class _OverviewData {
       finance: _FinanceOverview.fromJson(
         json['finance'] as Map<String, dynamic>? ?? const {},
       ),
+      myPayroll: _MyPayrollOverview.fromJson(
+        json['my_payroll'] as Map<String, dynamic>? ?? const {},
+      ),
       staff: (json['staff'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(_staffFromJson)
@@ -822,10 +826,51 @@ class _OverviewData {
   final List<_Client> clients;
   final List<_Product> products;
   final _FinanceOverview finance;
+  final _MyPayrollOverview myPayroll;
   final List<_StaffMember> staff;
   final int menuNotifications;
 
   bool hasPermission(String permission) => permissions.contains(permission);
+}
+
+class _MyPayrollOverview {
+  const _MyPayrollOverview({
+    required this.hasEmployee,
+    required this.employeeId,
+    required this.employeeName,
+    required this.position,
+    required this.from,
+    required this.to,
+    required this.totalGross,
+    required this.totalNet,
+    required this.totalPaid,
+  });
+
+  factory _MyPayrollOverview.fromJson(Map<String, dynamic> json) {
+    return _MyPayrollOverview(
+      hasEmployee: json['has_employee'] as bool? ?? false,
+      employeeId: json['employee_id'] as String? ?? '',
+      employeeName: json['employee_name'] as String? ?? '',
+      position: json['position'] as String? ?? '',
+      from: json['from'] as String? ?? '',
+      to: json['to'] as String? ?? '',
+      totalGross: json['total_gross'] as int? ?? 0,
+      totalNet: json['total_net'] as int? ?? 0,
+      totalPaid: json['total_paid'] as int? ?? 0,
+    );
+  }
+
+  final bool hasEmployee;
+  final String employeeId;
+  final String employeeName;
+  final String position;
+  final String from;
+  final String to;
+  final int totalGross;
+  final int totalNet;
+  final int totalPaid;
+
+  int get totalDue => totalNet - totalPaid;
 }
 
 Set<String> _permissionsFromJson(Map<String, dynamic> json) {
