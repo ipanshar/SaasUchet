@@ -716,6 +716,86 @@ func (s *PostgresStore) ListWarehouseStock(user auth.User, warehouseID string, s
 	return items, rows.Err()
 }
 
+func (s *PostgresStore) ListWarehouseTurnover(user auth.User, warehouseID string, from string, to string) ([]WarehouseTurnoverItem, error) {
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	if _, err := time.Parse("2006-01-02", from); err != nil {
+		return nil, fmt.Errorf("%w: invalid from date", ErrValidation)
+	}
+	if _, err := time.Parse("2006-01-02", to); err != nil {
+		return nil, fmt.Errorf("%w: invalid to date", ErrValidation)
+	}
+
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+		    p.id::text,
+		    p.name,
+		    p.sku,
+		    COALESCE(p.barcode, ''),
+		    p.unit_name,
+		    COALESCE(SUM(CASE WHEN m.happened_at < $3::date THEN m.quantity_delta END), 0) AS opening,
+		    COALESCE(SUM(CASE WHEN m.happened_at >= $3::date AND m.happened_at < ($4::date + INTERVAL '1 day')
+		                       AND m.quantity_delta > 0 THEN m.quantity_delta END), 0) AS receipts,
+		    COALESCE(SUM(CASE WHEN m.happened_at >= $3::date AND m.happened_at < ($4::date + INTERVAL '1 day')
+		                       AND m.quantity_delta < 0 THEN -m.quantity_delta END), 0) AS issues
+		 FROM inventory_movements m
+		 JOIN products p ON p.id = m.product_id
+		 WHERE m.company_id = $1::uuid
+		   AND m.warehouse_id = $2::uuid
+		   AND m.happened_at < ($4::date + INTERVAL '1 day')
+		   AND p.archived_at IS NULL
+		 GROUP BY p.id, p.name, p.sku, p.barcode, p.unit_name
+		 ORDER BY p.name ASC`,
+		companyID,
+		warehouseID,
+		from,
+		to,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]WarehouseTurnoverItem, 0)
+	for rows.Next() {
+		var item WarehouseTurnoverItem
+		var opening float64
+		var receipts float64
+		var issues float64
+		if err := rows.Scan(
+			&item.ProductID,
+			&item.ProductName,
+			&item.SKU,
+			&item.Barcode,
+			&item.UnitName,
+			&opening,
+			&receipts,
+			&issues,
+		); err != nil {
+			return nil, err
+		}
+		item.Opening = int(opening)
+		item.Receipts = int(receipts)
+		item.Issues = int(issues)
+		item.Closing = item.Opening + item.Receipts - item.Issues
+		if item.Opening == 0 && item.Receipts == 0 && item.Issues == 0 {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	return items, rows.Err()
+}
+
 func (s *PostgresStore) ListWarehouseMovements(user auth.User, warehouseID string, search string) ([]WarehouseMovement, error) {
 	ctx, cancel := s.withTimeout()
 	defer cancel()

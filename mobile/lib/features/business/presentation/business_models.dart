@@ -341,6 +341,30 @@ class _WarehouseStockItem {
   }
 }
 
+class _WarehouseTurnoverItem {
+  const _WarehouseTurnoverItem({
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.barcode,
+    required this.unitName,
+    required this.opening,
+    required this.receipts,
+    required this.issues,
+    required this.closing,
+  });
+
+  final String productId;
+  final String productName;
+  final String sku;
+  final String barcode;
+  final String unitName;
+  final int opening;
+  final int receipts;
+  final int issues;
+  final int closing;
+}
+
 class _WarehouseMovement {
   const _WarehouseMovement({
     required this.id,
@@ -1079,6 +1103,20 @@ _WarehouseStockItem _warehouseStockItemFromJson(Map<String, dynamic> json) =>
         'out_of_stock' => ProductStatus.outOfStock,
         _ => ProductStatus.inStock,
       },
+    );
+
+_WarehouseTurnoverItem _warehouseTurnoverItemFromJson(
+        Map<String, dynamic> json) =>
+    _WarehouseTurnoverItem(
+      productId: json['product_id'] as String? ?? '',
+      productName: json['product_name'] as String? ?? '',
+      sku: json['sku'] as String? ?? '',
+      barcode: json['barcode'] as String? ?? '',
+      unitName: json['unit_name'] as String? ?? 'шт',
+      opening: json['opening'] as int? ?? 0,
+      receipts: json['receipts'] as int? ?? 0,
+      issues: json['issues'] as int? ?? 0,
+      closing: json['closing'] as int? ?? 0,
     );
 
 _WarehouseMovement _warehouseMovementFromJson(Map<String, dynamic> json) =>

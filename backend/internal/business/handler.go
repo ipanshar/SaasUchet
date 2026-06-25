@@ -642,6 +642,19 @@ func (h Handler) WarehouseByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		response.JSON(w, http.StatusOK, map[string]any{"movements": movements})
+	case "turnover":
+		from := strings.TrimSpace(r.URL.Query().Get("from"))
+		to := strings.TrimSpace(r.URL.Query().Get("to"))
+		items, err := h.store.ListWarehouseTurnover(user, warehouseID, from, to)
+		if err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusBadRequest, "invalid period")
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]any{"items": items})
 	default:
 		response.Error(w, http.StatusNotFound, "warehouse section not found")
 	}

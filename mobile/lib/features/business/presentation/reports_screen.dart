@@ -215,6 +215,23 @@ class _ReportsScreenState extends State<_ReportsScreen> {
                 );
               },
             ),
+            const SizedBox(height: 10),
+            _ReportLinkCard(
+              icon: Icons.swap_vert_rounded,
+              title: 'Оборотная ведомость',
+              subtitle: 'Движение товаров за период · PDF / Excel',
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => _TurnoverReportScreen(
+                      accessToken: widget.accessToken,
+                      businessGateway: widget.businessGateway,
+                      companyName: widget.overview.companyName,
+                    ),
+                  ),
+                );
+              },
+            ),
             const SizedBox(height: 18),
             _ReportSection(
               title: 'Торговля',

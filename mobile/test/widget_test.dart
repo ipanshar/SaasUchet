@@ -463,6 +463,28 @@ class _FakeBusinessGateway extends BusinessGateway {
   }
 
   @override
+  Future<List<Map<String, dynamic>>> fetchWarehouseTurnover({
+    required String accessToken,
+    required String warehouseId,
+    required String from,
+    required String to,
+  }) async {
+    return [
+      {
+        'product_id': 'prd_1',
+        'product_name': 'Ноутбук Lenovo ThinkPad',
+        'sku': 'TECH-001',
+        'barcode': '',
+        'unit_name': 'шт',
+        'opening': 0,
+        'receipts': 15,
+        'issues': 0,
+        'closing': 15,
+      },
+    ];
+  }
+
+  @override
   Future<Map<String, dynamic>> createInventoryDocument({
     required String accessToken,
     required Map<String, dynamic> payload,

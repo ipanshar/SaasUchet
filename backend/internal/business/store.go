@@ -16,6 +16,7 @@ type Store interface {
 	CreateWarehouse(user auth.User, input CreateWarehouseInput) (Warehouse, error)
 	ListWarehouseStock(user auth.User, warehouseID string, search string) ([]WarehouseStockItem, error)
 	ListWarehouseMovements(user auth.User, warehouseID string, search string) ([]WarehouseMovement, error)
+	ListWarehouseTurnover(user auth.User, warehouseID string, from string, to string) ([]WarehouseTurnoverItem, error)
 	ListProducts(user auth.User) ([]Product, error)
 	CreateProduct(user auth.User, input CreateProductInput) (Product, error)
 	UpdateProduct(user auth.User, productID string, input CreateProductInput) (Product, error)
@@ -221,6 +222,17 @@ func (s *MemoryStore) ListWarehouseMovements(user auth.User, warehouseID string,
 	}
 
 	return movements, nil
+}
+
+func (s *MemoryStore) ListWarehouseTurnover(user auth.User, warehouseID string, from string, to string) ([]WarehouseTurnoverItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.findMemoryWarehouse(user.ID, warehouseID); !ok {
+		return nil, fmt.Errorf("%w: warehouse not found", ErrValidation)
+	}
+
+	return []WarehouseTurnoverItem{}, nil
 }
 
 func (s *MemoryStore) ListProducts(user auth.User) ([]Product, error) {

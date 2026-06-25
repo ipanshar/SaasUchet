@@ -246,6 +246,18 @@ type WarehouseStockItem struct {
 	Status      string `json:"status"`
 }
 
+type WarehouseTurnoverItem struct {
+	ProductID   string `json:"product_id"`
+	ProductName string `json:"product_name"`
+	SKU         string `json:"sku"`
+	Barcode     string `json:"barcode"`
+	UnitName    string `json:"unit_name"`
+	Opening     int    `json:"opening"`
+	Receipts    int    `json:"receipts"`
+	Issues      int    `json:"issues"`
+	Closing     int    `json:"closing"`
+}
+
 type WarehouseMovement struct {
 	ID               string `json:"id"`
 	DocumentID       string `json:"document_id"`

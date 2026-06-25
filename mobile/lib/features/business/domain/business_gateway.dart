@@ -105,6 +105,13 @@ abstract class BusinessGateway {
     String? search,
   });
 
+  Future<List<Map<String, dynamic>>> fetchWarehouseTurnover({
+    required String accessToken,
+    required String warehouseId,
+    required String from,
+    required String to,
+  });
+
   Future<Map<String, dynamic>> createInventoryDocument({
     required String accessToken,
     required Map<String, dynamic> payload,
