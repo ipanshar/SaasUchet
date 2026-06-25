@@ -271,3 +271,125 @@ _PayrollPeriodDetail _payrollPeriodDetailFromJson(Map<String, dynamic> j) =>
 
 String _formatHours(double v) =>
     v == v.truncateToDouble() ? v.toInt().toString() : v.toString();
+
+class _EmployeeStatementEntry {
+  const _EmployeeStatementEntry({
+    required this.periodYear,
+    required this.periodMonth,
+    required this.title,
+    required this.status,
+    required this.daysWorked,
+    required this.hoursWorked,
+    required this.baseAmount,
+    required this.pieceAmount,
+    required this.bonusAmount,
+    required this.overtimeAmount,
+    required this.vacationAmount,
+    required this.deductions,
+    required this.grossAmount,
+    required this.netAmount,
+    required this.isPaid,
+    required this.paidAt,
+  });
+
+  final int periodYear;
+  final int periodMonth;
+  final String title;
+  final String status;
+  final double daysWorked;
+  final double hoursWorked;
+  final int baseAmount;
+  final int pieceAmount;
+  final int bonusAmount;
+  final int overtimeAmount;
+  final int vacationAmount;
+  final int deductions;
+  final int grossAmount;
+  final int netAmount;
+  final bool isPaid;
+  final String paidAt;
+
+  String get periodLabel {
+    if (title.isNotEmpty) return title;
+    return '${periodMonth.toString().padLeft(2, '0')}.$periodYear';
+  }
+}
+
+class _EmployeeStatement {
+  const _EmployeeStatement({
+    required this.employeeId,
+    required this.employeeName,
+    required this.position,
+    required this.from,
+    required this.to,
+    required this.totalBase,
+    required this.totalPiece,
+    required this.totalBonus,
+    required this.totalOvertime,
+    required this.totalVacation,
+    required this.totalDeductions,
+    required this.totalGross,
+    required this.totalNet,
+    required this.totalPaid,
+    required this.entries,
+  });
+
+  final String employeeId;
+  final String employeeName;
+  final String position;
+  final String from;
+  final String to;
+  final int totalBase;
+  final int totalPiece;
+  final int totalBonus;
+  final int totalOvertime;
+  final int totalVacation;
+  final int totalDeductions;
+  final int totalGross;
+  final int totalNet;
+  final int totalPaid;
+  final List<_EmployeeStatementEntry> entries;
+}
+
+_EmployeeStatementEntry _employeeStatementEntryFromJson(
+        Map<String, dynamic> j) =>
+    _EmployeeStatementEntry(
+      periodYear: j['period_year'] as int? ?? 0,
+      periodMonth: j['period_month'] as int? ?? 0,
+      title: j['title'] as String? ?? '',
+      status: j['status'] as String? ?? '',
+      daysWorked: (j['days_worked'] as num?)?.toDouble() ?? 0,
+      hoursWorked: (j['hours_worked'] as num?)?.toDouble() ?? 0,
+      baseAmount: j['base_amount'] as int? ?? 0,
+      pieceAmount: j['piece_amount'] as int? ?? 0,
+      bonusAmount: j['bonus_amount'] as int? ?? 0,
+      overtimeAmount: j['overtime_amount'] as int? ?? 0,
+      vacationAmount: j['vacation_amount'] as int? ?? 0,
+      deductions: j['deductions'] as int? ?? 0,
+      grossAmount: j['gross_amount'] as int? ?? 0,
+      netAmount: j['net_amount'] as int? ?? 0,
+      isPaid: j['is_paid'] as bool? ?? false,
+      paidAt: j['paid_at'] as String? ?? '',
+    );
+
+_EmployeeStatement _employeeStatementFromJson(Map<String, dynamic> j) =>
+    _EmployeeStatement(
+      employeeId: j['employee_id'] as String? ?? '',
+      employeeName: j['employee_name'] as String? ?? '',
+      position: j['position'] as String? ?? '',
+      from: j['from'] as String? ?? '',
+      to: j['to'] as String? ?? '',
+      totalBase: j['total_base'] as int? ?? 0,
+      totalPiece: j['total_piece'] as int? ?? 0,
+      totalBonus: j['total_bonus'] as int? ?? 0,
+      totalOvertime: j['total_overtime'] as int? ?? 0,
+      totalVacation: j['total_vacation'] as int? ?? 0,
+      totalDeductions: j['total_deductions'] as int? ?? 0,
+      totalGross: j['total_gross'] as int? ?? 0,
+      totalNet: j['total_net'] as int? ?? 0,
+      totalPaid: j['total_paid'] as int? ?? 0,
+      entries: (j['entries'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(_employeeStatementEntryFromJson)
+          .toList(growable: false),
+    );

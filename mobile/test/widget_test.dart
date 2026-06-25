@@ -533,6 +533,32 @@ class _FakeBusinessGateway extends BusinessGateway {
   }
 
   @override
+  Future<Map<String, dynamic>> fetchEmployeeStatement({
+    required String accessToken,
+    required String employeeId,
+    required String from,
+    required String to,
+  }) async {
+    return {
+      'employee_id': employeeId,
+      'employee_name': 'Сотрудник',
+      'position': '',
+      'from': from,
+      'to': to,
+      'total_base': 0,
+      'total_piece': 0,
+      'total_bonus': 0,
+      'total_overtime': 0,
+      'total_vacation': 0,
+      'total_deductions': 0,
+      'total_gross': 0,
+      'total_net': 0,
+      'total_paid': 0,
+      'entries': <Map<String, dynamic>>[],
+    };
+  }
+
+  @override
   Future<Map<String, dynamic>> createInventoryDocument({
     required String accessToken,
     required Map<String, dynamic> payload,

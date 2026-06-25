@@ -267,6 +267,23 @@ class _ReportsScreenState extends State<_ReportsScreen> {
                 );
               },
             ),
+            const SizedBox(height: 10),
+            _ReportLinkCard(
+              icon: Icons.badge_rounded,
+              title: 'Зарплатная карточка сотрудника',
+              subtitle: 'Начисления, премии, удержания за период · PDF / Excel',
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => _EmployeeReportScreen(
+                      accessToken: widget.accessToken,
+                      businessGateway: widget.businessGateway,
+                      companyName: widget.overview.companyName,
+                    ),
+                  ),
+                );
+              },
+            ),
             const SizedBox(height: 18),
             _ReportSection(
               title: 'Торговля',

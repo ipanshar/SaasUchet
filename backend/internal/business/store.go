@@ -19,6 +19,7 @@ type Store interface {
 	ListWarehouseTurnover(user auth.User, warehouseID string, from string, to string) ([]WarehouseTurnoverItem, error)
 	FinancialSummary(user auth.User, from string, to string) (FinancialSummary, error)
 	CounterpartyStatement(user auth.User, clientID string, from string, to string) (CounterpartyStatement, error)
+	EmployeeStatement(user auth.User, employeeID string, from string, to string) (EmployeeStatement, error)
 	ListProducts(user auth.User) ([]Product, error)
 	CreateProduct(user auth.User, input CreateProductInput) (Product, error)
 	UpdateProduct(user auth.User, productID string, input CreateProductInput) (Product, error)
@@ -1204,6 +1205,10 @@ func (s *MemoryStore) UpdateProductionOrderStatus(_ auth.User, orderID string, i
 
 func (s *MemoryStore) ListEmployees(_ auth.User) ([]Employee, error) {
 	return []Employee{}, nil
+}
+
+func (s *MemoryStore) EmployeeStatement(_ auth.User, employeeID string, from string, to string) (EmployeeStatement, error) {
+	return EmployeeStatement{EmployeeID: employeeID, From: from, To: to, Entries: []EmployeeStatementEntry{}}, nil
 }
 
 func (s *MemoryStore) CreateEmployee(_ auth.User, input CreateEmployeeInput) (Employee, error) {

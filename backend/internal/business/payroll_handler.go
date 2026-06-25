@@ -60,8 +60,38 @@ func (h Handler) EmployeeByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	employeeID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/payroll/employees/"))
-	if employeeID == "" || strings.Contains(employeeID, "/") {
+	path := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/payroll/employees/"))
+	parts := strings.Split(path, "/")
+	employeeID := strings.TrimSpace(parts[0])
+	if employeeID == "" {
+		response.Error(w, http.StatusNotFound, "employee not found")
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "statement" {
+		if r.Method != http.MethodGet {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if !h.requireActiveCompanyPermission(w, user, permPayrollRead) {
+			return
+		}
+		from := strings.TrimSpace(r.URL.Query().Get("from"))
+		to := strings.TrimSpace(r.URL.Query().Get("to"))
+		statement, err := h.store.EmployeeStatement(user, employeeID, from, to)
+		if err != nil {
+			if errors.Is(err, ErrValidation) {
+				response.Error(w, http.StatusBadRequest, "invalid statement request")
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		response.JSON(w, http.StatusOK, statement)
+		return
+	}
+
+	if len(parts) != 1 {
 		response.Error(w, http.StatusNotFound, "employee not found")
 		return
 	}

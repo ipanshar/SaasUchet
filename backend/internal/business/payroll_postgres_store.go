@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/altyncloud/saas-uchet/backend/internal/auth"
@@ -46,6 +47,107 @@ func (s *PostgresStore) ListEmployees(user auth.User) ([]Employee, error) {
 		employees = append(employees, emp)
 	}
 	return employees, rows.Err()
+}
+
+func (s *PostgresStore) EmployeeStatement(user auth.User, employeeID string, from string, to string) (EmployeeStatement, error) {
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	employeeID = strings.TrimSpace(employeeID)
+	if _, err := time.Parse("2006-01-02", from); err != nil {
+		return EmployeeStatement{}, fmt.Errorf("%w: invalid from date", ErrValidation)
+	}
+	if _, err := time.Parse("2006-01-02", to); err != nil {
+		return EmployeeStatement{}, fmt.Errorf("%w: invalid to date", ErrValidation)
+	}
+
+	ctx, cancel := s.withTimeout()
+	defer cancel()
+
+	companyID, err := s.ensurePrimaryCompany(ctx, user)
+	if err != nil {
+		return EmployeeStatement{}, err
+	}
+
+	statement := EmployeeStatement{EmployeeID: employeeID, From: from, To: to}
+
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT full_name, COALESCE(position, '')
+		 FROM employees WHERE id = $1::uuid AND company_id = $2::uuid`,
+		employeeID,
+		companyID,
+	).Scan(&statement.EmployeeName, &statement.Position); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return EmployeeStatement{}, fmt.Errorf("%w: employee not found", ErrValidation)
+		}
+		return EmployeeStatement{}, err
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT p.period_year, p.period_month, p.title, p.status,
+		        e.days_worked, e.hours_worked,
+		        e.base_amount, e.piece_amount, e.bonus_amount, e.overtime_amount, e.vacation_amount,
+		        e.deductions, e.gross_amount, e.net_amount,
+		        (e.money_document_id IS NOT NULL), COALESCE(e.paid_at::text, '')
+		 FROM payroll_entries e
+		 JOIN payroll_periods p ON p.id = e.period_id
+		 WHERE p.company_id = $1::uuid AND e.employee_id = $2::uuid
+		   AND make_date(p.period_year, p.period_month, 1) >= date_trunc('month', $3::date)::date
+		   AND make_date(p.period_year, p.period_month, 1) <= $4::date
+		 ORDER BY p.period_year ASC, p.period_month ASC`,
+		companyID,
+		employeeID,
+		from,
+		to,
+	)
+	if err != nil {
+		return EmployeeStatement{}, err
+	}
+	defer rows.Close()
+
+	entries := make([]EmployeeStatementEntry, 0)
+	for rows.Next() {
+		var e EmployeeStatementEntry
+		if err := rows.Scan(
+			&e.PeriodYear,
+			&e.PeriodMonth,
+			&e.Title,
+			&e.Status,
+			&e.DaysWorked,
+			&e.HoursWorked,
+			&e.BaseAmount,
+			&e.PieceAmount,
+			&e.BonusAmount,
+			&e.OvertimeAmount,
+			&e.VacationAmount,
+			&e.Deductions,
+			&e.GrossAmount,
+			&e.NetAmount,
+			&e.IsPaid,
+			&e.PaidAt,
+		); err != nil {
+			return EmployeeStatement{}, err
+		}
+		statement.TotalBase += e.BaseAmount
+		statement.TotalPiece += e.PieceAmount
+		statement.TotalBonus += e.BonusAmount
+		statement.TotalOvertime += e.OvertimeAmount
+		statement.TotalVacation += e.VacationAmount
+		statement.TotalDeductions += e.Deductions
+		statement.TotalGross += e.GrossAmount
+		statement.TotalNet += e.NetAmount
+		if e.IsPaid {
+			statement.TotalPaid += e.NetAmount
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return EmployeeStatement{}, err
+	}
+
+	statement.Entries = entries
+	return statement, nil
 }
 
 func (s *PostgresStore) CreateEmployee(user auth.User, input CreateEmployeeInput) (Employee, error) {

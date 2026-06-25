@@ -181,6 +181,43 @@ type PayrollPeriodDetail struct {
 	Entries []PayrollEntry `json:"entries"`
 }
 
+type EmployeeStatementEntry struct {
+	PeriodYear     int     `json:"period_year"`
+	PeriodMonth    int     `json:"period_month"`
+	Title          string  `json:"title"`
+	Status         string  `json:"status"`
+	DaysWorked     float64 `json:"days_worked"`
+	HoursWorked    float64 `json:"hours_worked"`
+	BaseAmount     int     `json:"base_amount"`
+	PieceAmount    int     `json:"piece_amount"`
+	BonusAmount    int     `json:"bonus_amount"`
+	OvertimeAmount int     `json:"overtime_amount"`
+	VacationAmount int     `json:"vacation_amount"`
+	Deductions     int     `json:"deductions"`
+	GrossAmount    int     `json:"gross_amount"`
+	NetAmount      int     `json:"net_amount"`
+	IsPaid         bool    `json:"is_paid"`
+	PaidAt         string  `json:"paid_at,omitempty"`
+}
+
+type EmployeeStatement struct {
+	EmployeeID     string                   `json:"employee_id"`
+	EmployeeName   string                   `json:"employee_name"`
+	Position       string                   `json:"position"`
+	From           string                   `json:"from"`
+	To             string                   `json:"to"`
+	TotalBase      int                      `json:"total_base"`
+	TotalPiece     int                      `json:"total_piece"`
+	TotalBonus     int                      `json:"total_bonus"`
+	TotalOvertime  int                      `json:"total_overtime"`
+	TotalVacation  int                      `json:"total_vacation"`
+	TotalDeductions int                     `json:"total_deductions"`
+	TotalGross     int                      `json:"total_gross"`
+	TotalNet       int                      `json:"total_net"`
+	TotalPaid      int                      `json:"total_paid"`
+	Entries        []EmployeeStatementEntry `json:"entries"`
+}
+
 type UpdatePayrollEntryInput struct {
 	DaysWorked    float64 `json:"days_worked"`
 	HoursWorked   float64 `json:"hours_worked"`
