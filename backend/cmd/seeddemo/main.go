@@ -30,7 +30,7 @@ import (
 const password = "12345678"
 
 var (
-	baseURL = getenv("API_BASE_URL", "http://localhost:8080")
+	baseURL = getenv("API_BASE_URL", "http://localhost:9090")
 	httpc   = &http.Client{Timeout: 30 * time.Second}
 	rng     = rand.New(rand.NewSource(time.Now().UnixNano()))
 	suffix  = time.Now().Unix() % 1_000_000
