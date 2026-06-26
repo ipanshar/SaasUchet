@@ -612,6 +612,7 @@ class _OrderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _BusinessCard(
+      onTap: () => _showDetail(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -729,6 +730,21 @@ class _OrderTile extends StatelessWidget {
     );
   }
 
+  Future<void> _showDetail(BuildContext context) async {
+    final recipe = recipes.where((r) => r.id == order.recipeId).firstOrNull;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _ProductionOrderDetailSheet(
+        order: order,
+        recipe: recipe,
+        accessToken: accessToken,
+        gateway: gateway,
+      ),
+    );
+  }
+
   Future<void> _changeStatus(BuildContext context, String newStatus) async {
     try {
       await gateway.updateProductionOrderStatus(
@@ -743,6 +759,362 @@ class _OrderTile extends StatelessWidget {
             .showSnackBar(SnackBar(content: Text('Ошибка: $e')));
       }
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Production order detail sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ProductionOrderDetailSheet extends StatefulWidget {
+  const _ProductionOrderDetailSheet({
+    required this.order,
+    required this.recipe,
+    required this.accessToken,
+    required this.gateway,
+  });
+
+  final _ProductionOrder order;
+  final _Recipe? recipe;
+  final String accessToken;
+  final BusinessGateway gateway;
+
+  @override
+  State<_ProductionOrderDetailSheet> createState() =>
+      _ProductionOrderDetailSheetState();
+}
+
+class _ProductionOrderDetailSheetState
+    extends State<_ProductionOrderDetailSheet> {
+  bool _isLoading = false;
+  String? _error;
+  _InventoryDocumentDetail? _outDetail;
+  _InventoryDocumentDetail? _inDetail;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.order.outDocumentId.isNotEmpty ||
+        widget.order.inDocumentId.isNotEmpty) {
+      _loadDocuments();
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchOrNull(String documentId) {
+    if (documentId.isEmpty) {
+      return Future.value(null);
+    }
+    return widget.gateway.fetchInventoryDocumentDetail(
+      accessToken: widget.accessToken,
+      documentId: documentId,
+    );
+  }
+
+  Future<void> _loadDocuments() async {
+    setState(() => _isLoading = true);
+    try {
+      final results = await Future.wait([
+        _fetchOrNull(widget.order.outDocumentId),
+        _fetchOrNull(widget.order.inDocumentId),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _outDetail = results[0] == null
+            ? null
+            : _inventoryDocumentDetailFromJson(results[0]!);
+        _inDetail = results[1] == null
+            ? null
+            : _inventoryDocumentDetailFromJson(results[1]!);
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Не удалось загрузить данные документа';
+        _isLoading = false;
+      });
+    }
+  }
+
+  String? _unitFor(String productId, {required bool isOutput}) {
+    final recipe = widget.recipe;
+    if (recipe == null) return null;
+    if (isOutput) {
+      return recipe.outputs
+          .where((o) => o.productId == productId)
+          .firstOrNull
+          ?.unitName;
+    }
+    return recipe.ingredients
+        .where((i) => i.productId == productId)
+        .firstOrNull
+        ?.unitName;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final order = widget.order;
+    final recipe = widget.recipe;
+    final isCompleted = order.status == 'completed';
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF7FAF8),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _SheetDragHandle(title: order.documentNo),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            order.recipeName.isEmpty
+                                ? 'Без техкарты'
+                                : order.recipeName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        _StatusBadge(
+                            label: order.statusLabel, kind: order.statusKind),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const _SectionLabel(label: 'Сведения'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _LabelValue(
+                            label: 'Количество',
+                            value:
+                                '${_formatQty(order.plannedQuantity)} шт',
+                          ),
+                        ),
+                        Expanded(
+                          child: _LabelValue(
+                            label: 'Партия',
+                            value: order.batchNumber.isEmpty
+                                ? '—'
+                                : order.batchNumber,
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _LabelValue(
+                            label: 'Сырьё со склада',
+                            value: order.sourceWarehouseName.isEmpty
+                                ? '—'
+                                : order.sourceWarehouseName,
+                          ),
+                        ),
+                        Expanded(
+                          child: _LabelValue(
+                            label: 'Выход на склад',
+                            value: order.outputWarehouseName.isEmpty
+                                ? '—'
+                                : order.outputWarehouseName,
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (order.responsibleEmployee.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _LabelValue(
+                        label: 'Ответственный',
+                        value: order.responsibleEmployee,
+                      ),
+                    ],
+                    if (order.notes.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _LabelValue(label: 'Примечание', value: order.notes),
+                    ],
+                    const SizedBox(height: 20),
+                    const _SectionLabel(label: 'Участники производства'),
+                    if (order.participants.isEmpty)
+                      const Text(
+                        'Участники не указаны',
+                        style: TextStyle(color: Color(0xFF94A3B8)),
+                      )
+                    else
+                      ...order.participants.map(
+                        (p) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  p.employeeName.isEmpty
+                                      ? 'Сотрудник'
+                                      : p.employeeName,
+                                  style:
+                                      const TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                              Text(
+                                '${_formatQty(p.sharePercent)}%',
+                                style: const TextStyle(
+                                    color: Color(0xFF64748B), fontSize: 13),
+                              ),
+                              if (recipe != null &&
+                                  recipe.payrollAmount > 0) ...[
+                                const SizedBox(width: 10),
+                                Text(
+                                  formatMoney(
+                                    (recipe.payrollAmount *
+                                            p.sharePercent /
+                                            100)
+                                        .round(),
+                                  ),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF00A86B),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                    _SectionLabel(
+                      label: isCompleted
+                          ? 'Списано сырья'
+                          : 'Плановый расход сырья',
+                    ),
+                    if (_isLoading)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (_error != null)
+                      Text(_error!,
+                          style: const TextStyle(color: Color(0xFFEF4444)))
+                    else if (_outDetail != null)
+                      ..._outDetail!.lines.map(
+                        (line) => _MaterialLineRow(
+                          name: line.productName,
+                          quantity: line.quantity.toDouble(),
+                          unit: _unitFor(line.productId, isOutput: false) ??
+                              '',
+                          cost: line.lineTotal,
+                        ),
+                      )
+                    else if (recipe != null && recipe.ingredients.isNotEmpty)
+                      ...recipe.ingredients.map(
+                        (i) => _MaterialLineRow(
+                          name: i.productName,
+                          quantity: i.quantity * order.plannedQuantity,
+                          unit: i.unitName,
+                        ),
+                      )
+                    else
+                      const Text('Нет данных',
+                          style: TextStyle(color: Color(0xFF94A3B8))),
+                    const SizedBox(height: 20),
+                    _SectionLabel(
+                      label: isCompleted
+                          ? 'Выпущено продукции'
+                          : 'Плановый выход продукции',
+                    ),
+                    if (_isLoading)
+                      const SizedBox.shrink()
+                    else if (_inDetail != null)
+                      ..._inDetail!.lines.map(
+                        (line) => _MaterialLineRow(
+                          name: line.productName,
+                          quantity: line.quantity.toDouble(),
+                          unit: _unitFor(line.productId, isOutput: true) ??
+                              '',
+                          cost: line.lineTotal,
+                        ),
+                      )
+                    else if (recipe != null && recipe.outputs.isNotEmpty)
+                      ...recipe.outputs.map(
+                        (o) => _MaterialLineRow(
+                          name: o.productName,
+                          quantity: o.quantity * order.plannedQuantity,
+                          unit: o.unitName,
+                        ),
+                      )
+                    else
+                      const Text('Нет данных',
+                          style: TextStyle(color: Color(0xFF94A3B8))),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MaterialLineRow extends StatelessWidget {
+  const _MaterialLineRow({
+    required this.name,
+    required this.quantity,
+    required this.unit,
+    this.cost,
+  });
+
+  final String name;
+  final double quantity;
+  final String unit;
+  final int? cost;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              name.isEmpty ? 'Товар' : name,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${_formatQty(quantity)} $unit'.trim(),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              if (cost != null)
+                Text(
+                  formatMoney(cost!),
+                  style:
+                      const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 

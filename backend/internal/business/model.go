@@ -416,6 +416,7 @@ type Finance struct {
 	Expense           int               `json:"expense"`
 	Accounts          []BankAccount     `json:"accounts"`
 	ExpenseCategories []ExpenseCategory `json:"expense_categories"`
+	IncomeCategories  []ExpenseCategory `json:"income_categories"`
 	Transactions      []Transaction     `json:"transactions"`
 	CashFlows         []CashFlow        `json:"cash_flows"`
 }
@@ -1959,6 +1960,8 @@ type ProductionOrder struct {
 	Notes               string                  `json:"notes"`
 	CreatedAt           string                  `json:"created_at"`
 	Participants        []ProductionParticipant `json:"participants"`
+	OutDocumentID       string                  `json:"production_out_document_id"`
+	InDocumentID        string                  `json:"production_in_document_id"`
 }
 
 type CreateProductionOrderInput struct {

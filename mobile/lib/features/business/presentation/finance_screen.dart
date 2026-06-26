@@ -254,11 +254,8 @@ class _FinanceScreenState extends State<_FinanceScreen> {
                           ),
                         ),
                         const SizedBox(height: 14),
-                        SizedBox(
-                          height: 220,
-                          child: _ExpensesChart(
-                            categories: widget.finance.expenseCategories,
-                          ),
+                        _ExpensesChart(
+                          categories: widget.finance.expenseCategories,
                         ),
                       ],
                     ),
@@ -393,6 +390,12 @@ class _FinanceScreenState extends State<_FinanceScreen> {
       builder: (context) => _CreateMoneyOperationSheet(
         accounts: widget.finance.accounts,
         transferMode: false,
+        incomeCategories: widget.finance.incomeCategories
+            .map((category) => category.name)
+            .toList(growable: false),
+        expenseCategories: widget.finance.expenseCategories
+            .map((category) => category.name)
+            .toList(growable: false),
       ),
     );
 
@@ -702,10 +705,14 @@ class _CreateMoneyOperationSheet extends StatefulWidget {
   const _CreateMoneyOperationSheet({
     required this.accounts,
     required this.transferMode,
+    this.incomeCategories = const [],
+    this.expenseCategories = const [],
   });
 
   final List<_BankAccount> accounts;
   final bool transferMode;
+  final List<String> incomeCategories;
+  final List<String> expenseCategories;
 
   @override
   State<_CreateMoneyOperationSheet> createState() =>
@@ -856,10 +863,32 @@ class _CreateMoneyOperationSheetState
                     ),
                     const SizedBox(height: 12),
                     if (!widget.transferMode) ...[
-                      _ClientTextField(
-                        controller: _categoryController,
-                        label: 'Категория',
-                        validator: _requiredValidator,
+                      Autocomplete<String>(
+                        textEditingController: _categoryController,
+                        optionsBuilder: (textValue) {
+                          final source = _direction == 'income'
+                              ? widget.incomeCategories
+                              : widget.expenseCategories;
+                          final query = textValue.text.trim().toLowerCase();
+                          if (query.isEmpty) {
+                            return source;
+                          }
+                          return source.where(
+                            (category) =>
+                                category.toLowerCase().contains(query),
+                          );
+                        },
+                        fieldViewBuilder:
+                            (context, controller, focusNode, onSubmitted) {
+                          return TextFormField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            decoration:
+                                const InputDecoration(labelText: 'Категория'),
+                            validator: _requiredValidator,
+                            onFieldSubmitted: (_) => onSubmitted(),
+                          );
+                        },
                       ),
                       const SizedBox(height: 12),
                     ],

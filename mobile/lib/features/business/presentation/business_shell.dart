@@ -151,12 +151,19 @@ class _BusinessShellState extends State<BusinessShell> {
   _OverviewData? _overview;
   bool _isLoading = true;
   String? _loadError;
+  PageController? _pageController;
 
   @override
   void initState() {
     super.initState();
     _session = widget.session;
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _pageController?.dispose();
+    super.dispose();
   }
 
   Future<void> _bootstrap() async {
@@ -857,7 +864,8 @@ class _BusinessShellState extends State<BusinessShell> {
 
   @override
   Widget build(BuildContext context) {
-    final showFab = _activeTab != BusinessTab.more &&
+    final showFab = _activeTab != BusinessTab.dashboard &&
+        _activeTab != BusinessTab.more &&
         _activeTab != BusinessTab.catalog &&
         _activeTab != BusinessTab.crm &&
         _activeTab != BusinessTab.production &&
@@ -915,11 +923,43 @@ class _BusinessShellState extends State<BusinessShell> {
               ),
             )
           else
-            IndexedStack(
-              index: _activeTabs.indexOf(_activeTab),
-              children: _activeTabs
-                  .map((tab) => _buildScreen(tab, overview))
-                  .toList(),
+            Builder(
+              builder: (context) {
+                final targetPage = _activeTabs.indexOf(_activeTab);
+                final pageController = _pageController ??=
+                    PageController(initialPage: targetPage < 0 ? 0 : targetPage);
+                if (targetPage >= 0) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted || !pageController.hasClients) return;
+                    final current = pageController.page?.round();
+                    if (current != targetPage) {
+                      pageController.animateToPage(
+                        targetPage,
+                        duration: const Duration(milliseconds: 260),
+                        curve: Curves.easeOutCubic,
+                      );
+                    }
+                  });
+                }
+                return PageView(
+                  controller: pageController,
+                  onPageChanged: (index) {
+                    final tab = _activeTabs[index];
+                    if (tab == _activeTab) return;
+                    setState(() {
+                      _activeTab = tab;
+                      _isFabExpanded = false;
+                    });
+                  },
+                  children: _activeTabs
+                      .map(
+                        (tab) => _KeepAlivePage(
+                          child: _buildScreen(tab, overview),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
             ),
           if (showFab && fabActions.isNotEmpty)
             Positioned(
@@ -949,6 +989,29 @@ class _BusinessShellState extends State<BusinessShell> {
         },
       ),
     );
+  }
+}
+
+/// Keeps a tab's screen alive while swiped off-screen in the [PageView],
+/// so switching tabs doesn't refetch data or reset scroll/filter state.
+class _KeepAlivePage extends StatefulWidget {
+  const _KeepAlivePage({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }
 

@@ -556,12 +556,12 @@ class AppTheme {
           .copyWith(
             headlineMedium: base.textTheme.headlineMedium?.copyWith(
               fontSize: 30,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w700,
               letterSpacing: 0,
             ),
             titleLarge: base.textTheme.titleLarge?.copyWith(
               fontSize: 20,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w700,
               letterSpacing: 0,
             ),
             titleMedium: base.textTheme.titleMedium?.copyWith(

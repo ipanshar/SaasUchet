@@ -289,10 +289,12 @@ class _GradientHeader extends StatelessWidget {
     final tokens = context.appThemeTokens;
 
     return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       padding: EdgeInsets.fromLTRB(16, 20, 16, child != null ? 34 : 20),
       decoration: BoxDecoration(
         gradient: tokens.heroGradient,
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(30)),
+        borderRadius: const BorderRadius.all(Radius.circular(24)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -327,7 +329,7 @@ class _GradientHeader extends StatelessWidget {
                                     style: TextStyle(
                                       color: tokens.onPrimary,
                                       fontSize: 28,
-                                      fontWeight: FontWeight.w800,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),
@@ -346,7 +348,7 @@ class _GradientHeader extends StatelessWidget {
                             style: TextStyle(
                               color: tokens.onPrimary,
                               fontSize: 28,
-                              fontWeight: FontWeight.w800,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                       ],
@@ -410,8 +412,8 @@ class _BusinessCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: tokens.shadow,
-            blurRadius: 20,
-            offset: const Offset(0, 10),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -516,7 +518,7 @@ class _KpiCard extends StatelessWidget {
                     style: TextStyle(
                       color: tokens.cardForeground,
                       fontSize: 24,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -533,12 +535,14 @@ class _KpiCard extends StatelessWidget {
             ),
           ),
           Container(
-            padding: const EdgeInsets.all(10),
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: iconBackground,
-              borderRadius: BorderRadius.circular(16),
+              color: tokens.tone(iconBackground, 0.14),
+              shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: Colors.white),
+            child: Icon(icon, color: iconBackground, size: 17),
           ),
         ],
       ),

@@ -1085,6 +1085,7 @@ class _FinanceOverview {
     required this.expense,
     required this.accounts,
     required this.expenseCategories,
+    required this.incomeCategories,
     required this.transactions,
     required this.cashFlows,
   });
@@ -1100,6 +1101,11 @@ class _FinanceOverview {
           .toList(growable: false),
       expenseCategories:
           (json['expense_categories'] as List<dynamic>? ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(_expenseCategoryFromJson)
+              .toList(growable: false),
+      incomeCategories:
+          (json['income_categories'] as List<dynamic>? ?? const [])
               .whereType<Map<String, dynamic>>()
               .map(_expenseCategoryFromJson)
               .toList(growable: false),
@@ -1119,6 +1125,7 @@ class _FinanceOverview {
   final int expense;
   final List<_BankAccount> accounts;
   final List<_ExpenseCategory> expenseCategories;
+  final List<_ExpenseCategory> incomeCategories;
   final List<_Transaction> transactions;
   final List<_CashFlowData> cashFlows;
 }
@@ -1856,6 +1863,8 @@ class _ProductionOrder {
     required this.notes,
     required this.createdAt,
     required this.participants,
+    required this.outDocumentId,
+    required this.inDocumentId,
   });
   final String id;
   final String documentNo;
@@ -1873,6 +1882,8 @@ class _ProductionOrder {
   final String notes;
   final String createdAt;
   final List<_ProductionParticipant> participants;
+  final String outDocumentId;
+  final String inDocumentId;
 
   String get statusLabel {
     switch (status) {
@@ -1940,4 +1951,6 @@ _ProductionOrder _productionOrderFromJson(Map<String, dynamic> j) =>
           .whereType<Map<String, dynamic>>()
           .map(_productionParticipantFromJson)
           .toList(growable: false),
+      outDocumentId: j['production_out_document_id'] as String? ?? '',
+      inDocumentId: j['production_in_document_id'] as String? ?? '',
     );

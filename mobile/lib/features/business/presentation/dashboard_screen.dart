@@ -76,16 +76,6 @@ class _DashboardScreen extends StatelessWidget {
               child: Column(
                 children: [
                   _DashboardKpiGrid(kpis: dashboard.kpis),
-                  if (overview.myPayroll.hasEmployee ||
-                      overview.activeRole == 'staff') ...[
-                    const SizedBox(height: 16),
-                    _DashboardMyPayrollCard(
-                      payroll: overview.myPayroll,
-                      onOpen: () {
-                        onOpenBusinessTab(BusinessTab.salary);
-                      },
-                    ),
-                  ],
                   const SizedBox(height: 16),
                   _DashboardHighlightsGrid(
                     highlights: dashboard.highlights,
@@ -386,8 +376,8 @@ class _DashboardHero extends StatelessWidget {
             value,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 34,
-              fontWeight: FontWeight.w800,
+              fontSize: 30,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
@@ -460,114 +450,6 @@ class _DashboardKpiGrid extends StatelessWidget {
   }
 }
 
-class _DashboardMyPayrollCard extends StatelessWidget {
-  const _DashboardMyPayrollCard({
-    required this.payroll,
-    required this.onOpen,
-  });
-
-  final _MyPayrollOverview payroll;
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.appThemeTokens;
-    return _BusinessCard(
-      onTap: onOpen,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: tokens.success.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(
-                  payroll.hasEmployee
-                      ? Icons.payments_rounded
-                      : Icons.person_search_rounded,
-                  color: tokens.success,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Моя зарплата',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      payroll.hasEmployee
-                          ? _dashboardPayrollPeriod(payroll.from, payroll.to)
-                          : 'Пользователь не связан с сотрудником',
-                      style: TextStyle(
-                        color: tokens.mutedForeground,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.arrow_forward_ios_rounded,
-                  size: 16, color: tokens.mutedForeground),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (payroll.hasEmployee)
-            Row(
-              children: [
-                Expanded(
-                  child: _DashboardMiniStat(
-                    label: 'Начислено',
-                    value: formatMoney(payroll.totalGross),
-                    color: tokens.foreground,
-                  ),
-                ),
-                Expanded(
-                  child: _DashboardMiniStat(
-                    label: 'К выплате',
-                    value: formatMoney(payroll.totalNet),
-                    color: tokens.success,
-                  ),
-                ),
-              ],
-            )
-          else
-            Text(
-              'Попросите администратора связать ваш профиль с карточкой сотрудника.',
-              style: TextStyle(color: tokens.mutedForeground, fontSize: 13),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-String _dashboardPayrollPeriod(String from, String to) {
-  final formattedFrom = _dashboardIsoDate(from);
-  final formattedTo = _dashboardIsoDate(to);
-  if (formattedFrom.isEmpty && formattedTo.isEmpty) return 'Текущий год';
-  if (formattedFrom.isEmpty) return 'по $formattedTo';
-  if (formattedTo.isEmpty) return 'с $formattedFrom';
-  return '$formattedFrom - $formattedTo';
-}
-
-String _dashboardIsoDate(String value) {
-  final parts = value.split('-');
-  if (parts.length != 3) return value;
-  return '${parts[2]}.${parts[1]}.${parts[0]}';
-}
-
 class _DashboardHighlightsGrid extends StatelessWidget {
   const _DashboardHighlightsGrid({
     required this.highlights,
@@ -587,7 +469,7 @@ class _DashboardHighlightsGrid extends StatelessWidget {
         final columns = constraints.maxWidth >= 760 ? 4 : 2;
         return GridView.count(
           crossAxisCount: columns,
-          childAspectRatio: constraints.maxWidth >= 760 ? 1.72 : 1.35,
+          childAspectRatio: constraints.maxWidth >= 760 ? 1.5 : 1.0,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 12,

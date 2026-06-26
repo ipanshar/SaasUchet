@@ -2736,6 +2736,7 @@ func (s *PostgresStore) GetFinance(user auth.User) (Finance, error) {
 	finance := Finance{
 		Accounts:          []BankAccount{},
 		ExpenseCategories: []ExpenseCategory{},
+		IncomeCategories:  []ExpenseCategory{},
 		Transactions:      []Transaction{},
 		CashFlows:         []CashFlow{},
 	}
@@ -2803,6 +2804,7 @@ func (s *PostgresStore) GetFinance(user auth.User) (Finance, error) {
 	defer movementRows.Close()
 
 	expenseByCategory := make(map[string]int)
+	incomeByCategory := make(map[string]int)
 	for movementRows.Next() {
 		var documentType string
 		var direction string
@@ -2819,6 +2821,10 @@ func (s *PostgresStore) GetFinance(user auth.User) (Finance, error) {
 		if documentType != "opening" {
 			if direction == "income" || direction == "transfer_in" {
 				finance.Income += roundedAmount
+				if category == "" {
+					category = "Другое"
+				}
+				incomeByCategory[category] += roundedAmount
 			}
 			if direction == "expense" || direction == "transfer_out" {
 				finance.Expense += roundedAmount
@@ -2893,6 +2899,48 @@ func (s *PostgresStore) GetFinance(user auth.User) (Finance, error) {
 			continue
 		}
 		finance.ExpenseCategories = append(finance.ExpenseCategories, ExpenseCategory{
+			Name:  name,
+			Value: value,
+			Color: "#64748B",
+		})
+	}
+
+	incomeCategoryRows, err := s.db.QueryContext(
+		ctx,
+		`SELECT name, COALESCE(color_hex, '#64748B')
+		 FROM money_categories
+		 WHERE company_id = $1::uuid AND direction = 'income' AND archived_at IS NULL
+		 ORDER BY created_at ASC`,
+		companyID,
+	)
+	if err != nil {
+		return Finance{}, err
+	}
+	defer incomeCategoryRows.Close()
+
+	seenIncomeCategories := make(map[string]bool)
+	for incomeCategoryRows.Next() {
+		var name string
+		var color string
+		if err := incomeCategoryRows.Scan(&name, &color); err != nil {
+			return Finance{}, err
+		}
+		seenIncomeCategories[name] = true
+		finance.IncomeCategories = append(finance.IncomeCategories, ExpenseCategory{
+			Name:  name,
+			Value: incomeByCategory[name],
+			Color: color,
+		})
+	}
+	if err := incomeCategoryRows.Err(); err != nil {
+		return Finance{}, err
+	}
+
+	for name, value := range incomeByCategory {
+		if seenIncomeCategories[name] {
+			continue
+		}
+		finance.IncomeCategories = append(finance.IncomeCategories, ExpenseCategory{
 			Name:  name,
 			Value: value,
 			Color: "#64748B",
@@ -4879,6 +4927,16 @@ func (s *PostgresStore) ensureMoneyCategory(ctx context.Context, tx *sql.Tx, com
 		return "", err
 	}
 
+	var existingCount int
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM money_categories WHERE company_id = $1::uuid AND direction = $2`,
+		companyID,
+		direction,
+	).Scan(&existingCount); err != nil {
+		return "", err
+	}
+
 	if err = tx.QueryRowContext(
 		ctx,
 		`INSERT INTO money_categories (company_id, direction, name, color_hex, created_at, updated_at)
@@ -4887,7 +4945,7 @@ func (s *PostgresStore) ensureMoneyCategory(ctx context.Context, tx *sql.Tx, com
 		companyID,
 		direction,
 		normalizedName,
-		moneyCategoryColor(direction),
+		moneyCategoryColor(direction, existingCount),
 	).Scan(&categoryID); err != nil {
 		return "", err
 	}
@@ -5015,15 +5073,24 @@ func defaultMoneyCategory(direction string) string {
 	}
 }
 
-func moneyCategoryColor(direction string) string {
-	switch direction {
-	case "income":
-		return "#22C55E"
-	case "expense":
-		return "#EF4444"
-	default:
+var moneyCategoryPalette = []string{
+	"#00A86B",
+	"#3B82F6",
+	"#F59E0B",
+	"#8B5CF6",
+	"#EC4899",
+	"#0EA5E9",
+	"#F97316",
+	"#14B8A6",
+	"#EF4444",
+	"#6366F1",
+}
+
+func moneyCategoryColor(direction string, index int) string {
+	if direction == "transfer" {
 		return "#64748B"
 	}
+	return moneyCategoryPalette[index%len(moneyCategoryPalette)]
 }
 
 func moneyDocumentTypeFor(direction string) string {
@@ -5792,7 +5859,9 @@ func (s *PostgresStore) ListProductionOrders(user auth.User) ([]ProductionOrder,
 		    po.status,
 		    COALESCE(po.planned_date::text, ''),
 		    po.notes,
-		    po.created_at::text
+		    po.created_at::text,
+		    COALESCE(po.production_out_document_id::text, ''),
+		    COALESCE(po.production_in_document_id::text, '')
 		 FROM production_orders po
 		 LEFT JOIN recipes r ON r.id = po.recipe_id
 		 LEFT JOIN warehouses sw ON sw.id = po.source_warehouse_id
@@ -5816,6 +5885,7 @@ func (s *PostgresStore) ListProductionOrders(user auth.User) ([]ProductionOrder,
 			&o.OutputWarehouseID, &o.OutputWarehouseName,
 			&o.BatchNumber, &o.ResponsibleEmployee,
 			&o.PlannedQuantity, &o.Status, &o.PlannedDate, &o.Notes, &o.CreatedAt,
+			&o.OutDocumentID, &o.InDocumentID,
 		); err != nil {
 			return nil, err
 		}
