@@ -46,6 +46,12 @@ func main() {
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	from := today.AddDate(0, -3, 0)
+	// Дата открытия — на день раньше периода данных, чтобы начальные остатки
+	// (касса/счёт, товарные остатки) не искажали график баланса по неделям:
+	// эндпоинт company-balance реконструирует историю вычитанием движений
+	// после cutoff, и если остаток датирован "сегодня", он пропадает из всех
+	// прошлых недель и даёт ложный скачок только в последней.
+	openingDate := from.AddDate(0, 0, -1).Format("2006-01-02")
 
 	// ── 1. Пользователи ────────────────────────────────────────────────────────
 	people := demoPeople()
@@ -109,14 +115,23 @@ func main() {
 	// ── 4. Счета ────────────────────────────────────────────────────────────────
 	bank := sget(api.post("/api/v1/business/accounts", map[string]any{
 		"name": "Kaspi Bank", "account_type": "bank", "currency_code": "KZT",
-		"bank_name": "Kaspi Bank", "opening_balance": 5_000_000,
+		"bank_name": "Kaspi Bank",
 	}), "id")
 	cash := sget(api.post("/api/v1/business/accounts", map[string]any{
 		"name": "Касса", "account_type": "cash", "currency_code": "KZT",
-		"opening_balance": 500_000,
 	}), "id")
 	bump("accounts")
 	bump("accounts")
+	// Начальные остатки — отдельной датированной операцией (а не "opening_balance"
+	// при создании счёта), чтобы happened_at был в начале периода, а не "сейчас".
+	api.post("/api/v1/business/money-operations", map[string]any{
+		"account_id": bank, "direction": "income", "amount": 5_000_000,
+		"category": "Начальный остаток", "operation_date": openingDate,
+	})
+	api.post("/api/v1/business/money-operations", map[string]any{
+		"account_id": cash, "direction": "income", "amount": 500_000,
+		"category": "Начальный остаток", "operation_date": openingDate,
+	})
 
 	// ── 5. Контрагенты (покупатели + поставщики) ───────────────────────────────
 	buyers := []string{}
@@ -173,13 +188,35 @@ func main() {
 			"product_type":     "consumer_goods",
 			"unit_name":        "шт",
 			"allowed_to_sell":  pr.sellable,
-			"initial_quantity": pr.initQty,
+			"initial_quantity": 0,
 			"min_quantity":     5,
 			"price":            pr.price,
 			"cost":             pr.cost,
 		})
 		pr.id = sget(res, "id")
 		bump("products")
+	}
+	// Начальные остатки товаров — отдельным датированным документом (а не
+	// "initial_quantity" при создании, который заводит остаток "сегодня") по
+	// той же причине, что и начальные остатки счетов выше.
+	openingLines := []map[string]any{}
+	for i := range products {
+		pr := &products[i]
+		if pr.initQty <= 0 {
+			continue
+		}
+		openingLines = append(openingLines, map[string]any{
+			"product_id": pr.id, "quantity": pr.initQty, "unit_price": pr.cost, "unit_cost": pr.cost,
+		})
+	}
+	if len(openingLines) > 0 {
+		api.post("/api/v1/business/inventory-documents", map[string]any{
+			"document_type": "adjustment",
+			"status":        "posted",
+			"document_date": openingDate,
+			"document_no":   "OPEN-STOCK",
+			"lines":         openingLines,
+		})
 	}
 	productByName := map[string]*product{}
 	for i := range products {
